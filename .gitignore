@@ -1,0 +1,26 @@
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+coverage/
+playwright-report/
+test-results/
+.vite/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+.env
+.env.*
+!.env.example
+.DS_Store
+.idea/
+.vscode/
+/tmp-projects/
+
+# Ship the prebuilt bundle used by `npx github:` (git-spec installs use the committed
+# tree, NOT the package.json `files` allowlist). These negations must come after the
+# `dist/` rule above so the viewer copy under bundle/web/dist is tracked too.
+!bundle/
+!bundle/**
+!bundle/web/dist/
+!bundle/web/dist/**

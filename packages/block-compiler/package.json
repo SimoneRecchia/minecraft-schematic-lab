@@ -1,0 +1,18 @@
+{
+  "name": "@minecraft-schematic-lab/block-compiler",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@minecraft-schematic-lab/build-spec": "workspace:*"
+  }
+}
