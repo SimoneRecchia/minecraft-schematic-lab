@@ -1,0 +1,50 @@
+{
+  "name": "minecraft-schematic-lab",
+  "version": "0.1.0",
+  "type": "module",
+  "packageManager": "pnpm@11.6.0",
+  "engines": { "node": ">=22" },
+  "bin": {
+    "minecraft-schematic-lab": "./bundle/server.mjs"
+  },
+  "files": ["bundle/", "README.md", "LICENSE"],
+  "scripts": {
+    "dev": "concurrently -n server,web -c blue,green \"pnpm dev:server\" \"pnpm dev:web\"",
+    "dev:web": "pnpm --filter @minecraft-schematic-lab/web dev",
+    "dev:server": "pnpm --filter @minecraft-schematic-lab/server dev",
+    "mcp": "pnpm --filter @minecraft-schematic-lab/server mcp",
+    "build": "pnpm -r build",
+    "setup": "pnpm install && pnpm build",
+    "bundle": "pnpm build && node scripts/bundle.mjs",
+    "test": "pnpm -r test",
+    "test:e2e": "playwright test",
+    "lint": "pnpm -r lint",
+    "format": "prettier --write .",
+    "typecheck": "pnpm -r typecheck",
+    "prepublishOnly": "pnpm build && node scripts/bundle.mjs"
+  },
+  "dependencies": {
+    "@fastify/static": "^8.0.3",
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "@napi-rs/canvas": "^0.1.65",
+    "execa": "^9.5.2",
+    "fast-json-patch": "^3.1.1",
+    "fastify": "^5.2.0",
+    "prismarine-nbt": "^2.5.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.17.0",
+    "@playwright/test": "^1.49.1",
+    "@types/node": "^22.10.2",
+    "concurrently": "^9.1.0",
+    "esbuild": "^0.25.0",
+    "eslint": "^9.17.0",
+    "globals": "^15.14.0",
+    "prettier": "^3.4.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.18.1",
+    "vitest": "^3.0.5"
+  }
+}

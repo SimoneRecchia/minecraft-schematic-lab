@@ -1,0 +1,7 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+# Allow esbuild (used by tsx / vite / vitest) to run its install script.
+allowBuilds:
+  esbuild: true
