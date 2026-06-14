@@ -46,8 +46,8 @@ importers:
         specifier: ^9.1.0
         version: 9.2.1
       esbuild:
-        specifier: ^0.25.0
-        version: 0.25.12
+        specifier: ^0.28.1
+        version: 0.28.1
       eslint:
         specifier: ^9.17.0
         version: 9.39.4
