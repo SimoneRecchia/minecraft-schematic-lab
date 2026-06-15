@@ -35,9 +35,12 @@ export function VoxelScene({ data, preset }: { data: PreviewData; preset: Camera
       gl={{ preserveDrawingBuffer: true }}
     >
       <color attach="background" args={['#0e1116']} />
-      <ambientLight intensity={0.7} />
-      <directionalLight position={[maxDim, maxDim * 1.5, maxDim]} intensity={1.1} />
-      <directionalLight position={[-maxDim, maxDim, -maxDim * 0.5]} intensity={0.4} />
+      {/* Strong top light + low fill so each block reads with crisp top/side contrast,
+          like the isometric render — instead of washing into a flat mush on big builds. */}
+      <ambientLight intensity={0.5} />
+      <hemisphereLight args={['#ffffff', '#3a3f4a', 0.5]} />
+      <directionalLight position={[maxDim * 0.6, maxDim * 2, maxDim]} intensity={1.5} />
+      <directionalLight position={[-maxDim, maxDim * 0.4, -maxDim * 0.6]} intensity={0.25} />
       <Grid
         args={[maxDim * 3, maxDim * 3]}
         position={[0, -size.y / 2 - 0.01, 0]}
