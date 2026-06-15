@@ -21,9 +21,12 @@ export function textureFor(state: string): THREE.Texture | null {
   if (name && typeof document !== 'undefined') {
     loader ??= new THREE.TextureLoader();
     texture = loader.load(`${TEXTURE_BASE}/${name}.png`);
+    // Crisp texels up close, but mipmaps + trilinear minification so far-away blocks blend
+    // toward their average color instead of shimmering into noise.
     texture.magFilter = THREE.NearestFilter;
-    texture.minFilter = THREE.NearestFilter;
-    texture.generateMipmaps = false;
+    texture.minFilter = THREE.LinearMipmapLinearFilter;
+    texture.generateMipmaps = true;
+    texture.anisotropy = 8;
     texture.colorSpace = THREE.SRGBColorSpace;
   }
   cache.set(state, texture);
