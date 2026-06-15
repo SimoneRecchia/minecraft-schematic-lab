@@ -18,7 +18,7 @@ describe('textureNameFor', () => {
   });
 
   it('returns null for blocks with no bundled texture', () => {
-    expect(textureNameFor('minecraft:beacon')).toBeNull();
+    expect(textureNameFor('minecraft:air')).toBeNull();
     expect(textureNameFor('minecraft:totally_made_up_block')).toBeNull();
   });
 });
