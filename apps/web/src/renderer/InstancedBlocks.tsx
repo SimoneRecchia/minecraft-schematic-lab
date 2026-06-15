@@ -26,8 +26,8 @@ export function InstancedBlocks({ data }: { data: PreviewData }) {
         if (positions.length === 0) return null;
         const shape = blockShape(state);
         const transparent = shape === 'glass' || isTransparent(state);
-        const textured = shape === 'full' || shape === 'slab' || shape === 'stairs';
-        const texture = textured ? textureFor(state) : null;
+        // Everything but thin posts (bars/rods) uses the real block texture when available.
+        const texture = shape === 'thin' ? null : textureFor(state);
         const [gw, gh, gd] = sizeForShape(shape);
         // Slabs sit on the floor of their cell.
         const yOffset = shape === 'slab' ? -0.25 : 0;
@@ -42,9 +42,10 @@ export function InstancedBlocks({ data }: { data: PreviewData }) {
             <boxGeometry args={[gw, gh, gd]} />
             {transparent ? (
               <meshStandardMaterial
-                color={colorFor(state)}
+                map={texture ?? undefined}
+                color={texture ? '#ffffff' : colorFor(state)}
                 transparent
-                opacity={0.42}
+                opacity={texture ? 0.8 : 0.42}
                 roughness={0.1}
                 metalness={0}
                 depthWrite={false}
