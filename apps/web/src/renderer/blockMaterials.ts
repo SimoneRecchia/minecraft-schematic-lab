@@ -23,7 +23,7 @@ function categoryOf(state: string): Category {
   if (/plank/.test(s)) return 'planks';
   if (/log|stem|stripped|wood/.test(s)) return 'log';
   if (/brick/.test(s)) return 'brick';
-  if (/cobble/.test(s)) return 'cobble';
+  if (/cobble|gravel/.test(s)) return 'cobble';
   if (/sand/.test(s)) return 'sand';
   if (/grass|moss/.test(s)) return 'grass';
   if (/leaves|vine|fern/.test(s)) return 'leaves';

@@ -1,17 +1,26 @@
-// Approximate display colors for Minecraft block states. Shared by the web 3D preview and the
-// server-side isometric PNG renderer so both look consistent. Pure / browser-safe.
+// Approximate display colors + shapes for Minecraft block states. Shared by the web 3D preview and
+// the server-side isometric PNG renderer so both look consistent. Pure / browser-safe.
 
 interface KeywordColor {
   re: RegExp;
   hex: string;
 }
 
+/** Lowercase, drop the namespace and any `[state...]` suffix. */
+function cleanName(state: string): string {
+  const s = state.toLowerCase();
+  const withoutNs = s.includes(':') ? s.slice(s.indexOf(':') + 1) : s;
+  return withoutNs.replace(/\[.*$/, '');
+}
+
 // Order matters: more specific keywords first.
 const KEYWORD_COLORS: KeywordColor[] = [
+  { re: /sea_lantern|prismarine/, hex: '#9fc6bd' },
+  { re: /end_rod/, hex: '#e6e2d6' },
   { re: /glass|pane/, hex: '#a9e0f5' },
   { re: /water/, hex: '#3b6feb' },
   { re: /lava|magma/, hex: '#d8662a' },
-  { re: /glowstone|sea_lantern|shroomlight|light|lantern|torch|lamp/, hex: '#f4d27a' },
+  { re: /glowstone|shroomlight|redstone_lamp|lantern|torch|lamp|^light$/, hex: '#f4d27a' },
   { re: /mossy/, hex: '#6f7f53' },
   { re: /cobble/, hex: '#7c7c7c' },
   { re: /stone_brick|brick_stone/, hex: '#8a8a8a' },
@@ -19,6 +28,8 @@ const KEYWORD_COLORS: KeywordColor[] = [
   { re: /blackstone|basalt|obsidian/, hex: '#2b2b33' },
   { re: /andesite|gravel/, hex: '#9a9a9a' },
   { re: /diorite|quartz|calcite/, hex: '#e7e5dd' },
+  { re: /amethyst/, hex: '#9a70c4' },
+  { re: /purpur/, hex: '#ab63ab' },
   { re: /granite/, hex: '#9a6a5a' },
   { re: /stone|smooth_stone/, hex: '#8f8f8f' },
   { re: /dark_oak|stripped_spruce/, hex: '#4b3621' },
@@ -26,25 +37,32 @@ const KEYWORD_COLORS: KeywordColor[] = [
   { re: /birch/, hex: '#d8c896' },
   { re: /acacia/, hex: '#b5642e' },
   { re: /jungle/, hex: '#9b6b3f' },
+  { re: /mangrove/, hex: '#7a3f3a' },
+  { re: /cherry/, hex: '#e3b6c8' },
+  { re: /bamboo/, hex: '#c2b24a' },
   { re: /crimson/, hex: '#7b3a4b' },
   { re: /warped/, hex: '#2c8374' },
   { re: /oak|plank|log|wood|fence|stripped/, hex: '#9c7a48' },
+  { re: /red_sand/, hex: '#bd6b3a' },
+  { re: /sand|sandstone/, hex: '#dcd0a0' },
+  { re: /nether_brick/, hex: '#3f2226' },
   { re: /brick/, hex: '#9b5b4a' },
   { re: /netherrack|nether/, hex: '#6e3334' },
-  { re: /dirt|coarse|podzol|mud|clay/, hex: '#7a5a3a' },
-  { re: /grass|moss|leaves|vine|fern/, hex: '#5d8a3a' },
-  { re: /sand|sandstone/, hex: '#dcd0a0' },
-  { re: /red_sand/, hex: '#bd6b3a' },
+  { re: /dirt|coarse|podzol|mud|clay|mycelium/, hex: '#7a5a3a' },
+  { re: /grass|moss|leaves|vine|fern|kelp|lily/, hex: '#5d8a3a' },
   { re: /snow|powder_snow/, hex: '#eef3f6' },
   { re: /ice/, hex: '#9fd0ff' },
   { re: /wool|concrete|terracotta|glazed/, hex: '#b0795a' },
+  { re: /netherite/, hex: '#4a4348' },
   { re: /iron/, hex: '#d8d8d8' },
   { re: /gold/, hex: '#f4d35e' },
   { re: /diamond/, hex: '#5fded0' },
   { re: /emerald/, hex: '#37c87a' },
+  { re: /lapis/, hex: '#1f4ea1' },
   { re: /redstone/, hex: '#b32d2d' },
   { re: /coal/, hex: '#2a2a2a' },
   { re: /copper/, hex: '#c1714b' },
+  { re: /bone/, hex: '#e3e0ca' },
 ];
 
 // Minecraft dye colors, for colored variants (concrete, wool, terracotta, stained glass, …),
@@ -88,13 +106,28 @@ function hashHue(s: string): number {
   return ((h % 360) + 360) % 360;
 }
 
+/** See-through blocks (glass, panes, ice, …) — rendered with partial opacity. */
 export function isTransparent(state: string): boolean {
-  return /glass|pane|ice|slime|honey/.test(state);
+  return /glass|pane|ice|slime|honey|barrier|tinted/.test(cleanName(state));
+}
+
+export type BlockShape = 'full' | 'slab' | 'stairs' | 'thin' | 'glass';
+
+/** Coarse geometric class that drives how a block is drawn (a full cube, half-slab, thin bar, …). */
+export function blockShape(state: string): BlockShape {
+  const s = cleanName(state);
+  if (/stairs/.test(s)) return 'stairs';
+  if (/slab/.test(s)) return 'slab';
+  if (/_bars|^bars$|fence|_pane$|chain|end_rod|lightning_rod|_wall$|wall$|_rail|^rail$|ladder/.test(s)) {
+    return 'thin';
+  }
+  if (/glass/.test(s)) return 'glass';
+  return 'full';
 }
 
 export function colorFor(state: string): string {
   const s = state.toLowerCase();
-  const name = (s.includes(':') ? s.slice(s.indexOf(':') + 1) : s).replace(/\[.*$/, '');
+  const name = cleanName(state);
   // Colored variants carry the dye as a prefix — map those first so red/green/blue/… differ.
   if (COLORED_BLOCK.test(name)) {
     const dye = dyeColorFor(name);

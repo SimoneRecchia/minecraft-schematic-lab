@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { colorFor, isTransparent } from './blockColor';
+import { blockShape, colorFor, isTransparent } from './blockColor';
 
 describe('colorFor', () => {
   it('gives colored variants distinct colors by dye prefix', () => {
@@ -23,6 +23,23 @@ describe('colorFor', () => {
 
   it('flags transparent blocks', () => {
     expect(isTransparent('minecraft:glass')).toBe(true);
+    expect(isTransparent('minecraft:light_blue_stained_glass')).toBe(true);
     expect(isTransparent('minecraft:stone')).toBe(false);
+  });
+});
+
+describe('blockShape', () => {
+  it('classifies non-full blocks', () => {
+    expect(blockShape('minecraft:stone_brick_stairs')).toBe('stairs');
+    expect(blockShape('minecraft:smooth_stone_slab')).toBe('slab');
+    expect(blockShape('minecraft:iron_bars')).toBe('thin');
+    expect(blockShape('minecraft:oak_fence')).toBe('thin');
+    expect(blockShape('minecraft:glass_pane')).toBe('thin');
+    expect(blockShape('minecraft:end_rod')).toBe('thin');
+    expect(blockShape('minecraft:cobblestone_wall')).toBe('thin');
+    expect(blockShape('minecraft:glass')).toBe('glass');
+    expect(blockShape('minecraft:light_blue_stained_glass')).toBe('glass');
+    expect(blockShape('minecraft:stone')).toBe('full');
+    expect(blockShape('minecraft:gray_concrete')).toBe('full');
   });
 });

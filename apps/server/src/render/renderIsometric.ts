@@ -1,6 +1,6 @@
 import { createCanvas } from '@napi-rs/canvas';
 import type { SKRSContext2D } from '@napi-rs/canvas';
-import { colorFor } from '@minecraft-schematic-lab/shared';
+import { blockShape, colorFor, isTransparent } from '@minecraft-schematic-lab/shared';
 import type { BlockVolume } from '@minecraft-schematic-lab/block-compiler';
 
 interface Cube {
@@ -8,6 +8,7 @@ interface Cube {
   y: number;
   z: number;
   color: string;
+  state: string;
 }
 
 function fillPolygon(ctx: SKRSContext2D, pts: [number, number][], fill: string): void {
@@ -27,12 +28,22 @@ function fillPolygon(ctx: SKRSContext2D, pts: [number, number][], fill: string):
   ctx.stroke();
 }
 
+const keyOf = (x: number, y: number, z: number): string => `${x},${y},${z}`;
+
 /** Render the volume as an isometric PNG so an agent (or human) can see the build. */
 export function renderIsometric(volume: BlockVolume, maxSize = 900): Buffer {
   const cubes: Cube[] = [];
+  // Occupancy by coverage class, used to cull faces hidden behind a neighbour.
+  const fullSet = new Set<string>(); // full-height, full-footprint (full / stairs)
+  const slabSet = new Set<string>(); // bottom-half coverage (slab)
   for (const [state, positions] of Object.entries(volume.toInstanceGroups())) {
     const color = colorFor(state);
-    for (const [x, y, z] of positions) cubes.push({ x, y, z, color });
+    const shape = blockShape(state);
+    for (const [x, y, z] of positions) {
+      cubes.push({ x, y, z, color, state });
+      if (shape === 'full' || shape === 'stairs') fullSet.add(keyOf(x, y, z));
+      else if (shape === 'slab') slabSet.add(keyOf(x, y, z));
+    }
   }
 
   const span = volume.x + volume.z;
@@ -81,38 +92,86 @@ export function renderIsometric(volume: BlockVolume, maxSize = 900): Buffer {
   ctx.fillStyle = '#0e1116';
   ctx.fillRect(0, 0, width, height);
 
-  // Painter's algorithm: draw far/low blocks first.
-  cubes.sort((a, b) => a.x + a.z - a.y - (b.x + b.z - b.y));
+  // Painter's algorithm: draw far/low blocks first. Tie-break by depth (x+z) then height so a
+  // nearer/taller block (e.g. a wall) always paints over a farther one on the same diagonal.
+  cubes.sort(
+    (a, b) =>
+      a.x + a.z - a.y - (b.x + b.z - b.y) || a.x + a.z - (b.x + b.z) || a.y - b.y,
+  );
 
   for (const c of cubes) {
     const { cx, cy } = anchor(c);
     const sx = cx + offsetX;
     const sy = cy + offsetY;
+    const shape = blockShape(c.state);
 
-    const top: [number, number][] = [
-      [sx, sy - hh],
-      [sx + hw, sy],
-      [sx, sy + hh],
-      [sx - hw, sy],
+    // Per-shape geometry: slabs are half-height (on the floor), thin blocks are narrow posts.
+    let s = 1;
+    let topOff = 0;
+    let h = vh;
+    if (shape === 'slab') {
+      topOff = vh * 0.5;
+      h = vh * 0.5;
+    } else if (shape === 'thin') {
+      s = 0.42;
+      topOff = hh * (1 - s);
+    }
+    const hwS = hw * s;
+    const hhS = hh * s;
+    const top = sy + topOff;
+
+    // Cull faces hidden behind a neighbour, respecting each shape's coverage.
+    const aboveKey = keyOf(c.x, c.y + 1, c.z);
+    const zKey = keyOf(c.x, c.y, c.z + 1);
+    const xKey = keyOf(c.x + 1, c.y, c.z);
+    let drawTop = true;
+    let drawLeft = true;
+    let drawRight = true;
+    if (shape === 'slab') {
+      // Bottom-half sides are covered by a full or slab neighbour; the top is always exposed.
+      drawLeft = !(fullSet.has(zKey) || slabSet.has(zKey));
+      drawRight = !(fullSet.has(xKey) || slabSet.has(xKey));
+    } else if (shape !== 'thin') {
+      // full / stairs / glass: a slab leaves the upper half of a side visible, so only a
+      // full-height neighbour culls the sides; either covers the top.
+      drawTop = !(fullSet.has(aboveKey) || slabSet.has(aboveKey));
+      drawLeft = !fullSet.has(zKey);
+      drawRight = !fullSet.has(xKey);
+    }
+
+    const alpha = isTransparent(c.state) ? 0.55 : 1;
+    if (alpha !== 1) ctx.globalAlpha = alpha;
+
+    const topFace: [number, number][] = [
+      [sx, top - hhS],
+      [sx + hwS, top],
+      [sx, top + hhS],
+      [sx - hwS, top],
     ];
-    const left: [number, number][] = [
-      [sx - hw, sy],
-      [sx, sy + hh],
-      [sx, sy + hh + vh],
-      [sx - hw, sy + vh],
+    const leftFace: [number, number][] = [
+      [sx - hwS, top],
+      [sx, top + hhS],
+      [sx, top + hhS + h],
+      [sx - hwS, top + h],
     ];
-    const right: [number, number][] = [
-      [sx + hw, sy],
-      [sx, sy + hh],
-      [sx, sy + hh + vh],
-      [sx + hw, sy + vh],
+    const rightFace: [number, number][] = [
+      [sx + hwS, top],
+      [sx, top + hhS],
+      [sx, top + hhS + h],
+      [sx + hwS, top + h],
     ];
 
-    fillPolygon(ctx, top, c.color);
-    fillPolygon(ctx, left, c.color);
-    fillPolygon(ctx, left, 'rgba(0,0,0,0.32)');
-    fillPolygon(ctx, right, c.color);
-    fillPolygon(ctx, right, 'rgba(0,0,0,0.18)');
+    if (drawTop) fillPolygon(ctx, topFace, c.color);
+    if (drawLeft) {
+      fillPolygon(ctx, leftFace, c.color);
+      fillPolygon(ctx, leftFace, 'rgba(0,0,0,0.32)');
+    }
+    if (drawRight) {
+      fillPolygon(ctx, rightFace, c.color);
+      fillPolygon(ctx, rightFace, 'rgba(0,0,0,0.18)');
+    }
+
+    if (alpha !== 1) ctx.globalAlpha = 1;
   }
 
   return canvas.toBuffer('image/png');

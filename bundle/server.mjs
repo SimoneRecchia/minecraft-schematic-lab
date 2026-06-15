@@ -214,11 +214,18 @@ function registerExportRoutes(app, sm) {
 }
 
 // packages/shared/src/blockColor.ts
+function cleanName(state) {
+  const s = state.toLowerCase();
+  const withoutNs = s.includes(":") ? s.slice(s.indexOf(":") + 1) : s;
+  return withoutNs.replace(/\[.*$/, "");
+}
 var KEYWORD_COLORS = [
+  { re: /sea_lantern|prismarine/, hex: "#9fc6bd" },
+  { re: /end_rod/, hex: "#e6e2d6" },
   { re: /glass|pane/, hex: "#a9e0f5" },
   { re: /water/, hex: "#3b6feb" },
   { re: /lava|magma/, hex: "#d8662a" },
-  { re: /glowstone|sea_lantern|shroomlight|light|lantern|torch|lamp/, hex: "#f4d27a" },
+  { re: /glowstone|shroomlight|redstone_lamp|lantern|torch|lamp|^light$/, hex: "#f4d27a" },
   { re: /mossy/, hex: "#6f7f53" },
   { re: /cobble/, hex: "#7c7c7c" },
   { re: /stone_brick|brick_stone/, hex: "#8a8a8a" },
@@ -226,6 +233,8 @@ var KEYWORD_COLORS = [
   { re: /blackstone|basalt|obsidian/, hex: "#2b2b33" },
   { re: /andesite|gravel/, hex: "#9a9a9a" },
   { re: /diorite|quartz|calcite/, hex: "#e7e5dd" },
+  { re: /amethyst/, hex: "#9a70c4" },
+  { re: /purpur/, hex: "#ab63ab" },
   { re: /granite/, hex: "#9a6a5a" },
   { re: /stone|smooth_stone/, hex: "#8f8f8f" },
   { re: /dark_oak|stripped_spruce/, hex: "#4b3621" },
@@ -233,25 +242,32 @@ var KEYWORD_COLORS = [
   { re: /birch/, hex: "#d8c896" },
   { re: /acacia/, hex: "#b5642e" },
   { re: /jungle/, hex: "#9b6b3f" },
+  { re: /mangrove/, hex: "#7a3f3a" },
+  { re: /cherry/, hex: "#e3b6c8" },
+  { re: /bamboo/, hex: "#c2b24a" },
   { re: /crimson/, hex: "#7b3a4b" },
   { re: /warped/, hex: "#2c8374" },
   { re: /oak|plank|log|wood|fence|stripped/, hex: "#9c7a48" },
+  { re: /red_sand/, hex: "#bd6b3a" },
+  { re: /sand|sandstone/, hex: "#dcd0a0" },
+  { re: /nether_brick/, hex: "#3f2226" },
   { re: /brick/, hex: "#9b5b4a" },
   { re: /netherrack|nether/, hex: "#6e3334" },
-  { re: /dirt|coarse|podzol|mud|clay/, hex: "#7a5a3a" },
-  { re: /grass|moss|leaves|vine|fern/, hex: "#5d8a3a" },
-  { re: /sand|sandstone/, hex: "#dcd0a0" },
-  { re: /red_sand/, hex: "#bd6b3a" },
+  { re: /dirt|coarse|podzol|mud|clay|mycelium/, hex: "#7a5a3a" },
+  { re: /grass|moss|leaves|vine|fern|kelp|lily/, hex: "#5d8a3a" },
   { re: /snow|powder_snow/, hex: "#eef3f6" },
   { re: /ice/, hex: "#9fd0ff" },
   { re: /wool|concrete|terracotta|glazed/, hex: "#b0795a" },
+  { re: /netherite/, hex: "#4a4348" },
   { re: /iron/, hex: "#d8d8d8" },
   { re: /gold/, hex: "#f4d35e" },
   { re: /diamond/, hex: "#5fded0" },
   { re: /emerald/, hex: "#37c87a" },
+  { re: /lapis/, hex: "#1f4ea1" },
   { re: /redstone/, hex: "#b32d2d" },
   { re: /coal/, hex: "#2a2a2a" },
-  { re: /copper/, hex: "#c1714b" }
+  { re: /copper/, hex: "#c1714b" },
+  { re: /bone/, hex: "#e3e0ca" }
 ];
 var DYE_COLORS = {
   white: "#e3e6e6",
@@ -286,9 +302,22 @@ function hashHue(s) {
   }
   return (h % 360 + 360) % 360;
 }
+function isTransparent(state) {
+  return /glass|pane|ice|slime|honey|barrier|tinted/.test(cleanName(state));
+}
+function blockShape(state) {
+  const s = cleanName(state);
+  if (/stairs/.test(s)) return "stairs";
+  if (/slab/.test(s)) return "slab";
+  if (/_bars|^bars$|fence|_pane$|chain|end_rod|lightning_rod|_wall$|wall$|_rail|^rail$|ladder/.test(s)) {
+    return "thin";
+  }
+  if (/glass/.test(s)) return "glass";
+  return "full";
+}
 function colorFor(state) {
   const s = state.toLowerCase();
-  const name = (s.includes(":") ? s.slice(s.indexOf(":") + 1) : s).replace(/\[.*$/, "");
+  const name = cleanName(state);
   if (COLORED_BLOCK.test(name)) {
     const dye = dyeColorFor(name);
     if (dye) return dye;
@@ -1458,11 +1487,19 @@ function fillPolygon(ctx, pts, fill) {
   ctx.lineWidth = 1;
   ctx.stroke();
 }
+var keyOf = (x, y, z6) => `${x},${y},${z6}`;
 function renderIsometric(volume, maxSize = 900) {
   const cubes = [];
+  const fullSet = /* @__PURE__ */ new Set();
+  const slabSet = /* @__PURE__ */ new Set();
   for (const [state, positions] of Object.entries(volume.toInstanceGroups())) {
     const color = colorFor(state);
-    for (const [x, y, z6] of positions) cubes.push({ x, y, z: z6, color });
+    const shape = blockShape(state);
+    for (const [x, y, z6] of positions) {
+      cubes.push({ x, y, z: z6, color, state });
+      if (shape === "full" || shape === "stairs") fullSet.add(keyOf(x, y, z6));
+      else if (shape === "slab") slabSet.add(keyOf(x, y, z6));
+    }
   }
   const span = volume.x + volume.z;
   let tile = Math.min(
@@ -1504,34 +1541,71 @@ function renderIsometric(volume, maxSize = 900) {
   const ctx = canvas.getContext("2d");
   ctx.fillStyle = "#0e1116";
   ctx.fillRect(0, 0, width, height);
-  cubes.sort((a, b) => a.x + a.z - a.y - (b.x + b.z - b.y));
+  cubes.sort(
+    (a, b) => a.x + a.z - a.y - (b.x + b.z - b.y) || a.x + a.z - (b.x + b.z) || a.y - b.y
+  );
   for (const c of cubes) {
     const { cx, cy } = anchor(c);
     const sx = cx + offsetX;
     const sy = cy + offsetY;
-    const top = [
-      [sx, sy - hh],
-      [sx + hw, sy],
-      [sx, sy + hh],
-      [sx - hw, sy]
+    const shape = blockShape(c.state);
+    let s = 1;
+    let topOff = 0;
+    let h = vh;
+    if (shape === "slab") {
+      topOff = vh * 0.5;
+      h = vh * 0.5;
+    } else if (shape === "thin") {
+      s = 0.42;
+      topOff = hh * (1 - s);
+    }
+    const hwS = hw * s;
+    const hhS = hh * s;
+    const top = sy + topOff;
+    const aboveKey = keyOf(c.x, c.y + 1, c.z);
+    const zKey = keyOf(c.x, c.y, c.z + 1);
+    const xKey = keyOf(c.x + 1, c.y, c.z);
+    let drawTop = true;
+    let drawLeft = true;
+    let drawRight = true;
+    if (shape === "slab") {
+      drawLeft = !(fullSet.has(zKey) || slabSet.has(zKey));
+      drawRight = !(fullSet.has(xKey) || slabSet.has(xKey));
+    } else if (shape !== "thin") {
+      drawTop = !(fullSet.has(aboveKey) || slabSet.has(aboveKey));
+      drawLeft = !fullSet.has(zKey);
+      drawRight = !fullSet.has(xKey);
+    }
+    const alpha = isTransparent(c.state) ? 0.55 : 1;
+    if (alpha !== 1) ctx.globalAlpha = alpha;
+    const topFace = [
+      [sx, top - hhS],
+      [sx + hwS, top],
+      [sx, top + hhS],
+      [sx - hwS, top]
     ];
-    const left = [
-      [sx - hw, sy],
-      [sx, sy + hh],
-      [sx, sy + hh + vh],
-      [sx - hw, sy + vh]
+    const leftFace = [
+      [sx - hwS, top],
+      [sx, top + hhS],
+      [sx, top + hhS + h],
+      [sx - hwS, top + h]
     ];
-    const right = [
-      [sx + hw, sy],
-      [sx, sy + hh],
-      [sx, sy + hh + vh],
-      [sx + hw, sy + vh]
+    const rightFace = [
+      [sx + hwS, top],
+      [sx, top + hhS],
+      [sx, top + hhS + h],
+      [sx + hwS, top + h]
     ];
-    fillPolygon(ctx, top, c.color);
-    fillPolygon(ctx, left, c.color);
-    fillPolygon(ctx, left, "rgba(0,0,0,0.32)");
-    fillPolygon(ctx, right, c.color);
-    fillPolygon(ctx, right, "rgba(0,0,0,0.18)");
+    if (drawTop) fillPolygon(ctx, topFace, c.color);
+    if (drawLeft) {
+      fillPolygon(ctx, leftFace, c.color);
+      fillPolygon(ctx, leftFace, "rgba(0,0,0,0.32)");
+    }
+    if (drawRight) {
+      fillPolygon(ctx, rightFace, c.color);
+      fillPolygon(ctx, rightFace, "rgba(0,0,0,0.18)");
+    }
+    if (alpha !== 1) ctx.globalAlpha = 1;
   }
   return canvas.toBuffer("image/png");
 }
