@@ -7,7 +7,7 @@ interface KeywordColor {
 }
 
 /** Lowercase, drop the namespace and any `[state...]` suffix. */
-function cleanName(state: string): string {
+export function cleanName(state: string): string {
   const s = state.toLowerCase();
   const withoutNs = s.includes(':') ? s.slice(s.indexOf(':') + 1) : s;
   return withoutNs.replace(/\[.*$/, '');
