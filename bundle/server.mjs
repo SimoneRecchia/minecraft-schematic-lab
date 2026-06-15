@@ -253,6 +253,32 @@ var KEYWORD_COLORS = [
   { re: /coal/, hex: "#2a2a2a" },
   { re: /copper/, hex: "#c1714b" }
 ];
+var DYE_COLORS = {
+  white: "#e3e6e6",
+  light_gray: "#8e8e86",
+  gray: "#3f4448",
+  black: "#1a1c20",
+  brown: "#7a4d2b",
+  red: "#a52722",
+  orange: "#f07613",
+  yellow: "#f8c627",
+  lime: "#64ab18",
+  green: "#5a7d1d",
+  cyan: "#158a8f",
+  light_blue: "#3ab3da",
+  blue: "#3a3cc1",
+  purple: "#8a2db5",
+  magenta: "#c14cc4",
+  pink: "#ed9ab4"
+};
+var DYE_NAMES = Object.keys(DYE_COLORS).sort((a, b) => b.length - a.length);
+var COLORED_BLOCK = /concrete|wool|terracotta|stained_glass|carpet|candle|shulker_box|glazed|bed|banner/;
+function dyeColorFor(name) {
+  for (const dye of DYE_NAMES) {
+    if (name.startsWith(`${dye}_`)) return DYE_COLORS[dye] ?? null;
+  }
+  return null;
+}
 function hashHue(s) {
   let h = 0;
   for (let i = 0; i < s.length; i++) {
@@ -262,6 +288,11 @@ function hashHue(s) {
 }
 function colorFor(state) {
   const s = state.toLowerCase();
+  const name = (s.includes(":") ? s.slice(s.indexOf(":") + 1) : s).replace(/\[.*$/, "");
+  if (COLORED_BLOCK.test(name)) {
+    const dye = dyeColorFor(name);
+    if (dye) return dye;
+  }
   for (const { re, hex } of KEYWORD_COLORS) {
     if (re.test(s)) return hex;
   }

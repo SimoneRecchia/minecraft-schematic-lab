@@ -3,12 +3,23 @@ import { colorFor, isTransparent } from '@minecraft-schematic-lab/shared';
 
 export { colorFor, isTransparent };
 
-type Category = 'planks' | 'log' | 'brick' | 'cobble' | 'stone' | 'sand' | 'grass' | 'leaves' | 'plain';
+type Category =
+  | 'planks'
+  | 'log'
+  | 'brick'
+  | 'cobble'
+  | 'stone'
+  | 'sand'
+  | 'grass'
+  | 'leaves'
+  | 'concrete'
+  | 'plain';
 
 const cache = new Map<string, THREE.CanvasTexture | null>();
 
 function categoryOf(state: string): Category {
   const s = state.toLowerCase();
+  if (/concrete|wool|terracotta|glazed|carpet|stained_glass/.test(s)) return 'concrete';
   if (/plank/.test(s)) return 'planks';
   if (/log|stem|stripped|wood/.test(s)) return 'log';
   if (/brick/.test(s)) return 'brick';
@@ -86,6 +97,10 @@ function draw(ctx: CanvasRenderingContext2D, cat: Category, size: number, seed: 
     case 'leaves':
       speckle(darker, 24);
       speckle(light, 18);
+      break;
+    case 'concrete':
+      // Concrete/wool read as flat solid color — just a whisper of grain for depth.
+      speckle('rgba(0,0,0,0.05)', 4);
       break;
     default:
       speckle(dark, 8);
