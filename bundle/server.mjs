@@ -2,6 +2,7 @@
 
 // apps/server/src/index.ts
 import { existsSync as existsSync4 } from "node:fs";
+import { createServer } from "node:net";
 
 // apps/server/src/config.ts
 import { existsSync } from "node:fs";
@@ -1974,8 +1975,25 @@ var SessionManager = class {
 };
 
 // apps/server/src/index.ts
+function isPortFree(host, port) {
+  return new Promise((resolve2) => {
+    const probe = createServer();
+    probe.once("error", () => resolve2(false));
+    probe.once("listening", () => probe.close(() => resolve2(true)));
+    probe.listen(port, host);
+  });
+}
+async function findOpenPort(host, start, attempts = 20) {
+  for (let port = start; port < start + attempts; port++) {
+    if (await isPortFree(host, port)) return port;
+  }
+  return start;
+}
 async function main() {
   const config = loadConfig();
+  const port = await findOpenPort(config.host, config.port);
+  config.port = port;
+  config.baseUrl = `http://${config.host}:${port}`;
   const git = new GitProjectService();
   const sessionManager = new SessionManager(config, git);
   const app = await createHttpServer(sessionManager, config);
