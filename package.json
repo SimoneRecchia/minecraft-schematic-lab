@@ -24,7 +24,7 @@
     "prepublishOnly": "pnpm build && node scripts/bundle.mjs"
   },
   "dependencies": {
-    "@fastify/static": "^8.0.3",
+    "@fastify/static": "^9.1.1",
     "@modelcontextprotocol/sdk": "^1.12.0",
     "@napi-rs/canvas": "^0.1.65",
     "execa": "^9.5.2",

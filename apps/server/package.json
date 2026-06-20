@@ -14,7 +14,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@fastify/static": "^8.0.3",
+    "@fastify/static": "^9.1.1",
     "@minecraft-schematic-lab/block-compiler": "workspace:*",
     "@minecraft-schematic-lab/build-spec": "workspace:*",
     "@minecraft-schematic-lab/shared": "workspace:*",
