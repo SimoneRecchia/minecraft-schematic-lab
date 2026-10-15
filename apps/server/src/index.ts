@@ -1,12 +1,14 @@
 import { existsSync } from 'node:fs';
 import { createServer } from 'node:net';
+import { AssetStore } from './assets/AssetStore';
 import { loadConfig } from './config';
-import { GitProjectService } from './git/GitProjectService';
-import { createHttpServer } from './http/createHttpServer';
-import { startMcpServer } from './mcp/createMcpServer';
-import { SessionManager } from './session/SessionManager';
+import { BuildService } from './core/BuildService';
+import { CaptureBroker } from './core/CaptureBroker';
+import { EventHub } from './core/EventHub';
+import { ProjectStore } from './core/ProjectStore';
+import { createHttpServer } from './http/server';
+import { startMcpServer } from './mcp/server';
 
-/** Resolve whether a TCP port is free on the given host. */
 function isPortFree(host: string, port: number): Promise<boolean> {
   return new Promise((resolve) => {
     const probe = createServer();
@@ -16,11 +18,7 @@ function isPortFree(host: string, port: number): Promise<boolean> {
   });
 }
 
-/**
- * Find the first open port at/after `start`. Lets several Claude Code chats each run
- * their own server: if 8765 is already taken, this session moves to 8766, 8767, … instead
- * of crashing on EADDRINUSE.
- */
+/** First free port from `start`, so several Claude Code sessions can each run their own server. */
 async function findOpenPort(host: string, start: number, attempts = 20): Promise<number> {
   for (let port = start; port < start + attempts; port++) {
     if (await isPortFree(host, port)) return port;
@@ -30,33 +28,43 @@ async function findOpenPort(host: string, start: number, attempts = 20): Promise
 
 async function main(): Promise<void> {
   const config = loadConfig();
+  config.port = await findOpenPort(config.host, config.port);
+  config.baseUrl = `http://${config.host}:${config.port}`;
 
-  const port = await findOpenPort(config.host, config.port);
-  config.port = port;
-  config.baseUrl = `http://${config.host}:${port}`;
+  const hub = new EventHub();
+  const assets = new AssetStore((s) =>
+    hub.broadcast({
+      type: 'assets',
+      version: s.version,
+      state: s.state,
+      ...(s.message ? { message: s.message } : {}),
+      ...(s.progress !== undefined ? { progress: s.progress } : {}),
+    }),
+  );
+  const capture = new CaptureBroker(hub);
+  const builds = new BuildService(new ProjectStore(), assets, hub, capture, config);
+  await builds.init();
 
-  const git = new GitProjectService();
-  const sessionManager = new SessionManager(config, git);
-
-  const app = await createHttpServer(sessionManager, config);
+  const app = await createHttpServer({ builds, assets, hub, capture, config });
   await app.listen({ host: config.host, port: config.port });
 
   if (config.mcpMode) {
-    await startMcpServer({ sessionManager, config });
-    // In MCP mode stdout carries the protocol — status goes to stderr only.
+    await startMcpServer({ builds, config });
+    // stdout carries the MCP protocol — status goes to stderr only.
     const note = existsSync(config.webDist)
       ? ''
       : ' (run "pnpm build" once to enable the browser viewer)';
     process.stderr.write(
-      `minecraft-schematic-lab: MCP stdio ready; viewer + API on ${config.baseUrl}${note}\n`,
+      `minecraft-schematic-lab: MCP ready; viewer on ${config.baseUrl}${note}\n`,
     );
   } else {
-    app.log.info(`minecraft-schematic-lab listening on ${config.baseUrl}`);
+    process.stdout.write(`minecraft-schematic-lab listening on ${config.baseUrl}\n`);
   }
 }
 
 main().catch((error) => {
-  const detail = error instanceof Error ? (error.stack ?? error.message) : String(error);
-  process.stderr.write(`Fatal: ${detail}\n`);
+  process.stderr.write(
+    `Fatal: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`,
+  );
   process.exit(1);
 });

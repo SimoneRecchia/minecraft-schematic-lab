@@ -1,36 +1,55 @@
 import type { z } from 'zod';
 import type {
-  blockEntityOpSchema,
-  boxOpSchema,
-  buildOperationSchema,
+  archOp,
+  blocksOp,
+  boxOp,
   buildSpecSchema,
-  cylinderOpSchema,
-  gableRoofOpSchema,
-  hollowBoxOpSchema,
-  pyramidOpSchema,
-  rampOpSchema,
-  replaceOpSchema,
-  sphereOpSchema,
-  wallRectOpSchema,
-  windowPatternOpSchema,
+  componentSchema,
+  coneOp,
+  cylinderOp,
+  domeOp,
+  GroupOperationInput,
+  layersOp,
+  lineOp,
+  OperationInput,
+  paletteEntrySchema,
+  PlaceOperationInput,
+  polygonOp,
+  replaceOp,
+  roofOp,
+  scatterOp,
+  scriptOp,
+  sphereOp,
+  terrainOp,
+  treeOp,
 } from './schema';
 
 export type Vec3 = [number, number, number];
 
 export type BuildSpec = z.infer<typeof buildSpecSchema>;
-export type BuildOperation = z.infer<typeof buildOperationSchema>;
+export type BuildOperation = OperationInput;
+export type PaletteEntry = z.infer<typeof paletteEntrySchema>;
+export type Component = z.infer<typeof componentSchema>;
 
-export type BoxOperation = z.infer<typeof boxOpSchema>;
-export type HollowBoxOperation = z.infer<typeof hollowBoxOpSchema>;
-export type WallRectOperation = z.infer<typeof wallRectOpSchema>;
-export type GableRoofOperation = z.infer<typeof gableRoofOpSchema>;
-export type CylinderOperation = z.infer<typeof cylinderOpSchema>;
-export type WindowPatternOperation = z.infer<typeof windowPatternOpSchema>;
-export type SphereOperation = z.infer<typeof sphereOpSchema>;
-export type PyramidOperation = z.infer<typeof pyramidOpSchema>;
-export type RampOperation = z.infer<typeof rampOpSchema>;
-export type ReplaceOperation = z.infer<typeof replaceOpSchema>;
-export type BlockEntityOperation = z.infer<typeof blockEntityOpSchema>;
+export type BoxOperation = z.infer<typeof boxOp>;
+export type LineOperation = z.infer<typeof lineOp>;
+export type CylinderOperation = z.infer<typeof cylinderOp>;
+export type ConeOperation = z.infer<typeof coneOp>;
+export type SphereOperation = z.infer<typeof sphereOp>;
+export type DomeOperation = z.infer<typeof domeOp>;
+export type PolygonOperation = z.infer<typeof polygonOp>;
+export type RoofOperation = z.infer<typeof roofOp>;
+export type ArchOperation = z.infer<typeof archOp>;
+export type BlocksOperation = z.infer<typeof blocksOp>;
+export type LayersOperation = z.infer<typeof layersOp>;
+export type TerrainOperation = z.infer<typeof terrainOp>;
+export type TreeOperation = z.infer<typeof treeOp>;
+export type ScatterOperation = z.infer<typeof scatterOp>;
+export type ReplaceOperation = z.infer<typeof replaceOp>;
+export type ScriptOperation = z.infer<typeof scriptOp>;
+export type GroupOperation = GroupOperationInput;
+export type PlaceOperation = PlaceOperationInput;
 
 export type OperationType = BuildOperation['type'];
 export type OperationOfType<T extends OperationType> = Extract<BuildOperation, { type: T }>;
+export type TreeKind = TreeOperation['kind'];

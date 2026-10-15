@@ -8,6 +8,17 @@ export interface AppConfig {
   mcpMode: boolean;
   /** Absolute path to the built web viewer (apps/web/dist). */
   webDist: string;
+  /** Building guides served by the read_guide tool. */
+  guidesDir: string;
+}
+
+/** Guides live in apps/server/guides (dev) or next to the bundle (bundle/guides). */
+function resolveGuides(): string {
+  const candidates = [
+    fileURLToPath(new URL('./guides', import.meta.url)),
+    fileURLToPath(new URL('../guides', import.meta.url)),
+  ];
+  return candidates.find((d) => existsSync(d)) ?? (candidates[1] as string);
 }
 
 /**
@@ -44,5 +55,5 @@ export function loadConfig(argv: string[] = process.argv.slice(2)): AppConfig {
   const mcpMode = argv.includes('--mcp') || process.env.MCP === '1';
   const baseUrl = `http://${host}:${port}`;
   const webDist = resolveWebDist();
-  return { host, port, baseUrl, mcpMode, webDist };
+  return { host, port, baseUrl, mcpMode, webDist, guidesDir: resolveGuides() };
 }

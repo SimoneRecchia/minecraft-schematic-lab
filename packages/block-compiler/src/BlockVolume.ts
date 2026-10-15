@@ -5,131 +5,143 @@ export function sortPair(a: number, b: number): [number, number] {
   return a <= b ? [a, b] : [b, a];
 }
 
-export interface Vec3Bounds {
-  min: [number, number, number];
-  max: [number, number, number];
+export interface BlockEntityData {
+  /** Block entity id, e.g. "minecraft:chest". */
+  id: string;
+  /** Local position inside the volume. */
+  pos: [number, number, number];
+  data: Record<string, unknown>;
 }
 
 /**
- * A dense 3D grid of block states, indexed YZX (x varies fastest) to match the Sponge schematic
- * BlockData order. The palette maps states to small integer ids; index 0 is always air.
+ * The compiled build: a dense grid of palette indices in YZX order (x fastest, then z, then y),
+ * matching the Sponge/Litematica layouts. Palette index 0 is always air.
  */
 export class BlockVolume {
-  readonly x: number;
-  readonly y: number;
-  readonly z: number;
-  private readonly cells: Uint16Array;
-  private readonly palette: string[] = [AIR];
-  private readonly paletteIndex = new Map<string, number>([[AIR, 0]]);
-  private _outOfBoundsWrites = 0;
+  readonly sizeX: number;
+  readonly sizeY: number;
+  readonly sizeZ: number;
+  /** Spec coordinates of local cell (0,0,0). */
+  readonly origin: [number, number, number];
+  readonly palette: string[];
+  readonly data: Uint16Array;
+  /** Which operation wrote each cell (index into provenance table), 0 = none. */
+  readonly prov: Uint16Array;
+  readonly blockEntities: BlockEntityData[];
+  private readonly paletteIndex: Map<string, number>;
 
-  constructor(x: number, y: number, z: number) {
-    this.x = x;
-    this.y = y;
-    this.z = z;
-    this.cells = new Uint16Array(x * y * z);
+  constructor(
+    sizeX: number,
+    sizeY: number,
+    sizeZ: number,
+    origin: [number, number, number] = [0, 0, 0],
+    palette: string[] = [AIR],
+    data?: Uint16Array,
+    prov?: Uint16Array,
+    blockEntities: BlockEntityData[] = [],
+  ) {
+    this.sizeX = sizeX;
+    this.sizeY = sizeY;
+    this.sizeZ = sizeZ;
+    this.origin = origin;
+    this.palette = palette;
+    this.data = data ?? new Uint16Array(sizeX * sizeY * sizeZ);
+    this.prov = prov ?? new Uint16Array(sizeX * sizeY * sizeZ);
+    this.blockEntities = blockEntities;
+    this.paletteIndex = new Map(palette.map((s, i) => [s, i]));
   }
 
-  /** YZX layout: x varies fastest, then z, then y. */
-  private index(x: number, y: number, z: number): number {
-    return x + this.x * (z + this.z * y);
+  get volume(): number {
+    return this.sizeX * this.sizeY * this.sizeZ;
+  }
+
+  index(x: number, y: number, z: number): number {
+    return x + this.sizeX * (z + this.sizeZ * y);
   }
 
   inBounds(x: number, y: number, z: number): boolean {
-    return x >= 0 && y >= 0 && z >= 0 && x < this.x && y < this.y && z < this.z;
+    return x >= 0 && y >= 0 && z >= 0 && x < this.sizeX && y < this.sizeY && z < this.sizeZ;
   }
 
-  private idFor(state: string): number {
-    const existing = this.paletteIndex.get(state);
-    if (existing !== undefined) return existing;
+  idFor(state: string): number {
+    const hit = this.paletteIndex.get(state);
+    if (hit !== undefined) return hit;
     const id = this.palette.length;
     this.palette.push(state);
     this.paletteIndex.set(state, id);
     return id;
   }
 
-  /** Place a block. Out-of-bounds writes are ignored (counted). Returns whether it was placed. */
-  setBlock(x: number, y: number, z: number, state: string): boolean {
-    if (!this.inBounds(x, y, z)) {
-      this._outOfBoundsWrites++;
-      return false;
-    }
-    this.cells[this.index(x, y, z)] = this.idFor(state);
-    return true;
+  getId(x: number, y: number, z: number): number {
+    if (!this.inBounds(x, y, z)) return 0;
+    return this.data[this.index(x, y, z)] as number;
   }
 
-  getBlock(x: number, y: number, z: number): string {
-    if (!this.inBounds(x, y, z)) return AIR;
-    const id = this.cells[this.index(x, y, z)] ?? 0;
-    return this.palette[id] ?? AIR;
+  getState(x: number, y: number, z: number): string {
+    return this.palette[this.getId(x, y, z)] ?? AIR;
+  }
+
+  setState(x: number, y: number, z: number, state: string): void {
+    if (!this.inBounds(x, y, z)) return;
+    this.data[this.index(x, y, z)] = this.idFor(state);
+  }
+
+  /** Non-air block count per state. */
+  counts(): Map<string, number> {
+    const byId = new Uint32Array(this.palette.length);
+    for (let i = 0; i < this.data.length; i++) (byId[this.data[i] as number] as number)++;
+    const out = new Map<string, number>();
+    for (let id = 1; id < byId.length; id++) {
+      const n = byId[id] as number;
+      if (n > 0) out.set(this.palette[id] as string, n);
+    }
+    return out;
   }
 
   countBlocks(): number {
-    let count = 0;
-    for (let i = 0; i < this.cells.length; i++) {
-      if (this.cells[i] !== 0) count++;
-    }
-    return count;
+    let n = 0;
+    for (let i = 0; i < this.data.length; i++) if (this.data[i] !== 0) n++;
+    return n;
   }
 
-  /** Distinct non-air states actually present, sorted. */
-  getPalette(): string[] {
-    const present = new Set<string>();
-    for (let i = 0; i < this.cells.length; i++) {
-      const id = this.cells[i] ?? 0;
-      if (id !== 0) present.add(this.palette[id] ?? AIR);
+  /** Drop unused palette entries and renumber (air stays 0). Returns a new volume. */
+  compact(): BlockVolume {
+    const used = new Uint8Array(this.palette.length);
+    for (let i = 0; i < this.data.length; i++) used[this.data[i] as number] = 1;
+    const remap = new Uint16Array(this.palette.length);
+    const palette = [AIR];
+    for (let id = 1; id < this.palette.length; id++) {
+      if (!used[id]) continue;
+      remap[id] = palette.length;
+      palette.push(this.palette[id] as string);
     }
-    return [...present].sort();
+    const data = new Uint16Array(this.data.length);
+    for (let i = 0; i < data.length; i++) data[i] = remap[this.data[i] as number] as number;
+    return new BlockVolume(
+      this.sizeX,
+      this.sizeY,
+      this.sizeZ,
+      this.origin,
+      palette,
+      data,
+      this.prov,
+      this.blockEntities,
+    );
   }
 
-  /** state -> list of [x,y,z] positions, iterating in YZX order. */
+  /** state -> positions, iterating in YZX order. */
   toInstanceGroups(): Record<string, [number, number, number][]> {
     const groups: Record<string, [number, number, number][]> = {};
-    this.forEachYZX((x, y, z, state) => {
-      if (state === AIR) return;
-      (groups[state] ??= []).push([x, y, z]);
-    });
+    let i = 0;
+    for (let y = 0; y < this.sizeY; y++) {
+      for (let z = 0; z < this.sizeZ; z++) {
+        for (let x = 0; x < this.sizeX; x++, i++) {
+          const id = this.data[i] as number;
+          if (id === 0) continue;
+          (groups[this.palette[id] as string] ??= []).push([x, y, z]);
+        }
+      }
+    }
     return groups;
-  }
-
-  forEachYZX(cb: (x: number, y: number, z: number, state: string) => void): void {
-    for (let y = 0; y < this.y; y++) {
-      for (let z = 0; z < this.z; z++) {
-        for (let x = 0; x < this.x; x++) {
-          const id = this.cells[this.index(x, y, z)] ?? 0;
-          cb(x, y, z, this.palette[id] ?? AIR);
-        }
-      }
-    }
-  }
-
-  getNonAirBounds(): Vec3Bounds | null {
-    let found = false;
-    let minX = Infinity;
-    let minY = Infinity;
-    let minZ = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    let maxZ = -Infinity;
-    for (let y = 0; y < this.y; y++) {
-      for (let z = 0; z < this.z; z++) {
-        for (let x = 0; x < this.x; x++) {
-          if ((this.cells[this.index(x, y, z)] ?? 0) === 0) continue;
-          found = true;
-          if (x < minX) minX = x;
-          if (y < minY) minY = y;
-          if (z < minZ) minZ = z;
-          if (x > maxX) maxX = x;
-          if (y > maxY) maxY = y;
-          if (z > maxZ) maxZ = z;
-        }
-      }
-    }
-    if (!found) return null;
-    return { min: [minX, minY, minZ], max: [maxX, maxY, maxZ] };
-  }
-
-  get outOfBoundsWrites(): number {
-    return this._outOfBoundsWrites;
   }
 }

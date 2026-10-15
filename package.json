@@ -1,13 +1,19 @@
 {
   "name": "minecraft-schematic-lab",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "packageManager": "pnpm@11.6.0",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "bin": {
     "minecraft-schematic-lab": "./bundle/server.mjs"
   },
-  "files": ["bundle/", "README.md", "LICENSE"],
+  "files": [
+    "bundle/",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "dev": "concurrently -n server,web -c blue,green \"pnpm dev:server\" \"pnpm dev:web\"",
     "dev:web": "pnpm --filter @minecraft-schematic-lab/web dev",
@@ -16,6 +22,7 @@
     "build": "pnpm -r build",
     "setup": "pnpm install && pnpm build",
     "bundle": "pnpm build && node scripts/bundle.mjs",
+    "catalog": "node scripts/gen-catalog.mjs",
     "test": "pnpm -r test",
     "test:e2e": "playwright test",
     "lint": "pnpm -r lint",
@@ -25,12 +32,11 @@
   },
   "dependencies": {
     "@fastify/static": "^8.0.3",
-    "@modelcontextprotocol/sdk": "^1.12.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@napi-rs/canvas": "^0.1.65",
-    "execa": "^9.5.2",
     "fast-json-patch": "^3.1.1",
     "fastify": "^5.2.0",
-    "prismarine-nbt": "^2.5.0",
+    "fflate": "^0.8.2",
     "zod": "^3.24.1"
   },
   "devDependencies": {
@@ -42,9 +48,11 @@
     "eslint": "^9.17.0",
     "globals": "^15.14.0",
     "prettier": "^3.4.2",
+    "prismarine-nbt": "^2.5.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "typescript-eslint": "^8.18.1",
     "vitest": "^3.0.5"
-  }
+  },
+  "description": "Describe a Minecraft build to Claude; get an expert-quality schematic with a live 3D preview using the real game textures, for any Java version from 1.8 to the latest."
 }

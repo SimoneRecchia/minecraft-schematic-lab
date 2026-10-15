@@ -38,15 +38,27 @@ warn() { printf '%s\n' "!!  $*" >&2; }
 # --- Idempotency: if everything is already in place, do nothing ---
 node_major() { node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0; }
 
+# The viewer must be rebuilt when its sources changed after the last build (e.g. after git pull).
+viewer_stale() {
+  local index="$REPO_DIR/apps/web/dist/index.html"
+  [ -f "$index" ] || return 0
+  [ -n "$(find "$REPO_DIR/apps/web/src" "$REPO_DIR/packages/shared/src" -newer "$index" -type f 2>/dev/null | head -1)" ]
+}
+
+# Registered, and pointing at this checkout's wrapper (not an older npx/github registration).
+connector_ok() {
+  command -v claude >/dev/null 2>&1 || return 0
+  (cd "$REPO_DIR" && claude mcp get "$CONNECTOR_NAME" 2>/dev/null) | grep -q "$WRAPPER"
+}
+
 already_setup() {
   command -v node >/dev/null 2>&1 || return 1
   [ "$(node_major)" -ge "$NEED_MAJOR" ] || return 1
   command -v pnpm >/dev/null 2>&1 || return 1
   [ -d "$REPO_DIR/node_modules" ] || return 1
-  [ -f "$REPO_DIR/apps/web/dist/index.html" ] || return 1
-  if command -v claude >/dev/null 2>&1; then
-    claude mcp list 2>/dev/null | grep -q "$CONNECTOR_NAME" || return 1
-  fi
+  viewer_stale && return 1
+  [ -x "$WRAPPER" ] || return 1
+  connector_ok || return 1
   return 0
 }
 
@@ -121,11 +133,11 @@ else
 fi
 pnpm --dir "$REPO_DIR" install
 
-if [ -f "$REPO_DIR/apps/web/dist/index.html" ]; then
-  say "Web viewer already built; skipping build."
-else
+if viewer_stale; then
   say "Building the browser viewer."
   pnpm --dir "$REPO_DIR" build
+else
+  say "Web viewer is up to date; skipping build."
 fi
 
 if [ ! -f "$REPO_DIR/apps/web/dist/index.html" ]; then
@@ -159,8 +171,10 @@ MANUAL_CMD="claude mcp add --scope user $CONNECTOR_NAME -- \"$WRAPPER\""
 
 if command -v claude >/dev/null 2>&1; then
   say "Registering MCP connector '$CONNECTOR_NAME' (user scope)."
-  # Idempotent + non-destructive: only ever touches our own named entry.
+  # Idempotent + non-destructive: only ever touches our own named entry. A local/project-scoped
+  # entry with the same name (e.g. an old `npx github:` registration) would shadow this one.
   claude mcp remove --scope user "$CONNECTOR_NAME" >/dev/null 2>&1 || true
+  (cd "$REPO_DIR" && claude mcp remove --scope local "$CONNECTOR_NAME" >/dev/null 2>&1) || true
   if claude mcp add --scope user "$CONNECTOR_NAME" -- "$WRAPPER"; then
     say "Connector registered. RESTART Claude Code once so the schematic tools load."
   else
@@ -182,7 +196,6 @@ if [ "$installed_node_via_nvm" = true ]; then
 fi
 
 say "Setup complete."
-say "Next: the schematic is built over HTTP for the first request (server started from apps/server),"
-say "then the standalone server is stopped; after restarting Claude Code the MCP connector starts its"
-say "own server and the MCP tools open/refresh the browser preview automatically on port 8765."
+say "Next: restart Claude Code once so the schematic tools load. Until then, builds can go over HTTP"
+say "(POST /api/build on a server started from apps/server) — see CLAUDE.md."
 

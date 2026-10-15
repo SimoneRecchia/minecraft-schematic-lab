@@ -24,3 +24,6 @@ pnpm-debug.log*
 !bundle/**
 !bundle/web/dist/
 !bundle/web/dist/**
+
+# Generated per machine by scripts/setup.sh (absolute node/pnpm paths).
+scripts/mcp-launch.sh

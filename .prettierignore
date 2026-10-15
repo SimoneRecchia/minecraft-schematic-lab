@@ -4,3 +4,5 @@ build
 coverage
 pnpm-lock.yaml
 .idea
+bundle
+packages/catalog/data
