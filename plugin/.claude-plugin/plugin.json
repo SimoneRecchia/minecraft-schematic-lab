@@ -1,0 +1,21 @@
+{
+  "name": "minecraft-schematic-lab",
+  "displayName": "Minecraft Schematic Lab",
+  "version": "0.2.0",
+  "description": "Describe a Minecraft build and get an expert-quality schematic (WorldEdit .schem/.schematic, Litematica, structure .nbt) with a live 3D preview using the real game textures, for any Java version from 1.8 to the latest.",
+  "author": {
+    "name": "SimoneRecchia",
+    "url": "https://github.com/SimoneRecchia"
+  },
+  "homepage": "https://github.com/SimoneRecchia/minecraft-schematic-lab",
+  "repository": "https://github.com/SimoneRecchia/minecraft-schematic-lab",
+  "license": "MIT",
+  "keywords": [
+    "minecraft",
+    "schematic",
+    "worldedit",
+    "litematica",
+    "building",
+    "3d-viewer"
+  ]
+}

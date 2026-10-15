@@ -1,0 +1,18 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "minecraft-schematic-lab",
+  "description": "Minecraft building tools for Claude Code.",
+  "owner": {
+    "name": "SimoneRecchia",
+    "url": "https://github.com/SimoneRecchia"
+  },
+  "plugins": [
+    {
+      "name": "minecraft-schematic-lab",
+      "source": "./plugin",
+      "description": "Describe a Minecraft build and get an expert-quality schematic with a live 3D preview using the real game textures, for any Java version from 1.8 to the latest.",
+      "category": "productivity",
+      "tags": ["minecraft", "schematic", "worldedit", "litematica"]
+    }
+  ]
+}

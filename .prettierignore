@@ -4,5 +4,7 @@ build
 coverage
 pnpm-lock.yaml
 .idea
-bundle
+plugin/server
+plugin/package-lock.json
+plugin/.claude-plugin/plugin.json
 packages/catalog/data
