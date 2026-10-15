@@ -1,7 +1,8 @@
 import { existsSync } from 'node:fs';
 import { createServer } from 'node:net';
+import type { FastifyInstance } from 'fastify';
 import { AssetStore } from './assets/AssetStore';
-import { loadConfig } from './config';
+import { type AppConfig, loadConfig } from './config';
 import { BuildService } from './core/BuildService';
 import { CaptureBroker } from './core/CaptureBroker';
 import { EventHub } from './core/EventHub';
@@ -26,10 +27,26 @@ async function findOpenPort(host: string, start: number, attempts = 20): Promise
   return start;
 }
 
+/**
+ * Listen on config.port or the next free one. Probing alone isn't enough: two servers started at
+ * the same moment (two Claude Code sessions) both see the same port free, so retry when it's taken.
+ */
+async function listen(app: FastifyInstance, config: AppConfig): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    config.port = await findOpenPort(config.host, config.port);
+    config.baseUrl = `http://${config.host}:${config.port}`;
+    try {
+      await app.listen({ host: config.host, port: config.port });
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EADDRINUSE' || attempt >= 20) throw error;
+      config.port += 1;
+    }
+  }
+}
+
 async function main(): Promise<void> {
   const config = loadConfig();
-  config.port = await findOpenPort(config.host, config.port);
-  config.baseUrl = `http://${config.host}:${config.port}`;
 
   const hub = new EventHub();
   const assets = new AssetStore((s) =>
@@ -46,7 +63,7 @@ async function main(): Promise<void> {
   await builds.init();
 
   const app = await createHttpServer({ builds, assets, hub, capture, config });
-  await app.listen({ host: config.host, port: config.port });
+  await listen(app, config);
 
   if (config.mcpMode) {
     await startMcpServer({ builds, config });

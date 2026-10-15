@@ -17,13 +17,14 @@ pnpm-debug.log*
 .vscode/
 /tmp-projects/
 
-# Ship the prebuilt bundle used by `npx github:` (git-spec installs use the committed
-# tree, NOT the package.json `files` allowlist). These negations must come after the
-# `dist/` rule above so the viewer copy under bundle/web/dist is tracked too.
-!bundle/
-!bundle/**
-!bundle/web/dist/
-!bundle/web/dist/**
+# Ship the prebuilt plugin (Claude Code clones the repo for the marketplace; `npx github:` uses the
+# committed tree, NOT the package.json `files` allowlist). These negations must come after the
+# `dist/` rule above so the viewer copy under plugin/server/web/dist is tracked too.
+!plugin/server/web/dist/
+!plugin/server/web/dist/**
+# Written by plugin/scripts/start-server.sh when it installs the dependencies itself.
+plugin/.install.log
+plugin/.install-lock/
 
 # Generated per machine by scripts/setup.sh (absolute node/pnpm paths).
 scripts/mcp-launch.sh

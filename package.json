@@ -7,10 +7,10 @@
     "node": ">=22"
   },
   "bin": {
-    "minecraft-schematic-lab": "./bundle/server.mjs"
+    "minecraft-schematic-lab": "./plugin/server/server.mjs"
   },
   "files": [
-    "bundle/",
+    "plugin/",
     "README.md",
     "LICENSE"
   ],

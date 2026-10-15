@@ -6775,10 +6775,21 @@ async function findOpenPort(host, start, attempts = 20) {
   }
   return start;
 }
+async function listen(app, config) {
+  for (let attempt = 0; ; attempt++) {
+    config.port = await findOpenPort(config.host, config.port);
+    config.baseUrl = `http://${config.host}:${config.port}`;
+    try {
+      await app.listen({ host: config.host, port: config.port });
+      return;
+    } catch (error) {
+      if (error.code !== "EADDRINUSE" || attempt >= 20) throw error;
+      config.port += 1;
+    }
+  }
+}
 async function main() {
   const config = loadConfig();
-  config.port = await findOpenPort(config.host, config.port);
-  config.baseUrl = `http://${config.host}:${config.port}`;
   const hub = new EventHub();
   const assets = new AssetStore(
     (s) => hub.broadcast({
@@ -6793,7 +6804,7 @@ async function main() {
   const builds = new BuildService(new ProjectStore(), assets, hub, capture, config);
   await builds.init();
   const app = await createHttpServer({ builds, assets, hub, capture, config });
-  await app.listen({ host: config.host, port: config.port });
+  await listen(app, config);
   if (config.mcpMode) {
     await startMcpServer({ builds, config });
     const note = existsSync8(config.webDist) ? "" : ' (run "pnpm build" once to enable the browser viewer)';
