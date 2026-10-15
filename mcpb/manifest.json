@@ -1,0 +1,102 @@
+{
+  "manifest_version": "0.3",
+  "name": "minecraft-schematic-lab",
+  "display_name": "Minecraft Schematic Lab",
+  "version": "0.2.0",
+  "description": "Describe a Minecraft build and get an expert-quality schematic with a live 3D preview using the real game textures, for any Java version from 1.8 to the latest.",
+  "long_description": "Ask Claude for a build in your own words (\"build me a fantasy castle\", \"make the roof darker\") and it designs it like an experienced Minecraft builder.\n\n- **Live 3D viewer** in your browser (http://127.0.0.1:8765) with the real game textures: orbit, zoom, cut layers, pin notes on blocks for Claude to fix.\n- **Every Java version from 1.8 to the newest**: only blocks that exist in your version are used.\n- **Exports** for WorldEdit (`.schem`, `.schematic`), Litematica (`.litematic`), vanilla structure blocks (`.nbt`) and a material list; it can save straight into your WorldEdit or Litematica folder.\n\nEverything runs on your computer. The only download is the official Minecraft client from Mojang, once per version, for the textures (skipped when your launcher already has that version).",
+  "author": {
+    "name": "SimoneRecchia",
+    "url": "https://github.com/SimoneRecchia"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SimoneRecchia/minecraft-schematic-lab"
+  },
+  "homepage": "https://github.com/SimoneRecchia/minecraft-schematic-lab",
+  "support": "https://github.com/SimoneRecchia/minecraft-schematic-lab/issues",
+  "icon": "icon.png",
+  "server": {
+    "type": "node",
+    "entry_point": "server/server.mjs",
+    "mcp_config": {
+      "command": "node",
+      "args": [
+        "${__dirname}/server/server.mjs",
+        "--mcp"
+      ]
+    }
+  },
+  "tools": [
+    {
+      "name": "read_guide",
+      "description": "Expert building guides and the BuildSpec reference (workflow, roofs, styles, palettes, details, landscape, versions…)."
+    },
+    {
+      "name": "create_build",
+      "description": "Build a structure from a BuildSpec and show it in the 3D viewer, with a rendered preview."
+    },
+    {
+      "name": "edit_build",
+      "description": "Change the current build: add, replace, update or remove parts, swap palettes."
+    },
+    {
+      "name": "get_build",
+      "description": "Summary of the current build, and its full spec to continue it in another chat."
+    },
+    {
+      "name": "render_views",
+      "description": "Pictures of the build with the real textures: any angle, close-ups and cross-sections."
+    },
+    {
+      "name": "get_feedback",
+      "description": "Notes you pinned on blocks in the 3D viewer."
+    },
+    {
+      "name": "resolve_feedback",
+      "description": "Answer and close a note from the viewer."
+    },
+    {
+      "name": "inspect",
+      "description": "Exact block-by-block view of a region, with which part placed each block."
+    },
+    {
+      "name": "list_blocks",
+      "description": "Which blocks and block states exist in a Minecraft version."
+    },
+    {
+      "name": "export_build",
+      "description": "Export for WorldEdit (.schem, .schematic), Litematica, structure blocks (.nbt) or a material list."
+    },
+    {
+      "name": "history",
+      "description": "Saved versions of the build; bring an earlier one back."
+    },
+    {
+      "name": "projects",
+      "description": "Your saved builds: list, open, rename."
+    },
+    {
+      "name": "focus_view",
+      "description": "Point the 3D viewer's camera at a part of the build, with a message."
+    }
+  ],
+  "keywords": [
+    "minecraft",
+    "schematic",
+    "worldedit",
+    "litematica",
+    "building",
+    "3d-viewer"
+  ],
+  "license": "MIT",
+  "compatibility": {
+    "platforms": [
+      "darwin",
+      "win32"
+    ],
+    "runtimes": {
+      "node": ">=22.0.0"
+    }
+  }
+}

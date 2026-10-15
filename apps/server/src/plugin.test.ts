@@ -42,3 +42,33 @@ describe('plugin', () => {
     expect(existsSync(join(plugin, 'server', 'web', 'dist', 'index.html')), STALE).toBe(true);
   });
 });
+
+// The Claude Desktop extension (`pnpm mcpb`) packs plugin/server with mcpb/manifest.json.
+describe('desktop extension manifest', () => {
+  const manifest = json(repo, 'mcpb', 'manifest.json') as {
+    version: string;
+    server: { entry_point: string; mcp_config: unknown };
+    tools: { name: string }[];
+  };
+
+  it('has the release version', () => {
+    expect(manifest.version, 'mcpb/manifest.json: run "pnpm bundle"').toBe(
+      json(repo, 'package.json').version,
+    );
+  });
+
+  it("runs the bundled server with Claude Desktop's built-in Node", () => {
+    expect(manifest.server.entry_point).toBe('server/server.mjs');
+    expect(manifest.server.mcp_config).toEqual({
+      command: 'node',
+      args: ['${__dirname}/server/server.mjs', '--mcp'],
+    });
+  });
+
+  it('lists exactly the tools the server registers', () => {
+    const source = read(repo, 'apps', 'server', 'src', 'mcp', 'server.ts');
+    const registered = [...source.matchAll(/registerTool\(\s*'([a-z_]+)'/g)].map((m) => m[1]);
+    expect(registered.length).toBeGreaterThan(0);
+    expect(manifest.tools.map((t) => t.name).sort()).toEqual(registered.sort());
+  });
+});

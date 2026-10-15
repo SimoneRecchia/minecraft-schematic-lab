@@ -119,6 +119,14 @@ When the tools **are** loaded, use them and never start a second server.
   viewer, guides or skill (`apps/server/src/plugin.test.ts` fails on a stale copy). Installed plugins
   only update when `version` changes: bump it in the root `package.json` (and
   `packages/shared/src/version.ts`), then `pnpm bundle`. Check with `claude plugin validate .`.
+- The Chat tab of the Claude desktop app can't run a plugin's local server: it gets the tools from a
+  Desktop Extension, `pnpm mcpb` → `dist/minecraft-schematic-lab.mcpb` (+ `dist/minecraft-builder-skill.zip`
+  for Customize → Skills), built from `plugin/server` and `mcpb/manifest.json` by `scripts/mcpb.mjs`,
+  which also smoke-tests the packed file. It runs on Claude Desktop's built-in Node (Electron's, no
+  `/bin/sh` launcher) and bundles the `@napi-rs/canvas` binaries for macOS and Windows. The manifest's
+  `tools` must match the server's (`plugin.test.ts`); `pnpm bundle` syncs its version. Never run the
+  Claude app binary with `ELECTRON_RUN_AS_NODE` (the fuse is off: it starts a second app instance);
+  `--check --node <electron>` with a matching Electron from npm emulates the app's runtime.
 - Never run `pnpm dev`/`dev:server`/`start` while the MCP server owns the port; use another `PORT`
   for development (`PORT=8790 pnpm --dir apps/server start`, viewer dev: `API_TARGET=… pnpm dev:web`).
 

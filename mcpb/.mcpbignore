@@ -1,0 +1,10 @@
+# mcpb pack: files of the staged extension (dist/mcpb) left out of the .mcpb, on top of the
+# CLI defaults (.bin, *.map, lockfiles, ...). Type declarations are not needed at run time.
+*.d.ts
+*.d.mts
+*.d.cts
+# The dependencies' own test suites. Some fixture names contain ".." (@fastify/send's
+# "do..ts.txt"), which Claude Desktop's installer rejects as path traversal.
+node_modules/**/test/
+node_modules/**/tests/
+node_modules/**/__tests__/

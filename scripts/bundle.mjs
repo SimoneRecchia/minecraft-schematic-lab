@@ -72,17 +72,25 @@ async function installedVersion(dep) {
 
 /**
  * The plugin's version follows the root package.json: installed plugins only update when it
- * changes, so bump it there for a release.
+ * changes, so bump it there for a release. So does the desktop extension's (mcpb/manifest.json,
+ * packed by scripts/mcpb.mjs).
  */
 async function syncPluginVersion(version) {
   const file = resolve(pluginDir, '.claude-plugin/plugin.json');
   const manifest = JSON.parse(await readFile(file, 'utf8'));
-  if (manifest.version === version) return;
-  // Keep `version` right after `displayName` so the manifest stays readable.
-  const { name, displayName, ...rest } = manifest;
-  delete rest.version;
-  const next = { name, displayName, version, ...rest };
-  await writeFile(file, `${JSON.stringify(next, null, 2)}\n`);
+  if (manifest.version !== version) {
+    // Keep `version` right after `displayName` so the manifest stays readable.
+    const { name, displayName, ...rest } = manifest;
+    delete rest.version;
+    const next = { name, displayName, version, ...rest };
+    await writeFile(file, `${JSON.stringify(next, null, 2)}\n`);
+  }
+  const mcpbFile = resolve(repoRoot, 'mcpb/manifest.json');
+  const mcpb = JSON.parse(await readFile(mcpbFile, 'utf8'));
+  if (mcpb.version !== version) {
+    mcpb.version = version; // an existing key keeps its place
+    await writeFile(mcpbFile, `${JSON.stringify(mcpb, null, 2)}\n`);
+  }
 }
 
 /** plugin/package.json: the runtime deps pinned to the workspace versions. */

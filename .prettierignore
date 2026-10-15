@@ -7,4 +7,5 @@ pnpm-lock.yaml
 plugin/server
 plugin/package-lock.json
 plugin/.claude-plugin/plugin.json
+mcpb/manifest.json
 packages/catalog/data
