@@ -23,6 +23,34 @@ Everything runs locally. The textures come from the official Minecraft client: f
 that version is installed, otherwise downloaded once from Mojang's servers into
 `~/.minecraft-schematic-lab` — they are never redistributed.
 
+## Use it in the Chat tab (Claude desktop app)
+
+Requirements: the [Claude desktop app](https://claude.ai/download) on macOS (Apple Silicon or Intel)
+or Windows (Windows not tested yet). Nothing else to install: the extension runs on the app's own
+Node. claude.ai in a browser and the phone apps can't run it.
+
+1. Download **`minecraft-schematic-lab.mcpb`** from the
+   [latest release](https://github.com/SimoneRecchia/minecraft-schematic-lab/releases/latest).
+2. Double-click it (or drag it onto **Settings → Extensions** in the app) and click **Install**.
+3. Open a new chat and ask, in any language:
+
+   > Costruiscimi un castello fantasy su un'isola fluttuante, per la 1.20.1, massimo 100×100.
+
+The viewer opens in your browser, exactly as in the Code tab. To update, install the newer `.mcpb`
+the same way; to remove it, use **Settings → Extensions**. Your builds stay in
+`~/.minecraft-schematic-lab`, shared with the Code tab.
+
+**Optional, for better builds: the building skill.** In Claude Code the plugin brings a skill that
+makes Claude follow the expert workflow on every build request; an extension can't carry it. To add
+it to Chat, download **`minecraft-builder-skill.zip`** from the same release, then in the app go to
+**Customize → Skills**, upload the zip and turn the skill on. Skills need **Code execution** turned on
+(**Settings → Capabilities**). Without the skill, Claude still gets the building guides from the
+extension's `read_guide` tool.
+
+Also using the Claude Code plugin below? Extensions load in the desktop app's Code tab too, so
+there you'd get the tools twice (two servers, two viewer tabs). Keep just one of them: turn the
+extension off in **Settings → Extensions** while you work in the Code tab, or uninstall the plugin.
+
 ## Install (Claude Code plugin)
 
 Requirements: [Claude Code](https://claude.com/claude-code) — the desktop app or the CLI — on macOS
@@ -110,6 +138,7 @@ pnpm test             # unit + integration tests
 pnpm typecheck && pnpm lint
 pnpm catalog          # regenerate the per-version block catalog from minecraft-data
 pnpm bundle           # rebuild the plugin in plugin/ (server bundle, viewer, guides, skill)
+pnpm mcpb             # bundle + the Chat-tab extension in dist/ (.mcpb + skill zip), smoke-tested
 PORT=8790 pnpm --dir apps/server start   # standalone server for development
 claude plugin validate .                 # check the plugin and marketplace manifests
 claude --plugin-dir ./plugin             # try the plugin from this checkout without installing it
@@ -118,6 +147,13 @@ claude --plugin-dir ./plugin             # try the plugin from this checkout wit
 `plugin/` is committed — it's what players install — so run `pnpm bundle` before committing changes
 to the server, viewer, guides or skill. Installed plugins only update when the version changes: bump
 `version` in `package.json` (and `packages/shared/src/version.ts`), then `pnpm bundle`.
+
+The Chat-tab extension is built from the same bundle by `pnpm mcpb` (manifest and icon in `mcpb/`):
+one `.mcpb` for macOS and Windows that runs on Claude Desktop's built-in Node and carries the native
+`@napi-rs/canvas` binary for each OS/CPU. It isn't committed: attach
+`dist/minecraft-schematic-lab.mcpb` and `dist/minecraft-builder-skill.zip` to a GitHub release.
+`node scripts/mcpb.mjs --check [file] [--node <binary>]` re-runs the smoke test (an Electron binary
+works as `--node`, to try the app's runtime).
 
 See [CLAUDE.md](CLAUDE.md) for the architecture, API and the protocol Claude follows.
 
