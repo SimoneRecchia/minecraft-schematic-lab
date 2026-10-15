@@ -89,7 +89,8 @@ const DYE_COLORS: Record<string, string> = {
 // Longest names first so "light_blue"/"light_gray" win over "blue"/"gray".
 const DYE_NAMES = Object.keys(DYE_COLORS).sort((a, b) => b.length - a.length);
 
-const COLORED_BLOCK = /concrete|wool|terracotta|stained_glass|carpet|candle|shulker_box|glazed|bed|banner/;
+const COLORED_BLOCK =
+  /concrete|wool|terracotta|stained_glass|carpet|candle|shulker_box|glazed|bed|banner/;
 
 function dyeColorFor(name: string): string | null {
   for (const dye of DYE_NAMES) {
@@ -118,7 +119,9 @@ export function blockShape(state: string): BlockShape {
   const s = cleanName(state);
   if (/stairs/.test(s)) return 'stairs';
   if (/slab/.test(s)) return 'slab';
-  if (/_bars|^bars$|fence|_pane$|chain|end_rod|lightning_rod|_wall$|wall$|_rail|^rail$|ladder/.test(s)) {
+  if (
+    /_bars|^bars$|fence|_pane$|chain|end_rod|lightning_rod|_wall$|wall$|_rail|^rail$|ladder/.test(s)
+  ) {
     return 'thin';
   }
   if (/glass/.test(s)) return 'glass';

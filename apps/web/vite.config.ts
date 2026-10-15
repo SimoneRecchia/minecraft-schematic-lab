@@ -10,15 +10,10 @@ export default defineConfig({
     port: 5173,
     proxy: { '/api': { target: API_TARGET, changeOrigin: true } },
   },
+  worker: { format: 'es' },
   build: {
+    target: 'es2022',
     chunkSizeWarningLimit: 1200,
-    rollupOptions: {
-      output: {
-        manualChunks: {
-          three: ['three'],
-          drei: ['@react-three/fiber', '@react-three/drei'],
-        },
-      },
-    },
+    rollupOptions: { output: { manualChunks: { three: ['three'] } } },
   },
 });

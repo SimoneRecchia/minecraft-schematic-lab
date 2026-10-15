@@ -6,9 +6,10 @@
 //
 //   - apps/server/src/index.ts  ->  bundle/server.mjs   (esm, node22, executable)
 //   - apps/web/dist/**          ->  bundle/web/dist/**   (the browser viewer it serves)
+//   - apps/server/guides/*.md   ->  bundle/guides/*.md   (building guides for read_guide)
 //
-// The three workspace packages (@minecraft-schematic-lab/{shared,build-spec,
-// block-compiler}) are INLINED into server.mjs. The eight real npm deps stay
+// The workspace packages (@minecraft-schematic-lab/{shared,catalog,build-spec,
+// block-compiler,formats}, including the block catalog JSON) are INLINED into server.mjs. The real npm deps stay
 // EXTERNAL so npm installs them from `dependencies` at `npx` time (this keeps
 // the native @napi-rs/canvas binary out of the bundle, where esbuild can't put
 // it anyway).
@@ -29,6 +30,8 @@ const webDistSrc = resolve(repoRoot, 'apps/web/dist');
 const outDir = resolve(repoRoot, 'bundle');
 const outFile = resolve(outDir, 'server.mjs');
 const webDistOut = resolve(outDir, 'web/dist');
+const guidesSrc = resolve(repoRoot, 'apps/server/guides');
+const guidesOut = resolve(outDir, 'guides');
 
 // Real npm deps: keep external so they install from package.json "dependencies".
 // MUST stay in sync with the runtime "dependencies" of the ROOT package.json.
@@ -37,9 +40,8 @@ const external = [
   '@fastify/static',
   '@modelcontextprotocol/sdk',
   '@napi-rs/canvas',
-  'execa',
   'fast-json-patch',
-  'prismarine-nbt',
+  'fflate',
   'zod',
 ];
 
@@ -89,7 +91,10 @@ async function main() {
   await mkdir(dirname(webDistOut), { recursive: true });
   await cp(webDistSrc, webDistOut, { recursive: true });
 
-  process.stdout.write(`\nBundle ready:\n  ${outFile}\n  ${webDistOut}\n`);
+  // 3) The building guides served by the read_guide tool: bundle/guides/*.md.
+  await cp(guidesSrc, guidesOut, { recursive: true });
+
+  process.stdout.write(`\nBundle ready:\n  ${outFile}\n  ${webDistOut}\n  ${guidesOut}\n`);
 }
 
 main().catch((error) => {

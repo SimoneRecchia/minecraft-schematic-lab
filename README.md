@@ -1,110 +1,77 @@
 # minecraft-schematic-lab
 
-Build Minecraft schematics by talking to Claude. Describe what you want and it produces a WorldEdit
-Sponge `.schem` with a live 3D preview in the browser. Everything runs locally — no account, no cloud.
+Describe a Minecraft build to Claude — a cottage, a fantasy castle on a floating island, a gothic
+cathedral, a whole village — and get an expert-quality schematic you can paste into your world.
 
-## Setup
+- **Builds like an experienced builder.** Claude follows a building guide distilled from expert
+  practice (massing, depth, palettes and gradients, roofs, styles, landscaping) and writes a compact
+  BuildSpec with real roof generators, arches, procedural trees, terrain, reusable components,
+  symmetry and scripts.
+- **Live 3D viewer** in your browser with the **real Minecraft textures and block models**, smooth
+  lighting like the game, orbit/pan/zoom (Blender-style shortcuts), layer-by-layer cut, block
+  inspector, material list, version history — a macOS-style glass interface, light and dark.
+- **Claude sees what you see.** It renders the build from any angle, close-ups and sections; you can
+  pin numbered notes on blocks ("make this roof steeper") and Claude knows exactly which part of the
+  spec made that block.
+- **Strict Minecraft versions** from 1.8 to the newest release: only blocks that exist in the chosen
+  version are accepted (experimental ones excluded), with suggestions for substitutes.
+- **Export**: WorldEdit `.schem` (Sponge v2/v3), MCEdit `.schematic` for 1.8–1.12, Litematica
+  `.litematic`, vanilla structure `.nbt`, and a material list with stacks and shulker boxes. Files can
+  be saved straight into your WorldEdit or Litematica folder.
 
-You need **Node 22+** and **Claude Code** (CLI or desktop app). Add the connector once — either way below
-works for both the CLI and the desktop app, since they share the same config.
+Everything runs locally. The textures come from the official Minecraft client: from your launcher if
+that version is installed, otherwise downloaded once from Mojang's servers into
+`~/.minecraft-schematic-lab` — they are never redistributed.
 
-<details>
-<summary><b>Add it with one command</b> &nbsp;(uses the <code>claude</code> CLI)</summary>
+## Quick start
 
-<br>
-
-macOS / Linux:
-
-```bash
-claude mcp add --scope user minecraft-schematic-lab -- npx -y github:SimoneRecchia/minecraft-schematic-lab --mcp
-```
-
-Windows — `npx` needs a `cmd /c` wrapper:
-
-```bat
-claude mcp add --scope user minecraft-schematic-lab -- cmd /c npx -y github:SimoneRecchia/minecraft-schematic-lab --mcp
-```
-
-If `claude` isn't found, the desktop app doesn't ship the CLI — install it, open a new terminal, and run
-the command again:
-
-- **macOS** — `brew install --cask claude-code` (or `curl -fsSL https://claude.ai/install.sh | bash`)
-- **Linux** — `curl -fsSL https://claude.ai/install.sh | bash`
-- **Windows** — `winget install Anthropic.ClaudeCode` (or `irm https://claude.ai/install.ps1 | iex`)
-
-</details>
-
-<details>
-<summary><b>Add it by hand</b> &nbsp;(edit the config file)</summary>
-
-<br>
-
-Add the block under `mcpServers` in your Claude config — `~/.claude.json` for Claude Code
-(`%USERPROFILE%\.claude.json` on Windows), or `claude_desktop_config.json` for the Claude Desktop chat app.
-
-macOS / Linux:
-
-```json
-{
-  "mcpServers": {
-    "minecraft-schematic-lab": {
-      "command": "npx",
-      "args": ["-y", "github:SimoneRecchia/minecraft-schematic-lab", "--mcp"]
-    }
-  }
-}
-```
-
-Windows:
-
-```json
-{
-  "mcpServers": {
-    "minecraft-schematic-lab": {
-      "command": "cmd",
-      "args": ["/c", "npx", "-y", "github:SimoneRecchia/minecraft-schematic-lab", "--mcp"]
-    }
-  }
-}
-```
-
-</details>
-
-Restart Claude Code so it picks up the connector, then ask:
-
-> build me a 50×40×80 fantasy castle
-
-The first run pulls the tool through `npx`; the 3D preview then opens at <http://127.0.0.1:8765>.
-
-## Using it
-
-- **Change it** — "make the roof brick", "add two towers". The preview refreshes on its own.
-- **Export** — the **Export .schem** button in the browser, or ask Claude (Sponge v2, or v3).
-- **In Minecraft** — put the `.schem` in your world's `schematics` folder, then `//schem load <name>` and `//paste`.
-- **Versions** — ask Claude to version a build in a folder (needs git).
-- **Updates** — the connector follows `main`; pin a release with `#v0.1.0`, or clear a stale cache with `npm cache clean --force`.
-
-## Platform support
-
-| OS                              | CLI | Desktop app | Note                             |
-| ------------------------------- | :-: | :---------: | -------------------------------- |
-| macOS (Intel / Apple Silicon)   | ✅  |     ✅      |                                  |
-| Windows 10/11 (x64 / ARM64)     | ✅  |     ✅      | `npx` needs `cmd /c` (see Setup) |
-| Linux (x64 / ARM64, incl. musl) | ✅  |     —       | no desktop app on Linux          |
-
-Node 22+ on every platform; 32-bit isn't supported.
-
-## Develop
+Requirements: macOS, Linux or Windows with [Claude Code](https://claude.com/claude-code). Node 22+ and
+pnpm are installed for you if missing (no admin rights).
 
 ```bash
-pnpm setup        # install + build
-pnpm dev          # web (5173) + server (8765), hot reload
-pnpm test         # vitest
-pnpm bundle       # rebuild bundle/ for the npx connector (commit after server changes)
+git clone https://github.com/SimoneRecchia/minecraft-schematic-lab.git
+cd minecraft-schematic-lab
+bash scripts/setup.sh
 ```
 
-Architecture, MCP tools, the HTTP API and the BuildSpec format are documented in [`CLAUDE.md`](CLAUDE.md).
+Restart Claude Code once, open it in this folder and ask, in any language:
+
+> Costruiscimi un castello fantasy su un'isola fluttuante, per la 1.20.1, massimo 100×100.
+
+The viewer opens in your browser. Ask for changes in chat or pin notes on blocks with the Note tool
+(N), then tell Claude "guarda le note". Export with the **Export** button.
+
+In game (WorldEdit): put the file in `config/worldedit/schematics` (single player) or
+`plugins/WorldEdit/schematics` (server), then `//schem load <name>` and `//paste`.
+
+## Viewer shortcuts
+
+| | |
+|---|---|
+| Drag / right-drag or Shift-drag / scroll | orbit / pan / zoom (toward the cursor) |
+| Double-click | orbit around that block |
+| `1` `3` `7` (`Ctrl` = opposite) · `0` | front, right, top · 3D view |
+| `4` `6` `8` `2` · `5` | orbit in steps · orthographic |
+| `Home` / `F` | frame everything / the selection |
+| `L` + `↑` `↓` | layer cut |
+| `V` / `N` | navigate / pin a note (Shift-click a second block for an area) |
+| `G` · `S` · `Esc` | grid · sidebar · clear |
+
+## Development
+
+```bash
+pnpm install
+pnpm build            # web viewer (apps/web/dist)
+pnpm test             # unit + integration tests
+pnpm typecheck && pnpm lint
+pnpm catalog          # regenerate the per-version block catalog from minecraft-data
+pnpm bundle           # bundle/server.mjs + viewer + guides, for npx / a Claude plugin
+PORT=8790 pnpm --dir apps/server start   # standalone server for development
+```
+
+See [CLAUDE.md](CLAUDE.md) for the architecture, API and the protocol Claude follows.
 
 ## License
 
-MIT © 2026 SimoneRecchia
+MIT. Block data from [PrismarineJS/minecraft-data](https://github.com/PrismarineJS/minecraft-data)
+(MIT). Minecraft textures and models are © Mojang and are read from your own game files at runtime.
