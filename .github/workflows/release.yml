@@ -1,58 +1,76 @@
-# Publishes the GitHub release of a version (v0.3.0, …) with the Claude Desktop extension and the
-# building skill attached, built and smoke-tested by `pnpm mcpb`. The plugin itself needs no
-# release: Claude Code and Anthropic's directory read it from the repository.
+# Publishes the GitHub release of each new version (v0.3.0, …) with the Claude Desktop extension
+# and the building skill attached, built and smoke-tested by `pnpm mcpb`. The plugin itself needs
+# no release: Claude Code and Anthropic's directory read it from the repository.
 #
 # Release: bump `version` (package.json, packages/shared/src/version.ts), `pnpm bundle`, add the
-# CHANGELOG.md section, merge into main, then either push the tag `v<version>` or run this workflow
-# on main (Actions → Release → Run workflow), which creates that tag on the commit it builds.
+# CHANGELOG.md section, and merge into main. When main's version has no release yet, this workflow
+# publishes it and creates the tag `v<version>` on that commit. Pushing that tag yourself, or
+# Actions → Release → Run workflow, does the same; a version that already has a release is skipped.
 name: Release
 
 on:
   push:
+    branches: [main]
+    paths: [package.json, .github/workflows/release.yml]
     tags: ['v*']
   workflow_dispatch:
 
 permissions:
   contents: write
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4 # the version comes from "packageManager" in package.json
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
 
-      - name: Version and tag
+      - name: Version, tag, and whether it is released already
+        id: version
         run: |
-          version=$(node -p 'require("./package.json").version')
+          version=$(jq -r .version package.json)
           if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
             echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $version"
             exit 1
           fi
           echo "VERSION=$version" >> "$GITHUB_ENV"
           echo "TAG=v$version" >> "$GITHUB_ENV"
+          if gh release view "v$version" >/dev/null 2>&1; then
+            echo "::notice::v$version is already released."
+            echo "released=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.version.outputs.released != 'true'
+        uses: pnpm/action-setup@v4 # the version comes from "packageManager" in package.json
+      - if: steps.version.outputs.released != 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - if: steps.version.outputs.released != 'true'
+        run: pnpm install --frozen-lockfile
 
       - name: Build and smoke-test the extension
+        if: steps.version.outputs.released != 'true'
         run: pnpm mcpb
 
       - name: Release notes from CHANGELOG.md
+        if: steps.version.outputs.released != 'true'
         run: |
           awk -v v="$VERSION" '$0 == "## " v { on = 1; next } /^## / { on = 0 } on' \
             CHANGELOG.md > "$RUNNER_TEMP/notes.md"
           test -s "$RUNNER_TEMP/notes.md" || { echo "::error::No '## $VERSION' in CHANGELOG.md"; exit 1; }
 
       - name: Publish the release
-        env:
-          GH_TOKEN: ${{ github.token }}
+        if: steps.version.outputs.released != 'true'
         run: |
-          # --target only matters when the tag doesn't exist yet (a manual run): it is created on
-          # the commit this run built.
+          # --target only matters when the tag doesn't exist yet: it is created on this commit.
           gh release create "$TAG" \
             dist/vibeschem.mcpb dist/minecraft-builder-skill.zip \
             --title "VibeSchem $TAG" \
