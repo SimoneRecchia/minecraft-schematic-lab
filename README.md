@@ -202,10 +202,18 @@ published, so bump `version` for each release (and add it to [CHANGELOG.md](CHAN
 
 The extension is built from the same bundle by `pnpm mcpb` (manifest and icon in `mcpb/`): one
 `.mcpb` for macOS and Windows that runs on Claude Desktop's built-in Node and carries the native
-`@napi-rs/canvas` binary for each OS/CPU. It isn't committed: attach `dist/vibeschem.mcpb` and
-`dist/minecraft-builder-skill.zip` to a GitHub release. The directory no longer lists desktop
-extensions, so they're installed from the release. `node scripts/mcpb.mjs --check [file] [--node
-<binary>]` re-runs the smoke test (an Electron binary works as `--node`, to try the app's runtime).
+`@napi-rs/canvas` binary for each OS/CPU. It isn't committed: pushing a version tag (`v0.3.0`, …)
+runs `.github/workflows/release.yml`, which builds both files and publishes them in the GitHub
+release with that version's CHANGELOG section. The directory no longer lists desktop extensions, so
+they're installed from the release. `node scripts/mcpb.mjs --check [file] [--node <binary>]` re-runs
+the smoke test (an Electron binary works as `--node`, to try the app's runtime).
+
+### Releasing a version
+
+1. Bump `version` in `package.json` and `packages/shared/src/version.ts`, run `pnpm bundle`, and
+   add a `## <version>` section to [CHANGELOG.md](CHANGELOG.md).
+2. Merge into `main`: Claude Code users and, after its review, Anthropic's directory pick it up.
+3. Push the tag `v<version>` on that commit: the release with the desktop extension follows.
 
 See [CLAUDE.md](CLAUDE.md) for the architecture, API and the protocol Claude follows.
 

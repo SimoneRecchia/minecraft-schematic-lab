@@ -1,0 +1,54 @@
+# Publishes the GitHub release of a version tag (v0.3.0, …) with the Claude Desktop extension and
+# the building skill attached, built and smoke-tested by `pnpm mcpb`. The plugin itself needs no
+# release: Claude Code and Anthropic's directory read it from the repository.
+#
+# Release: bump `version` (package.json, packages/shared/src/version.ts), `pnpm bundle`, add the
+# CHANGELOG.md section, merge into main, then push the tag `v<version>`.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4 # the version comes from "packageManager" in package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Check that the tag matches the version
+        run: |
+          version=$(node -p 'require("./package.json").version')
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $version"
+            exit 1
+          fi
+
+      - name: Build and smoke-test the extension
+        run: pnpm mcpb
+
+      - name: Release notes from CHANGELOG.md
+        run: |
+          awk -v v="${GITHUB_REF_NAME#v}" '$0 == "## " v { on = 1; next } /^## / { on = 0 } on' \
+            CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          test -s "$RUNNER_TEMP/notes.md" || { echo "::error::No '## ${GITHUB_REF_NAME#v}' in CHANGELOG.md"; exit 1; }
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            dist/vibeschem.mcpb dist/minecraft-builder-skill.zip \
+            --title "VibeSchem $GITHUB_REF_NAME" \
+            --notes-file "$RUNNER_TEMP/notes.md" \
+            --verify-tag
