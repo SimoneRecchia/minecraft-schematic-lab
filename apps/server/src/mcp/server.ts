@@ -51,7 +51,9 @@ const GUIDE_TOPICS = [
   'examples',
 ] as const;
 
-const vec3 = z.tuple([z.number().int(), z.number().int(), z.number().int()]);
+// A fixed-length array, not z.tuple: a tuple becomes draft-07 `items: [...]`, which the Claude API
+// (JSON Schema 2020-12) rejects, dropping every tool that uses it.
+const vec3 = z.array(z.number().int()).length(3).describe('[x, y, z]');
 const VIEW_NAMES = [
   'iso',
   'iso_nw',
