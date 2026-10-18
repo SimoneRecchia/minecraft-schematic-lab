@@ -4,6 +4,7 @@ import { api } from '../api';
 import { controller } from '../controller';
 import { blockLabel, t } from '../i18n';
 import { useApp } from '../store';
+import { CircuitLabels } from './Redstone';
 
 /** Full-bleed 3D viewport, plus the overlays that follow the camera (pins, hover label). */
 export function Scene() {
@@ -14,6 +15,7 @@ export function Scene() {
   }, []);
   return (
     <div ref={ref} className={`scene tool-${tool}`}>
+      <CircuitLabels />
       <Pins />
       <HoverLabel />
       <Composer />

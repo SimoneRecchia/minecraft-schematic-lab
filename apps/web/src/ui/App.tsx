@@ -1,7 +1,9 @@
 import { useEffect } from 'react';
 import { controller } from '../controller';
+import { useSim } from '../sim/simStore';
 import { useApp } from '../store';
 import { Empty, FocusMessage, Gizmo, Inspector, LayerSlider, Status, Toasts } from './Overlays';
+import { SimBar } from './Redstone';
 import { Scene } from './Scene';
 import { ExportSheet, ProjectsPopover, VersionPopover } from './Sheets';
 import { Sidebar } from './Sidebar';
@@ -28,6 +30,18 @@ function useShortcuts(): void {
           return;
         case 'v':
           s.set({ tool: 'navigate', noteDraft: null });
+          return;
+        case 'u':
+          s.set({ tool: 'use', noteDraft: null });
+          return;
+        case ' ':
+          if (useSim.getState().available) {
+            e.preventDefault();
+            controller.sim.toggle();
+          }
+          return;
+        case 't':
+          if (useSim.getState().available) controller.sim.step(1);
           return;
         case 'n':
           s.set({ tool: 'note' });
@@ -126,6 +140,7 @@ export function App() {
       <Inspector />
       <LayerSlider />
       <FocusMessage />
+      <SimBar />
       <Status />
       <Toasts />
       <VersionPopover />

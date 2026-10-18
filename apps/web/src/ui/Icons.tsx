@@ -145,3 +145,52 @@ export const IconFullscreen = (p: P) => (
     <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
   </svg>
 );
+
+export const IconPlay = (p: P) => (
+  <svg {...base(p)}>
+    <path
+      d="M7.5 5.2v13.6a.8.8 0 0 0 1.2.7l11-6.8a.8.8 0 0 0 0-1.4l-11-6.8a.8.8 0 0 0-1.2.7z"
+      fill="currentColor"
+      stroke="none"
+    />
+  </svg>
+);
+
+export const IconPause = (p: P) => (
+  <svg {...base(p)}>
+    <rect x="6.5" y="5" width="3.6" height="14" rx="1" fill="currentColor" stroke="none" />
+    <rect x="13.9" y="5" width="3.6" height="14" rx="1" fill="currentColor" stroke="none" />
+  </svg>
+);
+
+export const IconStep = (p: P) => (
+  <svg {...base(p)}>
+    <path
+      d="M6 6.2v11.6a.7.7 0 0 0 1.1.6l8.6-5.8a.7.7 0 0 0 0-1.2L7.1 5.6a.7.7 0 0 0-1.1.6z"
+      fill="currentColor"
+      stroke="none"
+    />
+    <path d="M18.5 5.5v13" strokeWidth={2.2} />
+  </svg>
+);
+
+export const IconReset = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3" />
+    <path d="M4.5 4.5v4h4" />
+  </svg>
+);
+
+/** Hand: use a block, like a right-click in the game. */
+export const IconHand = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M8.5 11.5V5.2a1.6 1.6 0 0 1 3.2 0v5.6M11.7 10.5V4a1.6 1.6 0 0 1 3.2 0v6.8M14.9 10.8V5.6a1.6 1.6 0 0 1 3.2 0v8.2c0 4-2.6 6.7-6.3 6.7-2.6 0-4.1-1.1-5.5-3.2L4 13.6a1.6 1.6 0 0 1 2.6-1.8l1.9 2.3" />
+  </svg>
+);
+
+/** Redstone: a spark. */
+export const IconBolt = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M13.2 3 5.5 13.4h5.6L10.3 21l8.2-10.6h-5.6z" />
+  </svg>
+);

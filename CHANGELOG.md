@@ -3,6 +3,38 @@
 Installed plugins update when `version` changes (root `package.json`, synced into the plugin and the
 desktop extension by `pnpm bundle`).
 
+## 0.4.0
+
+- **Redstone simulator.** A new engine (`packages/redstone`) runs Minecraft Java redstone the way
+  the game's code does, with the mechanics of the build's version (1.8 → newest):
+  - game ticks, neighbour updates (W, E, down, up, N, S) and shape updates;
+  - scheduled-tick priorities and block events;
+  - pistons and sticky pistons with slime, honey, the 12-block limit and dropped blocks on short
+    pulses;
+  - quasi-connectivity, observers, comparators (compare/subtract, containers, through a block) and
+    torch burnout;
+  - doors, rails, note blocks, copper bulbs and more.
+  Dust update order depends on world position, like in the game.
+- **Circuits with tests.** A BuildSpec can have a `circuit` with named inputs and outputs (single
+  blocks or buses) and tests: truth tables with `forAll`, delays with `expect … within`, clock
+  periods with `measure`, memory with `for`. The tests run on every build and show in the summary.
+  The rest state is saved into the build, so exports paste working.
+- **`simulate` tool**: run stored or ad-hoc tests, add probes, check that results don't depend on
+  where the build sits (`locations`), and play a test live in the viewer (`show`).
+- **Live simulation in the viewer**:
+  - a hand tool (U) for levers, buttons and repeaters;
+  - run, pause, one tick, speed from ¼× to max;
+  - a Redstone panel with inputs, outputs, tests and events, and labels on the blocks;
+  - redstone dust coloured by its power, like in the game.
+- New guide `read_guide("redstone")`: tick timing, which way blocks face, power rules, the test
+  language, verified building blocks (AND, latch, clock, pulse, piston door, a generated chaser) and
+  how to scale up. Every example in it is tested.
+- Dust connects like placing it by hand (a lone dust is a "+" from 1.16), and repeaters get their
+  `locked` state.
+- **The viewer tab is reused.** Edits no longer open a new browser tab: the server waits for the tab
+  that's already open to reconnect (after a new session too), and only opens one when there is none.
+  A hidden tab shows a dot in its title when a change arrives.
+
 ## 0.3.1
 
 - Fix: Claude dropped the `focus_view`, `inspect` and `render_views` tools, because their `[x, y, z]`

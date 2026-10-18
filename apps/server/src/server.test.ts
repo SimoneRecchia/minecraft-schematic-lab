@@ -193,7 +193,7 @@ describe('MCP tools', () => {
     const client = new Client({ name: 'test', version: '0' });
     await Promise.all([server.connect(serverSide), client.connect(clientSide)]);
     const { tools } = await client.listTools();
-    expect(tools.length).toBe(13);
+    expect(tools.length).toBe(14);
     // The Claude API checks each schema as JSON Schema 2020-12 and drops a tool whose schema fails
     // (e.g. a draft-07 tuple, `items: [...]`), whatever `$schema` the SDK writes.
     const ajv = new Ajv2020({ strict: false });
@@ -207,6 +207,61 @@ describe('MCP tools', () => {
       }
     }
     await client.close();
+  });
+});
+
+describe('redstone', () => {
+  const spec = {
+    name: 'switch',
+    minecraftVersion: '1.21.4',
+    operations: [
+      { type: 'blocks', id: 'lever', block: 'lever[face=floor,facing=east]', at: [[0, 0, 0]] },
+      { type: 'line', id: 'dust', from: [1, 0, 0], to: [3, 0, 0], block: 'redstone_wire' },
+      { type: 'blocks', id: 'lamp', block: 'redstone_lamp', at: [[4, 0, 0]] },
+    ],
+    circuit: {
+      inputs: { S: { at: [0, 0, 0] } },
+      outputs: { L: { at: [4, 0, 0] } },
+      tests: [{ name: 'lights', steps: [{ set: { S: 1 } }, { expect: { L: 1 } }] }],
+    },
+  };
+
+  it('reports the tests in the build summary and runs ad-hoc ones', async () => {
+    const out = await builds.create(spec);
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(builds.summary(out.build)).toContain('Tests: 1/1 passed');
+    const r = builds.simulate({
+      tests: [
+        {
+          name: 'delay',
+          steps: [
+            { set: { S: 1 } },
+            { wait: 1 },
+            { set: { S: 0 } },
+            { expect: { L: 0 }, within: 8 },
+          ],
+        },
+      ],
+      locations: 4,
+    });
+    expect(r.ok, r.text).toBe(true);
+    expect(r.text).toContain('L=0 after 4 ticks');
+    expect(r.text).toContain('Same results at 4 world positions.');
+    expect(r.text).toContain('At rest: S=0, L=0');
+  });
+
+  it('explains malformed tests instead of running them', () => {
+    const r = builds.simulate({ tests: [{ name: 'x', steps: [{ fly: 1 }] }] });
+    expect(r.ok).toBe(false);
+    expect(r.text).toMatch(/Unknown step/);
+  });
+
+  it('serves what the viewer needs to run the same simulation', async () => {
+    const sim = (await app.inject({ url: '/api/build/sim' })).json();
+    expect(sim.version).toBe('1.21.4');
+    expect(sim.fullCubes).toContain('stone');
+    expect(sim.circuit.outputs.L.at).toEqual([4, 0, 0]);
   });
 });
 

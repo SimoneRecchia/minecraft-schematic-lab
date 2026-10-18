@@ -160,6 +160,9 @@ Draw small detailed parts as ASCII — the most precise way to place a facade, a
 ### script
 `{type:"script", code, args?}` — JavaScript for procedural work: spiral stairs, ring walls with crenels, rose windows, organic shapes, city blocks, anything repetitive. Runs inside the current group transform. See read_guide("scripts").
 
+## circuit (redstone)
+Optional top-level `"circuit": {inputs, outputs, tests, settleTicks?}`. It names a circuit's inputs and outputs and holds tests that the redstone simulator runs on every build. Read read_guide("redstone").
+
 ## Workflow tips for specs
 - Build in passes: masses → structure (frames, pillars, floors) → roofs → openings (carve with `air`) → detail (`mask:"air"` so you don't break walls) → weathering (`replace` with `chance`) → landscape.
 - Palette keys + ids make edits one-liners: `edit_build({edits:[{op:"palette", set:{"roof":"deepslate_tile_stairs"}}]})`.

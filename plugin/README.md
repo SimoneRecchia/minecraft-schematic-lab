@@ -8,6 +8,12 @@ world.
 
 ## What you get
 
+- **Working redstone, tested before you build it.** Ask for a piston door, a clock, a calculator or
+  a whole redstone computer. VibeSchem simulates Minecraft Java redstone for your version: game
+  ticks, update order, pistons and quasi-connectivity. Claude writes tests for the circuit (truth
+  tables, delays, clock periods) and fixes the design until every test passes. In the viewer you
+  flip levers, press ▶ to run the circuit at any speed, and replay its tests in 3D.
+
 - **Builds like an experienced builder.** Claude follows building guides distilled from expert
   practice: massing, depth, palettes and gradients, real roofs, styles, details and landscaping.
 - **Live 3D viewer** in your browser with the real Minecraft textures and block models: orbit, pan,
@@ -41,6 +47,10 @@ world.
 > A gothic cathedral for 1.12.2 in stone bricks, very detailed, with flying buttresses.
 
 > Make the roof darker and add a chimney, then export it for Litematica.
+
+> Fammi una porta a pistoni 2×2 nascosta per la 1.21, che si apre con un pulsante.
+
+> An 8-bit adder with levers for the inputs and lamps for the result, with tests.
 
 ## Where it works
 

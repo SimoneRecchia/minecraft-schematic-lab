@@ -9,6 +9,7 @@ import type {
   InspectResult,
   ProjectInfo,
   ServerEvent,
+  SimInfo,
   Vec3,
   VersionOption,
   VersionSummary,
@@ -50,6 +51,7 @@ export const api = {
     if (!res.ok) throw new ApiError('Could not load the build data.', res.status);
     return new Uint16Array(await res.arrayBuffer());
   },
+  sim: () => json<SimInfo>('/api/build/sim'),
   inspect: (pos: Vec3) =>
     json<InspectResult>(`/api/build/inspect?x=${pos[0]}&y=${pos[1]}&z=${pos[2]}`),
   changeVersion: (version: string, apply: boolean) =>
@@ -107,8 +109,10 @@ export function connectEvents(
     };
     es.onerror = () => {
       onStatus(false);
-      es?.close();
-      if (!closed) setTimeout(open, Math.min(5000, 500 * 2 ** retry++));
+      // The browser reconnects by itself (every second, as the server asks, also in background
+      // tabs); only a stream it gave up on needs a new one.
+      if (es?.readyState !== EventSource.CLOSED || closed) return;
+      setTimeout(open, Math.min(5000, 500 * 2 ** retry++));
     };
   };
   open();

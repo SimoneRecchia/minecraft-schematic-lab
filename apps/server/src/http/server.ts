@@ -83,6 +83,9 @@ export async function createHttpServer({
       connection: 'keep-alive',
       'x-accel-buffering': 'no',
     });
+    // Reconnect within a second after the server restarts (a new Claude session), so the open tab
+    // is reused instead of a new one being opened.
+    res.write('retry: 1000\n\n');
     const client = hub.add(res);
     hub.send(client, {
       type: 'hello',
@@ -170,6 +173,7 @@ export async function createHttpServer({
   );
 
   app.get('/api/build/spec', async () => builds.requireCurrent().record.spec);
+  app.get('/api/build/sim', async () => builds.simInfo());
 
   app.post('/api/build/version', async (req, reply) => {
     const { version, apply } = (req.body ?? {}) as { version?: string; apply?: boolean };

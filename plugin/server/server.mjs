@@ -17,8 +17,8 @@ function appHome() {
   mkdirSync(dir, { recursive: true });
   return dir;
 }
-function appDir(...parts) {
-  const dir = join(appHome(), ...parts);
+function appDir(...parts2) {
+  const dir = join(appHome(), ...parts2);
   mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -687,6 +687,9 @@ function hashHue(s) {
 }
 function blockShape(state) {
   const s = cleanName(state);
+  if (/^redstone_wire$|pressure_plate$|_carpet$|^tripwire$/.test(s)) return "flat";
+  if (/^(repeater|comparator|daylight_detector)$/.test(s)) return "low";
+  if (/_button$|^lever$|torch$|^tripwire_hook$/.test(s)) return "small";
   if (/stairs/.test(s)) return "stairs";
   if (/slab/.test(s)) return "slab";
   if (/_bars|^bars$|fence|_pane$|chain|end_rod|lightning_rod|_wall$|wall$|_rail|^rail$|ladder/.test(s)) {
@@ -698,6 +701,16 @@ function blockShape(state) {
 function colorFor(state) {
   const s = state.toLowerCase();
   const name = cleanName(state);
+  if (name === "redstone_wire") {
+    const p = Number(/power=(\d+)/.exec(s)?.[1] ?? 0) / 15;
+    const r = Math.round((p * 0.6 + (p > 0 ? 0.4 : 0.3)) * 255);
+    const g = Math.round(Math.max(0, p * p * 0.7 - 0.5) * 255);
+    return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}00`;
+  }
+  if (/lamp|torch|bulb/.test(name) && /lit=/.test(s))
+    return /lit=true/.test(s) ? "#ffd25a" : "#7a5a34";
+  if (/powered=true/.test(s) && /^(repeater|comparator|observer|lever)$|_button$/.test(name))
+    return "#ff5a36";
   if (COLORED_BLOCK.test(name)) {
     const dye = dyeColorFor(name);
     if (dye) return dye;
@@ -709,7 +722,7 @@ function colorFor(state) {
 }
 
 // packages/shared/src/version.ts
-var APP_VERSION = "0.3.1";
+var APP_VERSION = "0.4.0";
 
 // apps/server/src/assets/ModelBaker.ts
 var DIRS = ["down", "up", "north", "south", "west", "east"];
@@ -747,6 +760,14 @@ var TINTS = [
   [/^(attached_)?(melon|pumpkin)_stem$/, 14731036],
   [/^redstone_wire$/, 11796480]
 ];
+function wireColor(power) {
+  const f = Math.max(0, Math.min(15, power)) / 15;
+  const r = f * 0.6 + (f > 0 ? 0.4 : 0.3);
+  const g = Math.min(1, Math.max(0, f * f * 0.7 - 0.5));
+  const b = Math.min(1, Math.max(0, f * f * 0.6 - 0.7));
+  const c = (v) => Math.round(v * 255);
+  return c(r) << 16 | c(g) << 8 | c(b);
+}
 var SELF_CULL = /(^|_)glass$|^ice$|^packed_ice$|^blue_ice$|^slime_block$|^honey_block$|^water$|^lava$|^tinted_glass$/;
 var INVISIBLE = /^(air|cave_air|void_air|barrier|light|structure_void|moving_piston)$/;
 function faceCorners(face, f, t) {
@@ -939,14 +960,16 @@ var ModelBaker = class {
     return out;
   }
   /** Biome/fixed colour the game applies to tinted faces; untinted blocks (cherry, azalea…) keep their texture colour. */
-  tintFor(name) {
+  tintFor(name, props) {
+    if (name === "redstone_wire" && props?.power !== void 0)
+      return wireColor(Number(props.power));
     for (const [re, color] of TINTS) if (re.test(name)) return color;
     return -1;
   }
   /** Quads of one model placed with a variant rotation. */
-  bakeModel(model, name, rx, ry, uvlock, out) {
+  bakeModel(model, name, rx, ry, uvlock, out, props) {
     const center = [8, 8, 8];
-    const tint = this.tintFor(name);
+    const tint = this.tintFor(name, props);
     for (const el of model.elements) {
       for (const face of DIRS) {
         const fd = el.faces[face];
@@ -1070,7 +1093,7 @@ var ModelBaker = class {
         if (!model) continue;
         if (model.elements.length === 0) continue;
         if (variants.length && out.length === 0 && this.isFullOpaque(model)) full = true;
-        this.bakeModel(model, name, ref.x ?? 0, ref.y ?? 0, ref.uvlock ?? false, q);
+        this.bakeModel(model, name, ref.x ?? 0, ref.y ?? 0, ref.uvlock ?? false, q, props);
       }
       out.push({ w: v.w, q });
     }
@@ -1787,6 +1810,73 @@ var componentSchema = z.object({
   description: z.string().optional(),
   operations: z.array(operationSchema)
 }).strict();
+var tickCount = z.union([z.number().int().nonnegative().max(1e6), z.string().min(1)]);
+var circuitIoSchema = z.object({
+  at: z.union([vec3, z.array(vec3).min(1).max(64)]),
+  /** Input: place this block for 1 and restore the original for 0 (e.g. "redstone_block"). */
+  as: blockRef.optional(),
+  /** Output: "bit" (0/1, default), "power" (0–15) or "block" (1 when a block stands there). */
+  read: z.enum(["bit", "power", "block"]).optional()
+}).strict();
+var ioValue = z.union([z.number(), z.boolean(), z.string().min(1)]);
+var ioName = z.string().regex(/^[A-Za-z_]\w*$/, "names are letters, digits and _");
+var STEP_SCHEMAS = {
+  set: z.object({ set: z.record(ioName, ioValue) }).strict(),
+  pulse: z.object({ pulse: z.record(ioName, tickCount) }).strict(),
+  press: z.object({ press: z.union([ioName, z.array(ioName).min(1)]) }).strict(),
+  wait: z.object({ wait: tickCount }).strict(),
+  settle: z.object({ settle: z.union([z.literal(true), tickCount]) }).strict(),
+  measure: z.object({
+    measure: ioName,
+    ticks: tickCount,
+    expect: z.object({ period: z.number(), high: z.number(), pulses: z.number().int() }).partial().strict().optional()
+  }).strict(),
+  expect: z.object({
+    expect: z.union([z.record(ioName, ioValue), z.string().min(1)]),
+    within: tickCount.optional(),
+    for: tickCount.optional()
+  }).strict(),
+  log: z.object({ log: z.union([ioName, z.array(ioName).min(1)]) }).strict(),
+  use: z.object({ use: vec3 }).strict(),
+  place: z.object({ place: z.object({ at: vec3, block: blockRef }).strict() }).strict(),
+  break: z.object({ break: vec3 }).strict()
+};
+var CIRCUIT_STEPS = Object.keys(STEP_SCHEMAS);
+var circuitStepSchema = z.record(z.string(), z.unknown()).superRefine((value, ctx) => {
+  const key = CIRCUIT_STEPS.find((k) => k in value);
+  const schema = key ? STEP_SCHEMAS[key] : void 0;
+  if (!schema) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `Unknown step. Use one of: ${CIRCUIT_STEPS.map((k) => `{"${k}": \u2026}`).join(", ")}.`
+    });
+    return;
+  }
+  const parsed = schema.safeParse(value);
+  if (!parsed.success) for (const issue of parsed.error.issues) ctx.addIssue(issue);
+});
+var circuitTestSchema = z.object({
+  name: z.string().min(1),
+  steps: z.array(circuitStepSchema).min(1),
+  /** Run once per combination: {"A": [0, 15]} is every A from 0 to 15. */
+  forAll: z.record(
+    ioName,
+    z.union([
+      z.tuple([z.number().int(), z.number().int()]),
+      z.object({ values: z.array(z.number().int()).min(1) }).strict()
+    ])
+  ).optional(),
+  samples: z.number().int().positive().max(1e5).optional(),
+  seed: z.number().int().optional(),
+  trace: z.array(ioName).optional()
+}).strict();
+var circuitSchema = z.object({
+  inputs: z.record(ioName, circuitIoSchema).optional(),
+  outputs: z.record(ioName, circuitIoSchema).optional(),
+  tests: z.array(circuitTestSchema).optional(),
+  /** Ticks power-on may take before the circuit counts as never resting (default 1200). */
+  settleTicks: z.number().int().positive().max(1e5).optional()
+}).strict();
 var buildSpecSchema = z.object({
   $schema: z.string().optional(),
   id: z.string().min(1).optional(),
@@ -1806,6 +1896,8 @@ var buildSpecSchema = z.object({
   palette: z.record(z.string().min(1), paletteEntrySchema).optional(),
   components: z.record(z.string().min(1), componentSchema).optional(),
   operations: z.array(operationSchema),
+  /** A redstone circuit: named inputs/outputs and tests the simulator runs on every build. */
+  circuit: circuitSchema.optional(),
   metadata: z.object({
     prompt: z.string().optional(),
     style: z.string().optional(),
@@ -2137,8 +2229,8 @@ var SWAP_LR = {
 };
 function mapRailShape(t, shape) {
   if (shape.startsWith("ascending_")) return `ascending_${mapDir(t, shape.slice(10))}`;
-  const parts = shape.split("_").map((p) => mapDir(t, p));
-  const set = new Set(parts);
+  const parts2 = shape.split("_").map((p) => mapDir(t, p));
+  const set = new Set(parts2);
   if (set.has("north") && set.has("south")) return "north_south";
   if (set.has("east") && set.has("west")) return "east_west";
   const ns = set.has("north") ? "north" : "south";
@@ -2196,6 +2288,7 @@ var AIR_STATE = "minecraft:air";
 var FLAG_CONNECT = 1;
 var FLAG_STAIR_SHAPE = 2;
 var FLAG_COMPLETE = 4;
+var FLAG_REDSTONE = 8;
 var SIDES = ["north", "east", "south", "west"];
 function connectsLikeFence(cat, name) {
   const v = cat.propValues(name, "north");
@@ -2217,6 +2310,8 @@ var InternalPalette = class {
       flags |= FLAG_CONNECT;
     }
     if (name.endsWith("_stairs") && !ex.has("shape")) flags |= FLAG_STAIR_SHAPE;
+    if (name === "redstone_wire" && !SIDES.some((s) => ex.has(s))) flags |= FLAG_REDSTONE;
+    if (name === "repeater" && !ex.has("locked")) flags |= FLAG_REDSTONE;
     if (props.half === "lower" && "half" in props || props.part === "foot")
       flags |= FLAG_COMPLETE;
     return this.addRaw(name, props, flags);
@@ -2421,7 +2516,7 @@ function stairShape(e, x, y, z3, entryAt) {
     const [dx, dz] = DIR_VEC[d];
     return entryAt(x + dx, y, z3 + dz);
   };
-  const axisOf = (d) => d === "east" || d === "west" ? "x" : "z";
+  const axisOf2 = (d) => d === "east" || d === "west" ? "x" : "z";
   const canTakeShape = (face) => {
     const n = rel(face);
     return !isStairs(n) || n.props.facing !== facing || n.props.half !== half;
@@ -2429,18 +2524,3294 @@ function stairShape(e, x, y, z3, entryAt) {
   const behind = rel(facing);
   if (isStairs(behind) && behind.props.half === half) {
     const d1 = behind.props.facing;
-    if (axisOf(d1) !== axisOf(facing) && canTakeShape(OPPOSITE[d1])) {
+    if (axisOf2(d1) !== axisOf2(facing) && canTakeShape(OPPOSITE[d1])) {
       return d1 === CCW[facing] ? "outer_left" : "outer_right";
     }
   }
   const front = rel(OPPOSITE[facing]);
   if (isStairs(front) && front.props.half === half) {
     const d2 = front.props.facing;
-    if (axisOf(d2) !== axisOf(facing) && canTakeShape(d2)) {
+    if (axisOf2(d2) !== axisOf2(facing) && canTakeShape(d2)) {
       return d2 === CCW[facing] ? "inner_left" : "inner_right";
     }
   }
   return "straight";
+}
+
+// packages/redstone/src/blocks.ts
+var K = {
+  AIR: 0,
+  SOLID: 1,
+  WIRE: 2,
+  TORCH: 3,
+  WALL_TORCH: 4,
+  REPEATER: 5,
+  COMPARATOR: 6,
+  LEVER: 7,
+  BUTTON: 8,
+  PLATE: 9,
+  WEIGHTED_PLATE: 10,
+  REDSTONE_BLOCK: 11,
+  LAMP: 12,
+  PISTON: 13,
+  PISTON_HEAD: 14,
+  MOVING_PISTON: 15,
+  OBSERVER: 16,
+  TARGET: 17,
+  NOTE_BLOCK: 18,
+  DOOR: 19,
+  TRAPDOOR: 20,
+  FENCE_GATE: 21,
+  DISPENSER: 22,
+  HOPPER: 23,
+  COPPER_BULB: 24,
+  TNT: 25,
+  POWERED_RAIL: 26,
+  RAIL: 27,
+  DAYLIGHT: 28,
+  TRIPWIRE_HOOK: 29,
+  LECTERN: 30,
+  TRAPPED_CHEST: 31,
+  SCULK_SENSOR: 32,
+  LIGHTNING_ROD: 33,
+  CRAFTER: 34,
+  BELL: 35
+};
+function kindOf2(name) {
+  switch (name) {
+    case "air":
+    case "cave_air":
+    case "void_air":
+      return K.AIR;
+    case "redstone_wire":
+      return K.WIRE;
+    case "redstone_torch":
+      return K.TORCH;
+    case "redstone_wall_torch":
+      return K.WALL_TORCH;
+    case "repeater":
+      return K.REPEATER;
+    case "comparator":
+      return K.COMPARATOR;
+    case "lever":
+      return K.LEVER;
+    case "light_weighted_pressure_plate":
+    case "heavy_weighted_pressure_plate":
+      return K.WEIGHTED_PLATE;
+    case "redstone_block":
+      return K.REDSTONE_BLOCK;
+    case "redstone_lamp":
+      return K.LAMP;
+    case "piston":
+    case "sticky_piston":
+      return K.PISTON;
+    case "piston_head":
+      return K.PISTON_HEAD;
+    case "moving_piston":
+      return K.MOVING_PISTON;
+    case "observer":
+      return K.OBSERVER;
+    case "target":
+      return K.TARGET;
+    case "note_block":
+      return K.NOTE_BLOCK;
+    case "dispenser":
+    case "dropper":
+      return K.DISPENSER;
+    case "hopper":
+      return K.HOPPER;
+    case "tnt":
+      return K.TNT;
+    case "powered_rail":
+    case "activator_rail":
+      return K.POWERED_RAIL;
+    case "rail":
+    case "detector_rail":
+      return K.RAIL;
+    case "daylight_detector":
+      return K.DAYLIGHT;
+    case "tripwire_hook":
+      return K.TRIPWIRE_HOOK;
+    case "lectern":
+      return K.LECTERN;
+    case "trapped_chest":
+      return K.TRAPPED_CHEST;
+    case "sculk_sensor":
+    case "calibrated_sculk_sensor":
+      return K.SCULK_SENSOR;
+    case "crafter":
+      return K.CRAFTER;
+    case "bell":
+      return K.BELL;
+  }
+  if (name.endsWith("_button")) return K.BUTTON;
+  if (name.endsWith("_pressure_plate")) return K.PLATE;
+  if (name.endsWith("_trapdoor")) return K.TRAPDOOR;
+  if (name.endsWith("_door")) return K.DOOR;
+  if (name.endsWith("_fence_gate")) return K.FENCE_GATE;
+  if (name.endsWith("copper_bulb")) return K.COPPER_BULB;
+  if (name.endsWith("lightning_rod")) return K.LIGHTNING_ROD;
+  return K.SOLID;
+}
+function isSignalSourceKind(kind, name) {
+  switch (kind) {
+    case K.WIRE:
+    case K.TORCH:
+    case K.WALL_TORCH:
+    case K.REPEATER:
+    case K.COMPARATOR:
+    case K.LEVER:
+    case K.BUTTON:
+    case K.PLATE:
+    case K.WEIGHTED_PLATE:
+    case K.REDSTONE_BLOCK:
+    case K.OBSERVER:
+    case K.TARGET:
+    case K.DAYLIGHT:
+    case K.TRIPWIRE_HOOK:
+    case K.LECTERN:
+    case K.TRAPPED_CHEST:
+    case K.SCULK_SENSOR:
+    case K.LIGHTNING_ROD:
+      return true;
+    case K.RAIL:
+      return name === "detector_rail";
+    default:
+      return false;
+  }
+}
+var NOT_CONDUCTIVE = /(^|_)glass$|_leaves$|^ice$|^frosted_ice$|^glowstone$|^sea_lantern$|^beacon$|^redstone_block$|^observer$|^tnt$|^moving_piston$|^(sticky_)?piston$|^structure_void$|^light$|copper_bulb$|copper_grate$/;
+var NO_SUPPORT = /_leaves$/;
+var CONDUCTIVE_ANYWAY = /^soul_sand$|^mud$/;
+var STURDY_TOP_ANYWAY = /^(sticky_)?piston$|^soul_sand$|^mud$|^dirt_path$|^farmland$|^observer$/;
+var CENTER_TOP = /_fence$|_wall$|^iron_bars$|_pane$|^chain$|^iron_chain$|_chain$|^lantern$/;
+function blockTraits(name, isFullCube) {
+  const kind = kindOf2(name);
+  const full = kind !== K.AIR && isFullCube(name);
+  const conductor = kind !== K.AIR && kind !== K.PISTON && kind !== K.REDSTONE_BLOCK && kind !== K.OBSERVER && (full && !NOT_CONDUCTIVE.test(name) || CONDUCTIVE_ANYWAY.test(name));
+  const support = !NO_SUPPORT.test(name);
+  const sturdyTop = support && (full || STURDY_TOP_ANYWAY.test(name));
+  return {
+    name,
+    kind,
+    conductor,
+    sturdyTop,
+    sturdySide: support && (full || kind === K.PISTON || kind === K.OBSERVER),
+    centerTop: sturdyTop || CENTER_TOP.test(name),
+    signalSource: isSignalSourceKind(kind, name)
+  };
+}
+function stateTraits(base, props) {
+  const n = base.name;
+  if (n.endsWith("_slab")) {
+    if (props.type === "double")
+      return { ...base, conductor: true, sturdyTop: true, sturdySide: true, centerTop: true };
+    if (props.type === "top") return { ...base, sturdyTop: true, centerTop: true };
+  } else if (n.endsWith("_stairs") && props.half === "top") {
+    return { ...base, sturdyTop: true, centerTop: true };
+  } else if (base.kind === K.PISTON && props.extended === "true") {
+    return { ...base, sturdyTop: false, sturdySide: false, centerTop: false };
+  } else if (n === "snow" && props.layers === "8") {
+    return { ...base, sturdyTop: true, centerTop: true };
+  }
+  return base;
+}
+var PUSH = { NORMAL: 0, DESTROY: 1, BLOCK: 2, PUSH_ONLY: 3 };
+var IMMOVABLE = /^(obsidian|crying_obsidian|respawn_anchor|reinforced_deepslate|bedrock|barrier|end_portal_frame|end_portal|end_gateway|nether_portal|command_block|chain_command_block|repeating_command_block|structure_block|jigsaw|light|grindstone|piston_head|moving_piston|enchanting_table|ender_chest|lodestone|anvil|chipped_anvil|damaged_anvil|beacon|conduit|spawner|trial_spawner|vault|test_block|test_instance_block)$/;
+var BLOCK_ENTITY = /(^|_)(chest|furnace|smoker|hopper|dispenser|dropper|barrel|brewing_stand|jukebox|lectern|beehive|bee_nest|campfire|sign|hanging_sign|banner|bed|head|skull|daylight_detector|comparator|enchanting_table|beacon|conduit|bell|crafter|chiseled_bookshelf|decorated_pot|sculk_sensor|sculk_catalyst|sculk_shrieker|calibrated_sculk_sensor|creaking_heart|trial_spawner|vault|spawner|shelf|copper_golem_statue)$/;
+var DESTROY_ON_PUSH = /^(redstone_wire|redstone_torch|redstone_wall_torch|torch|wall_torch|soul_torch|soul_wall_torch|copper_torch|copper_wall_torch|repeater|comparator|lever|tripwire|tripwire_hook|cobweb|cake|candle_cake|dragon_egg|flower_pot|ladder|vine|snow|lily_pad|scaffolding|pumpkin|carved_pumpkin|jack_o_lantern|melon|cocoa|sugar_cane|cactus|bamboo|bamboo_sapling|chorus_plant|chorus_flower|sea_pickle|turtle_egg|sniffer_egg|frogspawn|pointed_dripstone|big_dripleaf|big_dripleaf_stem|small_dripleaf|spore_blossom|glow_lichen|sculk_vein|resin_clump|lantern|soul_lantern|end_rod|fire|soul_fire|water|lava|bubble_column|light|moss_carpet|pale_moss_carpet|pale_hanging_moss|hanging_roots|leaf_litter|wildflowers|bush|firefly_bush|short_dry_grass|tall_dry_grass|cactus_flower|pink_petals|azalea|flowering_azalea|heavy_core|decorated_pot|pitcher_crop|pitcher_plant|torchflower|torchflower_crop|sweet_berry_bush|nether_wart|wheat|carrots|potatoes|beetroots|melon_stem|pumpkin_stem|attached_melon_stem|attached_pumpkin_stem|kelp|kelp_plant|seagrass|tall_seagrass|cave_vines|cave_vines_plant|weeping_vines|weeping_vines_plant|twisting_vines|twisting_vines_plant|structure_void)$/;
+var DESTROY_SUFFIX = /(_button|_pressure_plate|_door|_bed|_banner|_wall_banner|_carpet|_sapling|_flower|_tulip|_orchid|_mushroom|_fungus|_roots|_sprouts|_coral|_coral_fan|_coral_wall_fan|_head|_wall_head|_skull|_wall_skull|_candle|candle|_shulker_box|shulker_box|_sign|_wall_sign|_hanging_sign|_wall_hanging_sign|_pane_dummy|_grass|_fern|_bush|_propagule|_lantern|_amethyst_bud|amethyst_cluster)$/;
+var FLOWERS = /^(dandelion|poppy|blue_orchid|allium|azure_bluet|cornflower|lily_of_the_valley|wither_rose|oxeye_daisy|sunflower|lilac|rose_bush|peony|open_eyeblossom|closed_eyeblossom|fern|large_fern|dead_bush|short_grass|grass|tall_grass|crimson_roots|warped_roots|nether_sprouts|brown_mushroom|red_mushroom|crimson_fungus|warped_fungus|mangrove_propagule)$/;
+function pushReactionOf(name) {
+  if (/_glazed_terracotta$/.test(name)) return PUSH.PUSH_ONLY;
+  if (IMMOVABLE.test(name)) return PUSH.BLOCK;
+  if (DESTROY_ON_PUSH.test(name) || DESTROY_SUFFIX.test(name) || FLOWERS.test(name))
+    return PUSH.DESTROY;
+  return PUSH.NORMAL;
+}
+function hasBlockEntity(name) {
+  return BLOCK_ENTITY.test(name);
+}
+function buttonTicks(name) {
+  return name === "stone_button" || name === "polished_blackstone_button" ? 20 : 30;
+}
+function plateMaxWeight(name) {
+  return name === "heavy_weighted_pressure_plate" ? 150 : 15;
+}
+
+// packages/redstone/src/containers.ts
+var STACK_16 = /^(ender_pearl|snowball|egg|blue_egg|brown_egg|bucket|armor_stand|honey_bottle|written_book|.*_sign|.*_hanging_sign|.*_banner)$/;
+var STACK_1 = /^(.*_(sword|pickaxe|axe|shovel|hoe|helmet|chestplate|leggings|boots|horse_armor|boat|chest_boat|bed|shulker_box|bundle)|.*_bucket|potion|splash_potion|lingering_potion|bow|crossbow|trident|mace|shield|elytra|totem_of_undying|saddle|minecart|.*_minecart|music_disc_.*|enchanted_book|cake|carrot_on_a_stick|warped_fungus_on_a_stick|fishing_rod|flint_and_steel|shears|brush|spyglass|goat_horn|knowledge_book|debug_stick|writable_book|suspicious_stew|mushroom_stew|rabbit_stew|beetroot_soup|wolf_armor|shulker_box)$/;
+function maxStackSize(itemId) {
+  const id = itemId.replace(/^minecraft:/, "");
+  if (STACK_1.test(id)) return 1;
+  if (STACK_16.test(id)) return 16;
+  return 64;
+}
+var SLOTS = [
+  [/^(chest|trapped_chest|barrel|.*shulker_box)$/, 27],
+  [/^hopper$/, 5],
+  [/^(dispenser|dropper|crafter)$/, 9],
+  [/^(furnace|blast_furnace|smoker)$/, 3],
+  [/^brewing_stand$/, 5],
+  [/^decorated_pot$/, 1]
+];
+function containerSlots(name) {
+  for (const [re, n] of SLOTS) if (re.test(name)) return n;
+  return 0;
+}
+function itemsOf(data) {
+  const items = data?.Items;
+  if (!Array.isArray(items)) return [];
+  const out = [];
+  for (const it of items) {
+    if (!it || typeof it !== "object") continue;
+    const r = it;
+    const id = typeof r.id === "string" ? r.id : "";
+    const raw = r.count ?? r.Count ?? 1;
+    const count = typeof raw === "number" ? raw : Number.parseInt(String(raw), 10);
+    if (id && Number.isFinite(count) && count > 0) out.push({ id, count });
+  }
+  return out;
+}
+function containerSignal(items, slots) {
+  if (slots <= 0 || items.length === 0) return 0;
+  let f = 0;
+  for (const it of items) {
+    const max = Math.min(64, maxStackSize(it.id));
+    f = Math.fround(f + Math.fround(Math.min(it.count, max) / max));
+  }
+  f = Math.fround(f / slots);
+  if (f <= 0) return 0;
+  return Math.floor(Math.fround(f * 14)) + 1;
+}
+function stateSignal(name, props) {
+  switch (name) {
+    case "cake":
+      return (7 - Number(props.bites ?? 0)) * 2;
+    case "candle_cake":
+      return 14;
+    case "water_cauldron":
+    case "powder_snow_cauldron":
+      return Number(props.level ?? 0);
+    case "lava_cauldron":
+      return 3;
+    case "cauldron":
+      return props.level !== void 0 ? Number(props.level) : 0;
+    case "composter":
+      return Number(props.level ?? 0);
+    case "end_portal_frame":
+      return props.eye === "true" ? 15 : 0;
+    case "respawn_anchor":
+      return Math.floor(Number(props.charges ?? 0) / 4 * 15);
+    case "beehive":
+    case "bee_nest":
+      return Number(props.honey_level ?? 0);
+    case "jukebox":
+      return props.has_record === "true" ? 1 : 0;
+    case "lectern":
+      return props.has_book === "true" ? 1 : 0;
+    case "chiseled_bookshelf": {
+      let n = 0;
+      for (let i = 0; i < 6; i++) if (props[`slot_${i}_occupied`] === "true") n = i + 1;
+      return n;
+    }
+  }
+  if (name.endsWith("copper_bulb")) return props.lit === "true" ? 15 : 0;
+  return null;
+}
+function hasAnalogOutput(name) {
+  return containerSlots(name) > 0 || stateSignal(name, {}) !== null;
+}
+
+// packages/redstone/src/dirs.ts
+var DOWN = 0;
+var UP = 1;
+var NORTH = 2;
+var SOUTH = 3;
+var WEST = 4;
+var EAST = 5;
+var DIR_NAMES = ["down", "up", "north", "south", "west", "east"];
+var OPPOSITE2 = [UP, DOWN, SOUTH, NORTH, EAST, WEST];
+var ALL = [DOWN, UP, NORTH, SOUTH, WEST, EAST];
+var UPDATE_ORDER = [WEST, EAST, DOWN, UP, NORTH, SOUTH];
+var SHAPE_ORDER = [WEST, EAST, NORTH, SOUTH, DOWN, UP];
+var HORIZONTAL = [NORTH, EAST, SOUTH, WEST];
+function dirOf(name) {
+  switch (name) {
+    case "down":
+      return DOWN;
+    case "up":
+      return UP;
+    case "north":
+      return NORTH;
+    case "south":
+      return SOUTH;
+    case "west":
+      return WEST;
+    case "east":
+      return EAST;
+    default:
+      return -1;
+  }
+}
+function axisOf(d) {
+  return d < 2 ? 1 : d < 4 ? 2 : 0;
+}
+function clockwise(d) {
+  switch (d) {
+    case NORTH:
+      return EAST;
+    case EAST:
+      return SOUTH;
+    case SOUTH:
+      return WEST;
+    case WEST:
+      return NORTH;
+    default:
+      return d;
+  }
+}
+function counterClockwise(d) {
+  switch (d) {
+    case NORTH:
+      return WEST;
+    case WEST:
+      return SOUTH;
+    case SOUTH:
+      return EAST;
+    case EAST:
+      return NORTH;
+    default:
+      return d;
+  }
+}
+
+// packages/redstone/src/states.ts
+var SIDE_NONE = 0;
+var SIDE_SIDE = 1;
+var SIDE_UP = 2;
+var SIDE_NAMES = ["none", "side", "up"];
+var sideOf = (v) => v === "up" ? SIDE_UP : v === "side" ? SIDE_SIDE : 0;
+function blockNameOf2(state) {
+  const noNs = state.includes(":") ? state.slice(state.indexOf(":") + 1) : state;
+  const br = noNs.indexOf("[");
+  return br === -1 ? noNs : noNs.slice(0, br);
+}
+function propsOf2(state) {
+  const br = state.indexOf("[");
+  const out = {};
+  if (br === -1) return out;
+  for (const pair of state.slice(br + 1, -1).split(",")) {
+    const eq = pair.indexOf("=");
+    if (eq > 0) out[pair.slice(0, eq)] = pair.slice(eq + 1);
+  }
+  return out;
+}
+function stringifyState2(name, props) {
+  const keys = Object.keys(props).sort();
+  const base = `minecraft:${name}`;
+  return keys.length ? `${base}[${keys.map((k) => `${k}=${props[k]}`).join(",")}]` : base;
+}
+var StateTable = class {
+  constructor(isFullCube) {
+    this.isFullCube = isFullCube;
+  }
+  infos = [];
+  ids = /* @__PURE__ */ new Map();
+  withCache = [];
+  baseTraits = /* @__PURE__ */ new Map();
+  nameIds = /* @__PURE__ */ new Map();
+  get size() {
+    return this.infos.length;
+  }
+  idOf(state) {
+    const hit = this.ids.get(state);
+    if (hit !== void 0) return hit;
+    const name = blockNameOf2(state);
+    return this.add(stringifyState2(name, propsOf2(state)), name, propsOf2(state));
+  }
+  idOfName(name, props = {}) {
+    return this.idOf(stringifyState2(name, props));
+  }
+  add(state, name, props) {
+    const canonical = this.ids.get(state);
+    if (canonical !== void 0) return canonical;
+    let base = this.baseTraits.get(name);
+    if (!base) {
+      base = blockTraits(name, this.isFullCube);
+      this.baseTraits.set(name, base);
+    }
+    const traits = stateTraits(base, props);
+    const id = this.infos.length;
+    const p = props;
+    const info = {
+      ...traits,
+      id,
+      state,
+      props: p,
+      facing: dirOf(p.facing),
+      face: p.face,
+      power: p.power !== void 0 ? Number(p.power) : -1,
+      powered: p.powered === "true",
+      lit: p.lit === "true",
+      extended: p.extended === "true",
+      open: p.open === "true",
+      triggered: p.triggered === "true",
+      enabled: p.enabled !== "false",
+      locked: p.locked === "true",
+      delay: p.delay !== void 0 ? Number(p.delay) : 1,
+      subtract: p.mode === "subtract",
+      sides: [0, 0, sideOf(p.north), sideOf(p.south), sideOf(p.west), sideOf(p.east)],
+      push: pushReactionOf(name),
+      blockEntity: hasBlockEntity(name),
+      nameId: this.nameIdOf(name)
+    };
+    this.infos.push(info);
+    this.withCache.push(/* @__PURE__ */ new Map());
+    this.ids.set(state, id);
+    return id;
+  }
+  nameIdOf(name) {
+    let n = this.nameIds.get(name);
+    if (n === void 0) {
+      n = this.nameIds.size;
+      this.nameIds.set(name, n);
+    }
+    return n;
+  }
+  info(id) {
+    return this.infos[id];
+  }
+  kind(id) {
+    return this.infos[id].kind;
+  }
+  /** Same block with one or more properties changed (unknown properties are ignored). */
+  with(id, key, value) {
+    const cache = this.withCache[id];
+    const k = `${key}=${value}`;
+    const hit = cache.get(k);
+    if (hit !== void 0) return hit;
+    const info = this.info(id);
+    let out = id;
+    if (key in info.props && info.props[key] !== value) {
+      const props = { ...info.props, [key]: value };
+      out = this.add(stringifyState2(info.name, props), info.name, props);
+    }
+    cache.set(k, out);
+    return out;
+  }
+  withBool(id, key, value) {
+    return this.with(id, key, value ? "true" : "false");
+  }
+  withPower(id, power) {
+    return this.with(id, "power", String(power));
+  }
+  withSides(id, n, e, s, w) {
+    let out = this.with(id, "north", SIDE_NAMES[n]);
+    out = this.with(out, "east", SIDE_NAMES[e]);
+    out = this.with(out, "south", SIDE_NAMES[s]);
+    return this.with(out, "west", SIDE_NAMES[w]);
+  }
+  withSide(id, dir, side) {
+    const key = dir === NORTH ? "north" : dir === SOUTH ? "south" : dir === WEST ? "west" : "east";
+    return this.with(id, key, SIDE_NAMES[side]);
+  }
+};
+
+// packages/redstone/src/version.ts
+function parts(v) {
+  return v.split(".").map((n) => Number.parseInt(n, 10) || 0);
+}
+function versionAtLeast(a, b) {
+  const pa = parts(a);
+  const pb = parts(b);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (d !== 0) return d > 0;
+  }
+  return true;
+}
+function rulesFor(version) {
+  const at = (v) => versionAtLeast(version, v);
+  return {
+    version,
+    incrementalDust: !at("1.13"),
+    liveDustSides: !at("1.16"),
+    tickThisTickCheck: at("1.13"),
+    queuedUpdates: at("1.19"),
+    noteBlockState: at("1.13"),
+    noteBlockImmovable: !at("1.13"),
+    shapeSurvival: at("1.13"),
+    splitBlocks: !at("1.13"),
+    dustOnGlass: at("1.14"),
+    maxScheduledPerTick: at("1.9.1") ? 65536 : 1e3
+  };
+}
+
+// packages/redstone/src/world.ts
+var F = {
+  NEIGHBORS: 1,
+  CLIENTS: 2,
+  INVISIBLE: 4,
+  KNOWN_SHAPE: 16,
+  SUPPRESS_DROPS: 32,
+  MOVED: 64
+};
+var UPDATE_ALL = 3;
+var P_EXTREMELY_HIGH = -3;
+var P_VERY_HIGH = -2;
+var P_HIGH = -1;
+var P_NORMAL = 0;
+var PAD = 2;
+var GLASSY = /(^|_)glass$|^ice$|^sea_lantern$/;
+var MAX_DEPTH = 900;
+var MAX_UPDATES_PER_TICK = 2e7;
+var MODERN_DEFAULTS = {
+  piston_head: { facing: "north", short: "false", type: "normal" },
+  moving_piston: { facing: "north", type: "normal" }
+};
+function heapLess(a, b) {
+  return a.time !== b.time ? a.time < b.time : a.priority !== b.priority ? a.priority < b.priority : a.seq < b.seq;
+}
+var World = class {
+  rules;
+  states;
+  size;
+  offset;
+  /** Array dimensions and where local (0,0,0) sits in them. */
+  W;
+  H;
+  D;
+  mx;
+  my;
+  mz;
+  off;
+  cells;
+  /** Game time: ticks completed. */
+  time = 0;
+  events = [];
+  AIR;
+  defaults;
+  wireSignals = true;
+  handlingTick = false;
+  seq = 0;
+  heap = [];
+  scheduled = /* @__PURE__ */ new Map();
+  runningThisTick = /* @__PURE__ */ new Set();
+  eventQueue = [];
+  eventHead = 0;
+  eventKeys = /* @__PURE__ */ new Set();
+  moving = /* @__PURE__ */ new Map();
+  tickers = [];
+  pendingTickers = [];
+  comparatorOut = /* @__PURE__ */ new Map();
+  inventories = /* @__PURE__ */ new Map();
+  plateEntities = /* @__PURE__ */ new Map();
+  toggles = [];
+  changedMark;
+  changed = [];
+  depth = 0;
+  updates = 0;
+  // queued updates (1.19+)
+  stack = [];
+  added = [];
+  count = 0;
+  constructor(opts) {
+    this.rules = rulesFor(opts.version);
+    this.states = new StateTable(opts.isFullCube);
+    this.defaults = { ...MODERN_DEFAULTS, ...opts.defaults };
+    this.size = [...opts.size];
+    this.offset = opts.offset ?? [0, 64, 0];
+    const margin = Math.max(0, opts.margin ?? 6);
+    const [sx, sy, sz] = opts.size;
+    this.mx = PAD + margin;
+    this.mz = PAD + margin;
+    this.my = PAD + 1;
+    this.W = sx + 2 * this.mx;
+    this.D = sz + 2 * this.mz;
+    this.H = sy + this.my + margin + PAD;
+    const total = this.W * this.H * this.D;
+    this.cells = new Uint16Array(total);
+    this.changedMark = new Uint8Array(total);
+    this.off = [-this.W * this.D, this.W * this.D, -this.W, this.W, -1, 1];
+    this.AIR = this.states.idOf("minecraft:air");
+    const ids = opts.palette.map((s) => this.states.idOf(s));
+    let i = 0;
+    for (let y = 0; y < sy; y++)
+      for (let z3 = 0; z3 < sz; z3++)
+        for (let x = 0; x < sx; x++, i++) {
+          const id = ids[opts.data[i]];
+          if (id !== void 0 && id !== this.AIR) this.cells[this.index(x, y, z3)] = id;
+        }
+    if (opts.ground ?? true) {
+      const stone = this.states.idOf("minecraft:stone");
+      for (let z3 = -margin; z3 < sz + margin; z3++)
+        for (let x = -margin; x < sx + margin; x++) this.cells[this.index(x, -1, z3)] = stone;
+    }
+    if (this.AIR !== 0) throw new Error("air must be state 0");
+    for (const be of opts.blockEntities ?? []) {
+      const p = this.index(...be.pos);
+      const items = itemsOf(be.data);
+      if (items.length) this.inventories.set(p, items);
+      const out = be.data.OutputSignal;
+      if (typeof out === "number") this.comparatorOut.set(p, out);
+    }
+  }
+  // ---------------------------------------------------------------- coordinates
+  /** Cell index of local build coordinates (no bounds check). */
+  index(x, y, z3) {
+    return x + this.mx + this.W * (z3 + this.mz + this.D * (y + this.my));
+  }
+  /** Local build coordinates of a cell. */
+  coords(i) {
+    const x = i % this.W;
+    const t = (i - x) / this.W;
+    const z3 = t % this.D;
+    const y = (t - z3) / this.D;
+    return [x - this.mx, y - this.my, z3 - this.mz];
+  }
+  /** Inside the simulated area (the build, its margin and the ground layer). */
+  valid(i) {
+    if (i < 0 || i >= this.cells.length) return false;
+    const x = i % this.W;
+    const t = (i - x) / this.W;
+    const z3 = t % this.D;
+    const y = (t - z3) / this.D;
+    return x >= PAD && x < this.W - PAD && z3 >= PAD && z3 < this.D - PAD && y >= PAD && y < this.H - PAD;
+  }
+  inBuild(x, y, z3) {
+    return x >= 0 && y >= 0 && z3 >= 0 && x < this.size[0] && y < this.size[1] && z3 < this.size[2];
+  }
+  rel(i, d, n = 1) {
+    return i + this.off[d] * n;
+  }
+  info(i) {
+    return this.states.infos[this.cells[i]];
+  }
+  stateAt(x, y, z3) {
+    return this.info(this.index(x, y, z3)).state;
+  }
+  /** What the viewer should draw: a moving block shows the block it carries, where it lands. */
+  displayState(i) {
+    const m = this.moving.get(i);
+    return m ? this.states.info(m.state).state : this.info(i).state;
+  }
+  /** Java's BlockPos.hashCode at this cell's world position (for HashSet/HashMap order). */
+  hashOf(i) {
+    const [x, y, z3] = this.coords(i);
+    const wx = x + this.offset[0];
+    const wy = y + this.offset[1];
+    const wz = z3 + this.offset[2];
+    return Math.imul(wy + Math.imul(wz, 31) | 0, 31) + wx | 0;
+  }
+  /** Iteration order of a Java HashSet/HashMap (capacity 16) holding these cells. */
+  javaHashOrder(cells, hashes) {
+    const bucket = hashes.map((h) => (h ^ h >>> 16) & 15);
+    const idx = cells.map((_, k) => k);
+    idx.sort((a, b) => bucket[a] - bucket[b] || a - b);
+    return idx.map((k) => cells[k]);
+  }
+  // ---------------------------------------------------------------- change tracking
+  markChanged(i) {
+    if (this.changedMark[i]) return;
+    this.changedMark[i] = 1;
+    this.changed.push(i);
+  }
+  /** Cells whose state (or displayed state) changed since the last call. */
+  takeChanges() {
+    const out = this.changed;
+    this.changed = [];
+    for (const i of out) this.changedMark[i] = 0;
+    return out;
+  }
+  event(type, i, detail) {
+    this.events.push({ tick: this.time, type, pos: this.coords(i), ...detail ? { detail } : {} });
+    if (this.events.length > 5e3) this.events.splice(0, 1e3);
+  }
+  // ---------------------------------------------------------------- Level.setBlock
+  setBlock(i, id, flags, rec = 512) {
+    if (!this.valid(i)) {
+      if (id !== this.AIR) this.event("left-area", i, this.states.info(id).name);
+      return false;
+    }
+    const oldId = this.cells[i];
+    if (oldId === id) return false;
+    this.cells[i] = id;
+    this.markChanged(i);
+    const oldI = this.states.info(oldId);
+    const newI = this.states.info(id);
+    const moved = (flags & F.MOVED) !== 0;
+    this.onRemove(i, oldI, newI, moved);
+    if (this.info(i).nameId !== newI.nameId) return false;
+    this.onPlace(i, newI, oldI, moved);
+    if (this.cells[i] !== id) return true;
+    if (flags & F.NEIGHBORS) {
+      this.updateNeighborsAt(i, oldI.nameId);
+      if (hasAnalogOutput(newI.name)) this.updateNeighbourForOutputSignal(i, newI.nameId);
+    }
+    if (!(flags & F.KNOWN_SHAPE) && rec > 0) {
+      const f = flags & ~(F.NEIGHBORS | F.SUPPRESS_DROPS);
+      this.updateIndirectNeighbourShapes(oldI, i, f, rec - 1);
+      this.updateNeighbourShapes(newI, i, f, rec - 1);
+      this.updateIndirectNeighbourShapes(newI, i, f, rec - 1);
+    }
+    return true;
+  }
+  /** Level.removeBlock: the fluid left behind (always air here). */
+  removeBlock(i) {
+    return this.setBlock(i, this.AIR, UPDATE_ALL);
+  }
+  /** Level.destroyBlock: the block drops as an item. */
+  destroyBlock(i, rec = 512) {
+    const info = this.info(i);
+    if (info.kind === K.AIR) return false;
+    this.event("break", i, info.name);
+    return this.setBlock(i, this.AIR, UPDATE_ALL, rec);
+  }
+  updateOrDestroy(oldId, newId, i, flags, rec) {
+    if (newId === oldId) return;
+    if (this.states.kind(newId) === K.AIR) this.destroyBlock(i, rec);
+    else this.setBlock(i, newId, flags & ~F.SUPPRESS_DROPS, rec);
+  }
+  // ---------------------------------------------------------------- neighbour updates
+  guard() {
+    if (++this.updates > MAX_UPDATES_PER_TICK) {
+      throw new Error("More than 20 million block updates in one tick: the circuit loops.");
+    }
+    return true;
+  }
+  /** Level.neighborChanged. */
+  neighborChanged(i, src, from) {
+    if (this.rules.queuedUpdates) {
+      this.addAndRun(this.job(0, i, src, from));
+      return;
+    }
+    if (this.depth > MAX_DEPTH) {
+      this.event("suppressed", i);
+      return;
+    }
+    this.depth++;
+    try {
+      this.runNeighborChanged(i, src, from);
+    } finally {
+      this.depth--;
+    }
+  }
+  /** Level.updateNeighborsAt: the six neighbours in the game's order. */
+  updateNeighborsAt(i, src, skip = -1) {
+    if (this.rules.queuedUpdates) {
+      this.addAndRun(this.job(1, i, src, i, skip));
+      return;
+    }
+    for (const d of UPDATE_ORDER) if (d !== skip) this.neighborChanged(this.rel(i, d), src, i);
+  }
+  neighborShapeChanged(dir, neighborState, i, from, flags, rec) {
+    if (this.rules.queuedUpdates) {
+      const j = this.job(2, i, 0, from);
+      j.dir = dir;
+      j.state = neighborState;
+      j.flags = flags;
+      j.rec = rec;
+      this.addAndRun(j);
+      return;
+    }
+    this.runShapeUpdate(dir, neighborState, i, from, flags, rec);
+  }
+  job(kind, pos, src, from, skip = -1) {
+    return {
+      kind,
+      pos,
+      src,
+      from,
+      idx: kind === 1 && UPDATE_ORDER[0] === skip ? 1 : 0,
+      skip,
+      dir: 0,
+      state: 0,
+      flags: 0,
+      rec: 0
+    };
+  }
+  /** CollectingNeighborUpdater.addAndRun. */
+  addAndRun(job) {
+    const nested = this.count > 0;
+    this.count++;
+    if (nested) this.added.push(job);
+    else this.stack.push(job);
+    if (nested) return;
+    try {
+      while (this.stack.length > 0 || this.added.length > 0) {
+        for (let k = this.added.length - 1; k >= 0; k--) this.stack.push(this.added[k]);
+        this.added.length = 0;
+        const top = this.stack[this.stack.length - 1];
+        while (this.added.length === 0) {
+          if (!this.runJobStep(top)) {
+            this.stack.pop();
+            break;
+          }
+        }
+      }
+    } finally {
+      this.stack.length = 0;
+      this.added.length = 0;
+      this.count = 0;
+    }
+  }
+  /** Run one step of a job; false when it has none left. */
+  runJobStep(j) {
+    if (j.kind === 0) {
+      this.runNeighborChanged(j.pos, j.src, j.from);
+      return false;
+    }
+    if (j.kind === 2) {
+      this.runShapeUpdate(j.dir, j.state, j.pos, j.from, j.flags, j.rec);
+      return false;
+    }
+    const d = UPDATE_ORDER[j.idx++];
+    this.runNeighborChanged(this.rel(j.pos, d), j.src, j.pos);
+    if (j.idx < 6 && UPDATE_ORDER[j.idx] === j.skip) j.idx++;
+    return j.idx < 6;
+  }
+  runShapeUpdate(dir, neighborState, i, from, flags, rec) {
+    this.guard();
+    const old = this.cells[i];
+    const next = this.updateShape(i, old, dir, neighborState, from);
+    this.updateOrDestroy(old, next, i, flags, rec);
+  }
+  /** BlockState.updateNeighbourShapes. */
+  updateNeighbourShapes(info, i, flags, rec) {
+    for (const d of SHAPE_ORDER)
+      this.neighborShapeChanged(OPPOSITE2[d], info.id, this.rel(i, d), i, flags, rec);
+  }
+  /** Only dust has indirect shape updates: wires one block up or down its connections. */
+  updateIndirectNeighbourShapes(info, i, flags, rec) {
+    if (info.kind !== K.WIRE) return;
+    for (const d of HORIZONTAL) {
+      if (info.sides[d] === SIDE_NONE) continue;
+      const n = this.rel(i, d);
+      if (this.info(n).kind === K.WIRE) continue;
+      const below = this.rel(n, DOWN);
+      if (this.info(below).kind === K.WIRE) {
+        const p = this.rel(below, OPPOSITE2[d]);
+        this.neighborShapeChanged(OPPOSITE2[d], this.cells[p], below, p, flags, rec);
+      }
+      const above = this.rel(n, UP);
+      if (this.info(above).kind === K.WIRE) {
+        const p = this.rel(above, OPPOSITE2[d]);
+        this.neighborShapeChanged(OPPOSITE2[d], this.cells[p], above, p, flags, rec);
+      }
+    }
+  }
+  /** Block.updateFromNeighbourShapes. */
+  updateFromNeighbourShapes(id, i) {
+    let s = id;
+    for (const d of SHAPE_ORDER) {
+      const n = this.rel(i, d);
+      s = this.updateShape(i, s, d, this.cells[n], n);
+    }
+    return s;
+  }
+  /** Level.updateNeighbourForOutputSignal: comparators next to (or behind a block from) it. */
+  updateNeighbourForOutputSignal(i, src) {
+    for (const d of HORIZONTAL) {
+      let n = this.rel(i, d);
+      let ni = this.info(n);
+      if (ni.kind === K.COMPARATOR) this.neighborChanged(n, src, i);
+      else if (ni.conductor) {
+        n = this.rel(n, d);
+        ni = this.info(n);
+        if (ni.kind === K.COMPARATOR) this.neighborChanged(n, src, i);
+      }
+    }
+  }
+  // ---------------------------------------------------------------- scheduled ticks
+  tickKey(i, type) {
+    return i * 4096 + type;
+  }
+  /** Level.scheduleTick; `type` is the block asking (default: the block there now). */
+  scheduleTick(i, delay, priority = P_NORMAL, type = this.info(i).nameId) {
+    const key = this.tickKey(i, type);
+    if (this.scheduled.has(key)) return;
+    const t = { time: this.time + delay, priority, seq: this.seq++, pos: i, type };
+    this.scheduled.set(key, t);
+    const h = this.heap;
+    h.push(t);
+    let k = h.length - 1;
+    while (k > 0) {
+      const parent = k - 1 >> 1;
+      if (!heapLess(t, h[parent])) break;
+      h[k] = h[parent];
+      k = parent;
+    }
+    h[k] = t;
+  }
+  popTick() {
+    const h = this.heap;
+    const top = h[0];
+    const last = h.pop();
+    if (!top || !last || h.length === 0) return top;
+    let k = 0;
+    const n = h.length;
+    for (; ; ) {
+      const l = 2 * k + 1;
+      if (l >= n) break;
+      const r = l + 1;
+      const c = r < n && heapLess(h[r], h[l]) ? r : l;
+      if (!heapLess(h[c], last)) break;
+      h[k] = h[c];
+      k = c;
+    }
+    h[k] = last;
+    return top;
+  }
+  hasScheduledTick(i) {
+    return this.scheduled.has(this.tickKey(i, this.info(i).nameId));
+  }
+  willTickThisTick(i) {
+    return this.runningThisTick.has(this.tickKey(i, this.info(i).nameId));
+  }
+  runScheduledTicks() {
+    this.handlingTick = true;
+    try {
+      const run = [];
+      while (this.heap.length > 0 && this.heap[0].time <= this.time) {
+        if (run.length >= this.rules.maxScheduledPerTick) break;
+        const t = this.popTick();
+        const key = this.tickKey(t.pos, t.type);
+        this.scheduled.delete(key);
+        this.runningThisTick.add(key);
+        run.push(t);
+      }
+      for (const t of run) {
+        this.runningThisTick.delete(this.tickKey(t.pos, t.type));
+        if (this.info(t.pos).nameId === t.type) this.tickBlock(t.pos);
+      }
+    } finally {
+      this.handlingTick = false;
+      this.runningThisTick.clear();
+    }
+  }
+  // ---------------------------------------------------------------- block events
+  blockEvent(i, b0, b1) {
+    const type = this.info(i).nameId;
+    const key = `${i},${type},${b0},${b1}`;
+    if (this.eventKeys.has(key)) return;
+    this.eventKeys.add(key);
+    this.eventQueue.push({ pos: i, type, b0, b1 });
+  }
+  runBlockEvents() {
+    while (this.eventHead < this.eventQueue.length) {
+      const e = this.eventQueue[this.eventHead++];
+      this.eventKeys.delete(`${e.pos},${e.type},${e.b0},${e.b1}`);
+      if (this.info(e.pos).nameId === e.type) this.triggerEvent(e.pos, e.b0, e.b1);
+    }
+    this.eventQueue = [];
+    this.eventHead = 0;
+  }
+  // ---------------------------------------------------------------- the game tick
+  /** One game tick: scheduled ticks, block events, entities (pressure plates), block entities. */
+  tick() {
+    this.time++;
+    this.updates = 0;
+    this.runScheduledTicks();
+    this.runBlockEvents();
+    this.tickEntities();
+    this.tickBlockEntities();
+  }
+  run(ticks) {
+    for (let t = 0; t < ticks; t++) this.tick();
+  }
+  /** Nothing scheduled, queued or moving: the circuit rests until something changes. */
+  get idle() {
+    if (this.heap.length > 0 || this.eventQueue.length > this.eventHead) return false;
+    if (this.tickers.some((m) => !m.removed) || this.pendingTickers.some((m) => !m.removed))
+      return false;
+    for (const n of this.plateEntities.values()) if (n > 0) return false;
+    return true;
+  }
+  /** Ticks until the next scheduled tick (Infinity if none). */
+  get nextTickIn() {
+    const t = this.heap[0];
+    return t ? Math.max(0, t.time - this.time) : Infinity;
+  }
+  tickEntities() {
+    for (const [i, n] of this.plateEntities) {
+      if (n <= 0) continue;
+      const info = this.info(i);
+      if (info.kind !== K.PLATE && info.kind !== K.WEIGHTED_PLATE) continue;
+      if (this.plateSignal(info) === 0) this.checkPlate(i, info, 0);
+    }
+  }
+  tickBlockEntities() {
+    if (this.pendingTickers.length) {
+      this.tickers.push(...this.pendingTickers);
+      this.pendingTickers = [];
+    }
+    const list2 = this.tickers;
+    for (let k = 0; k < list2.length; k++) {
+      const m = list2[k];
+      if (m.removed) continue;
+      if (this.info(m.pos).kind !== K.MOVING_PISTON) {
+        m.removed = true;
+        if (this.moving.get(m.pos) === m) this.moving.delete(m.pos);
+        continue;
+      }
+      this.tickMoving(m);
+    }
+    this.tickers = list2.filter((m) => !m.removed);
+  }
+  // ---------------------------------------------------------------- signals
+  /** BlockState.getSignal: what the block at i gives a neighbour that looks at it along d. */
+  signal(i, info, d) {
+    switch (info.kind) {
+      case K.WIRE:
+        return this.wireSignal(i, info, d);
+      case K.TORCH:
+        return info.lit && d !== UP ? 15 : 0;
+      case K.WALL_TORCH:
+        return info.lit && info.facing !== d ? 15 : 0;
+      case K.REPEATER:
+        return info.powered && info.facing === d ? 15 : 0;
+      case K.COMPARATOR:
+        return info.powered && info.facing === d ? this.comparatorOut.get(i) ?? 0 : 0;
+      case K.LEVER:
+      case K.BUTTON:
+      case K.LIGHTNING_ROD:
+      case K.LECTERN:
+      case K.TRIPWIRE_HOOK:
+        return info.powered ? 15 : 0;
+      case K.PLATE:
+      case K.WEIGHTED_PLATE:
+        return this.plateSignal(info);
+      case K.REDSTONE_BLOCK:
+        return 15;
+      case K.OBSERVER:
+        return info.powered && info.facing === d ? 15 : 0;
+      case K.TARGET:
+      case K.DAYLIGHT:
+      case K.SCULK_SENSOR:
+        return Math.max(0, info.power);
+      case K.RAIL:
+        return info.name === "detector_rail" && info.powered ? 15 : 0;
+      default:
+        return 0;
+    }
+  }
+  /** BlockState.getDirectSignal (strong power). */
+  directSignal(i, info, d) {
+    switch (info.kind) {
+      case K.WIRE:
+        return this.wireSignal(i, info, d);
+      case K.TORCH:
+      case K.WALL_TORCH:
+        return d === DOWN ? this.signal(i, info, d) : 0;
+      case K.REPEATER:
+      case K.COMPARATOR:
+      case K.OBSERVER:
+        return this.signal(i, info, d);
+      case K.LEVER:
+      case K.BUTTON:
+        return info.powered && connectedDir(info) === d ? 15 : 0;
+      case K.PLATE:
+      case K.WEIGHTED_PLATE:
+        return d === UP ? this.plateSignal(info) : 0;
+      case K.LIGHTNING_ROD:
+      case K.TRIPWIRE_HOOK:
+        return info.powered && info.facing === d ? 15 : 0;
+      case K.LECTERN:
+        return d === UP && info.powered ? 15 : 0;
+      case K.SCULK_SENSOR:
+        return d === UP ? Math.max(0, info.power) : 0;
+      case K.RAIL:
+        return d === UP && info.name === "detector_rail" && info.powered ? 15 : 0;
+      default:
+        return 0;
+    }
+  }
+  /** Level.getSignal: a conductor passes on the strong power it receives. */
+  levelSignal(i, d) {
+    const info = this.info(i);
+    const s = this.signal(i, info, d);
+    return info.conductor ? Math.max(s, this.directSignalTo(i)) : s;
+  }
+  /** Level.getDirectSignalTo: strongest strong power into a block. */
+  directSignalTo(i) {
+    let best = 0;
+    for (const d of ALL) {
+      const n = this.rel(i, d);
+      const s = this.directSignal(n, this.info(n), d);
+      if (s > best) {
+        best = s;
+        if (best >= 15) return best;
+      }
+    }
+    return best;
+  }
+  hasNeighborSignal(i) {
+    for (const d of ALL) if (this.levelSignal(this.rel(i, d), d) > 0) return true;
+    return false;
+  }
+  bestNeighborSignal(i) {
+    let best = 0;
+    for (const d of ALL) {
+      const s = this.levelSignal(this.rel(i, d), d);
+      if (s > best) {
+        best = s;
+        if (best >= 15) return best;
+      }
+    }
+    return best;
+  }
+  /**
+   * Power a block receives from its neighbours, without passing through other blocks: what a
+   * redstone lamp or piston placed there would see. For probes.
+   */
+  receivedPower(i) {
+    let best = this.directSignalTo(i);
+    for (const d of ALL) {
+      const n = this.rel(i, d);
+      best = Math.max(best, this.signal(n, this.info(n), d));
+    }
+    return best;
+  }
+  isSignalSource(info) {
+    return info.kind === K.WIRE ? this.wireSignals : info.signalSource;
+  }
+  // ---------------------------------------------------------------- redstone dust
+  wireSignal(i, info, d) {
+    if (!this.wireSignals || d === DOWN || info.power <= 0) return 0;
+    if (d === UP) return info.power;
+    if (this.rules.liveDustSides) return this.legacyWirePowers(i, d) ? info.power : 0;
+    return info.sides[OPPOSITE2[d]] !== SIDE_NONE ? info.power : 0;
+  }
+  /** 1.8–1.15 BlockRedstoneWire.getWeakPower: sides worked out from the neighbours. */
+  legacyWirePowers(i, d) {
+    let set = 0;
+    for (const e of HORIZONTAL) if (this.legacyPowerSourceAt(i, e)) set |= 1 << e;
+    if (set === 0) return true;
+    return (set & 1 << d) !== 0 && (set & 1 << counterClockwise(d)) === 0 && (set & 1 << clockwise(d)) === 0;
+  }
+  legacyPowerSourceAt(i, side) {
+    const b = this.rel(i, side);
+    const bi = this.info(b);
+    const aboveConducts = this.info(this.rel(i, UP)).conductor;
+    if (!aboveConducts && bi.conductor && this.info(this.rel(b, UP)).kind === K.WIRE) return true;
+    if (this.wireConnectsTo(bi, side)) return true;
+    if (bi.kind === K.REPEATER && bi.powered && bi.facing === side) return true;
+    return !bi.conductor && this.info(this.rel(b, DOWN)).kind === K.WIRE;
+  }
+  /** RedStoneWireBlock.shouldConnectTo (dir -1 = null). */
+  wireConnectsTo(info, dir) {
+    if (info.kind === K.WIRE) return true;
+    if (info.kind === K.REPEATER)
+      return dir >= 0 && (info.facing === dir || info.facing === OPPOSITE2[dir]);
+    if (info.kind === K.OBSERVER) return dir === info.facing;
+    return dir >= 0 && this.isSignalSource(info);
+  }
+  canHoldWire(info) {
+    if (!this.rules.dustOnGlass && GLASSY.test(info.name)) return false;
+    return info.sturdyTop || info.kind === K.HOPPER;
+  }
+  connectingSide(i, dir, canConnectUp) {
+    const n = this.rel(i, dir);
+    const ni = this.info(n);
+    if (canConnectUp && this.canHoldWire(ni) && this.wireConnectsTo(this.info(this.rel(n, UP)), -1))
+      return ni.sturdySide ? SIDE_UP : SIDE_SIDE;
+    if (!this.wireConnectsTo(ni, dir) && (ni.conductor || !this.wireConnectsTo(this.info(this.rel(n, DOWN)), -1)))
+      return SIDE_NONE;
+    return SIDE_SIDE;
+  }
+  /** RedStoneWireBlock.getConnectionState (1.16+), or plain connections before 1.16. */
+  wireConnectionState(i, id) {
+    const st = this.states;
+    const info = st.info(id);
+    const canUp = !this.info(this.rel(i, UP)).conductor;
+    let n = this.connectingSide(i, NORTH, canUp);
+    let e = this.connectingSide(i, EAST, canUp);
+    let s = this.connectingSide(i, SOUTH, canUp);
+    let w = this.connectingSide(i, WEST, canUp);
+    if (this.rules.liveDustSides) return st.withSides(id, n, e, s, w);
+    const wasDot = isDot(info);
+    if (wasDot && !n && !e && !s && !w) return st.withSides(id, 0, 0, 0, 0);
+    const noNS = !n && !s;
+    const noEW = !e && !w;
+    if (!w && noNS) w = SIDE_SIDE;
+    if (!e && noNS) e = SIDE_SIDE;
+    if (!n && noEW) n = SIDE_SIDE;
+    if (!s && noEW) s = SIDE_SIDE;
+    return st.withSides(id, n, e, s, w);
+  }
+  wireUpdateShape(i, id, dir) {
+    if (dir === DOWN) return id;
+    if (dir === UP || this.rules.liveDustSides) return this.wireConnectionState(i, id);
+    const info = this.states.info(id);
+    const side = this.connectingSide(i, dir, !this.info(this.rel(i, UP)).conductor);
+    if (side !== SIDE_NONE === (info.sides[dir] !== SIDE_NONE) && !isCross(info))
+      return this.states.withSide(id, dir, side);
+    const cross = this.states.withSides(id, SIDE_SIDE, SIDE_SIDE, SIDE_SIDE, SIDE_SIDE);
+    return this.wireConnectionState(i, this.states.withSide(cross, dir, side));
+  }
+  wirePower(info) {
+    return info.kind === K.WIRE ? info.power : 0;
+  }
+  wireTarget(i) {
+    this.wireSignals = false;
+    const received = this.bestNeighborSignal(i);
+    this.wireSignals = true;
+    let j = 0;
+    if (received < 15) {
+      const aboveConducts = this.info(this.rel(i, UP)).conductor;
+      for (const d of HORIZONTAL) {
+        const n = this.rel(i, d);
+        const ni = this.info(n);
+        j = Math.max(j, this.wirePower(ni));
+        if (ni.conductor && !aboveConducts)
+          j = Math.max(j, this.wirePower(this.info(this.rel(n, UP))));
+        else if (!ni.conductor) j = Math.max(j, this.wirePower(this.info(this.rel(n, DOWN))));
+      }
+    }
+    return Math.max(received, j - 1);
+  }
+  /** 1.8–1.12 calculateCurrentChanges: one level at a time while depowering. */
+  legacyWireTarget(i, info) {
+    let j = info.power;
+    this.wireSignals = false;
+    const k = this.bestNeighborSignal(i);
+    this.wireSignals = true;
+    if (k > 0 && k > j - 1) j = k;
+    let l = 0;
+    const aboveConducts = this.info(this.rel(i, UP)).conductor;
+    for (const d of HORIZONTAL) {
+      const n = this.rel(i, d);
+      const ni = this.info(n);
+      l = Math.max(l, this.wirePower(ni));
+      if (ni.conductor && !aboveConducts)
+        l = Math.max(l, this.wirePower(this.info(this.rel(n, UP))));
+      else if (!ni.conductor) l = Math.max(l, this.wirePower(this.info(this.rel(n, DOWN))));
+    }
+    if (l > j) j = l - 1;
+    else if (j > 0) j--;
+    else j = 0;
+    if (k > j - 1) j = k;
+    return j;
+  }
+  /** RedStoneWireBlock.updatePowerStrength. */
+  updateWirePower(i, id) {
+    const info = this.states.info(id);
+    const target = this.rules.incrementalDust ? this.legacyWireTarget(i, info) : this.wireTarget(i);
+    if (info.power === target) return;
+    if (this.cells[i] === id) this.setBlock(i, this.states.withPower(id, target), F.CLIENTS);
+    const h = this.hashOf(i);
+    const cells = [i];
+    const hashes = [h];
+    const dh = [-31, 31, -961, 961, -1, 1];
+    for (const d of ALL) {
+      cells.push(this.rel(i, d));
+      hashes.push(h + dh[d] | 0);
+    }
+    const src = info.nameId;
+    for (const p of this.javaHashOrder(cells, hashes)) this.updateNeighborsAt(p, src);
+  }
+  updateNeighborsOfNeighboringWires(i, src) {
+    for (const d of HORIZONTAL) this.checkCornerChangeAt(this.rel(i, d), src);
+    for (const d of HORIZONTAL) {
+      const n = this.rel(i, d);
+      this.checkCornerChangeAt(this.rel(n, this.info(n).conductor ? UP : DOWN), src);
+    }
+  }
+  checkCornerChangeAt(i, src) {
+    if (this.info(i).kind !== K.WIRE) return;
+    this.updateNeighborsAt(i, src);
+    for (const d of ALL) this.updateNeighborsAt(this.rel(i, d), src);
+  }
+  // ---------------------------------------------------------------- survival
+  canSurvive(i, info) {
+    switch (info.kind) {
+      case K.WIRE:
+        return this.canHoldWire(this.info(this.rel(i, DOWN)));
+      case K.REPEATER:
+      case K.COMPARATOR:
+      case K.RAIL:
+      case K.POWERED_RAIL:
+        return this.info(this.rel(i, DOWN)).sturdyTop;
+      case K.TORCH:
+        return this.info(this.rel(i, DOWN)).centerTop;
+      case K.PLATE:
+      case K.WEIGHTED_PLATE:
+        return this.info(this.rel(i, DOWN)).centerTop;
+      case K.WALL_TORCH:
+        return this.info(this.rel(i, OPPOSITE2[info.facing])).sturdySide;
+      case K.LEVER:
+      case K.BUTTON: {
+        const c = connectedDir(info);
+        const support = this.info(this.rel(i, OPPOSITE2[c]));
+        return c === UP ? support.sturdyTop : support.sturdySide;
+      }
+      case K.PISTON_HEAD: {
+        const base = this.info(this.rel(i, OPPOSITE2[info.facing]));
+        return this.isFittingBase(info, base) || base.kind === K.MOVING_PISTON && base.facing === info.facing;
+      }
+      case K.DOOR:
+        return info.props.half === "upper" ? this.info(this.rel(i, DOWN)).kind === K.DOOR : this.info(this.rel(i, DOWN)).sturdyTop;
+      default:
+        return true;
+    }
+  }
+  isFittingBase(head, base) {
+    const sticky = head.props.type === "sticky";
+    return base.kind === K.PISTON && base.name === "sticky_piston" === sticky && base.facing === head.facing && base.extended;
+  }
+  // ---------------------------------------------------------------- shape updates
+  /** BlockState.updateShape: dir points from this block to the neighbour that changed. */
+  updateShape(i, id, dir, neighbor, _from) {
+    const info = this.states.info(id);
+    const surviveOnShape = this.rules.shapeSurvival;
+    switch (info.kind) {
+      case K.WIRE:
+        return this.wireUpdateShape(i, id, dir);
+      case K.REPEATER:
+        if (dir >= NORTH && axisOf(dir) !== axisOf(info.facing))
+          return this.states.withBool(id, "locked", this.isLocked(i, info));
+        return id;
+      case K.OBSERVER:
+        if (info.facing === dir && !info.powered && !this.hasScheduledTickOf(i, info.nameId))
+          this.scheduleTick(i, 2, P_NORMAL, info.nameId);
+        return id;
+      case K.TORCH:
+      case K.PLATE:
+      case K.WEIGHTED_PLATE:
+        return surviveOnShape && dir === DOWN && !this.canSurvive(i, info) ? this.AIR : id;
+      case K.WALL_TORCH:
+        return surviveOnShape && dir === OPPOSITE2[info.facing] && !this.canSurvive(i, info) ? this.AIR : id;
+      case K.LEVER:
+      case K.BUTTON:
+        return surviveOnShape && OPPOSITE2[connectedDir(info)] === dir && !this.canSurvive(i, info) ? this.AIR : id;
+      case K.PISTON_HEAD:
+        return dir === OPPOSITE2[info.facing] && !this.canSurvive(i, info) ? this.AIR : id;
+      case K.DOOR: {
+        const lower = info.props.half === "lower";
+        if (dir === UP || dir === DOWN) {
+          if (lower === (dir === UP)) {
+            const ni = this.states.info(neighbor);
+            if (ni.nameId === info.nameId && ni.props.half !== info.props.half) {
+              let s = this.states.with(id, "open", ni.props.open ?? "false");
+              s = this.states.with(s, "powered", ni.props.powered ?? "false");
+              s = this.states.with(s, "facing", ni.props.facing ?? "north");
+              return this.states.with(s, "hinge", ni.props.hinge ?? "left");
+            }
+            return this.AIR;
+          }
+          if (lower && dir === DOWN && !this.canSurvive(i, info)) return this.AIR;
+        }
+        return id;
+      }
+      default:
+        return id;
+    }
+  }
+  // ---------------------------------------------------------------- onPlace / onRemove
+  onPlace(i, info, old, moved) {
+    const sameBlock = old.nameId === info.nameId;
+    switch (info.kind) {
+      case K.WIRE:
+        if (!sameBlock) {
+          this.updateWirePower(i, info.id);
+          this.updateNeighborsAt(this.rel(i, UP), info.nameId);
+          this.updateNeighborsAt(this.rel(i, DOWN), info.nameId);
+          this.updateNeighborsOfNeighboringWires(i, info.nameId);
+        }
+        return;
+      case K.TORCH:
+      case K.WALL_TORCH:
+        if (this.rules.splitBlocks && (!info.lit || sameBlock && old.lit)) return;
+        for (const d of ALL) this.updateNeighborsAt(this.rel(i, d), info.nameId);
+        return;
+      case K.REPEATER:
+      case K.COMPARATOR:
+        if (info.kind === K.COMPARATOR && !this.comparatorOut.has(i)) this.comparatorOut.set(i, 0);
+        this.updateDiodeFront(i, info);
+        return;
+      case K.OBSERVER:
+        if (!sameBlock && info.powered && !this.hasScheduledTick(i)) {
+          const s = this.states.withBool(info.id, "powered", false);
+          this.setBlock(i, s, F.CLIENTS | F.KNOWN_SHAPE);
+          this.updateObserverFront(i, this.states.info(s));
+        }
+        return;
+      case K.PISTON:
+        if (!sameBlock && !this.moving.has(i)) this.checkIfExtend(i, info);
+        return;
+      case K.TNT:
+        if (!sameBlock && this.hasNeighborSignal(i)) this.primeTnt(i);
+        return;
+      case K.HOPPER:
+        if (!sameBlock) this.checkHopper(i, info);
+        return;
+      case K.COPPER_BULB:
+        if (!sameBlock) this.checkBulb(i, info);
+        return;
+      case K.POWERED_RAIL:
+        if (!sameBlock && !moved) this.neighborChanged(i, info.nameId, i);
+        return;
+      default:
+        return;
+    }
+  }
+  onRemove(i, old, info, moved) {
+    const sameBlock = old.nameId === info.nameId;
+    switch (old.kind) {
+      case K.WIRE:
+        if (!moved && !sameBlock) {
+          for (const d of ALL) this.updateNeighborsAt(this.rel(i, d), old.nameId);
+          this.updateWirePower(i, old.id);
+          this.updateNeighborsOfNeighboringWires(i, old.nameId);
+        }
+        return;
+      case K.TORCH:
+      case K.WALL_TORCH:
+        if (moved) return;
+        if (this.rules.splitBlocks && (!old.lit || sameBlock && info.lit)) return;
+        for (const d of ALL) this.updateNeighborsAt(this.rel(i, d), old.nameId);
+        return;
+      case K.REPEATER:
+      case K.COMPARATOR:
+        if (!moved && !sameBlock) {
+          this.comparatorOut.delete(i);
+          this.updateDiodeFront(i, old);
+        } else if (this.rules.splitBlocks && old.powered && !info.powered) {
+          for (const d of ALL) this.updateNeighborsAt(this.rel(i, d), old.nameId);
+        }
+        return;
+      case K.OBSERVER:
+        if (!sameBlock && old.powered && this.hasScheduledTickOf(i, old.nameId))
+          this.updateObserverFront(
+            i,
+            this.states.info(this.states.withBool(old.id, "powered", false))
+          );
+        return;
+      case K.LEVER:
+      case K.BUTTON:
+        if (!moved && !sameBlock && old.powered) this.updateAttachedNeighbours(i, old);
+        return;
+      case K.PLATE:
+      case K.WEIGHTED_PLATE:
+        if (!moved && !sameBlock && this.plateSignal(old) > 0) {
+          this.updateNeighborsAt(i, old.nameId);
+          this.updateNeighborsAt(this.rel(i, DOWN), old.nameId);
+        }
+        if (!sameBlock) this.plateEntities.delete(i);
+        return;
+      case K.PISTON_HEAD:
+        if (!sameBlock) {
+          const b = this.rel(i, OPPOSITE2[old.facing]);
+          if (this.isFittingBase(old, this.info(b))) this.destroyBlock(b);
+        }
+        return;
+      case K.MOVING_PISTON:
+        if (!sameBlock) {
+          const m = this.moving.get(i);
+          if (m) this.finalTick(m);
+        }
+        return;
+      case K.POWERED_RAIL:
+        if (!moved && !sameBlock) {
+          if (/^ascending/.test(old.props.shape ?? ""))
+            this.updateNeighborsAt(this.rel(i, UP), old.nameId);
+          this.updateNeighborsAt(i, old.nameId);
+          this.updateNeighborsAt(this.rel(i, DOWN), old.nameId);
+        }
+        return;
+      default:
+        if (!sameBlock) this.inventories.delete(i);
+        return;
+    }
+  }
+  hasScheduledTickOf(i, nameId) {
+    return this.scheduled.has(this.tickKey(i, nameId));
+  }
+  // ---------------------------------------------------------------- neighbour changed
+  runNeighborChanged(i, src, from) {
+    this.guard();
+    const info = this.info(i);
+    switch (info.kind) {
+      case K.AIR:
+      case K.SOLID:
+        return;
+      case K.WIRE:
+        if (this.canSurvive(i, info)) this.updateWirePower(i, info.id);
+        else this.destroyBlock(i);
+        return;
+      case K.TORCH:
+      case K.WALL_TORCH:
+        if (!this.rules.shapeSurvival && !this.canSurvive(i, info)) {
+          this.destroyBlock(i);
+          return;
+        }
+        if (info.lit === this.torchHasSignal(i, info) && !(this.rules.tickThisTickCheck && this.willTickThisTick(i)))
+          this.scheduleTick(i, 2);
+        return;
+      case K.REPEATER:
+      case K.COMPARATOR:
+        if (!this.canSurvive(i, info)) {
+          this.destroyBlock(i);
+          for (const d of ALL) this.updateNeighborsAt(this.rel(i, d), info.nameId);
+          return;
+        }
+        if (info.kind === K.REPEATER) this.repeaterCheck(i, info);
+        else this.comparatorCheck(i, info);
+        return;
+      case K.LEVER:
+      case K.BUTTON:
+      case K.PLATE:
+      case K.WEIGHTED_PLATE:
+        if (!this.rules.shapeSurvival && !this.canSurvive(i, info)) this.destroyBlock(i);
+        return;
+      case K.LAMP: {
+        const powered = this.hasNeighborSignal(i);
+        if (info.lit !== powered) {
+          if (info.lit) this.scheduleTick(i, 4);
+          else this.setBlock(i, this.states.withBool(info.id, "lit", true), F.CLIENTS);
+        }
+        return;
+      }
+      case K.PISTON:
+        this.checkIfExtend(i, info);
+        return;
+      case K.PISTON_HEAD:
+        if (this.canSurvive(i, info))
+          this.neighborChanged(this.rel(i, OPPOSITE2[info.facing]), src, from);
+        return;
+      case K.NOTE_BLOCK: {
+        const powered = this.hasNeighborSignal(i);
+        if (powered !== info.powered) {
+          if (powered && this.info(this.rel(i, UP)).kind === K.AIR) this.blockEvent(i, 0, 0);
+          const s = this.states.withBool(info.id, "powered", powered);
+          this.setBlock(i, s, this.rules.noteBlockState ? UPDATE_ALL : F.CLIENTS | F.KNOWN_SHAPE);
+        }
+        return;
+      }
+      case K.DOOR: {
+        const other = this.rel(i, info.props.half === "lower" ? UP : DOWN);
+        const powered = this.hasNeighborSignal(i) || this.hasNeighborSignal(other);
+        if (src !== info.nameId && powered !== info.powered) {
+          let s = this.states.withBool(info.id, "powered", powered);
+          s = this.states.withBool(s, "open", powered);
+          this.setBlock(i, s, F.CLIENTS);
+        }
+        return;
+      }
+      case K.TRAPDOOR: {
+        const powered = this.hasNeighborSignal(i);
+        if (powered !== info.powered) {
+          let s = this.states.withBool(info.id, "powered", powered);
+          if (info.open !== powered) s = this.states.withBool(s, "open", powered);
+          this.setBlock(i, s, F.CLIENTS);
+        }
+        return;
+      }
+      case K.FENCE_GATE: {
+        const powered = this.hasNeighborSignal(i);
+        if (powered !== info.powered) {
+          let s = this.states.withBool(info.id, "powered", powered);
+          s = this.states.withBool(s, "open", powered);
+          this.setBlock(i, s, F.CLIENTS);
+        }
+        return;
+      }
+      case K.DISPENSER:
+      case K.CRAFTER: {
+        const powered = this.hasNeighborSignal(i) || info.kind === K.DISPENSER && this.hasNeighborSignal(this.rel(i, UP));
+        if (powered && !info.triggered) {
+          this.scheduleTick(i, 4);
+          this.setBlock(i, this.states.withBool(info.id, "triggered", true), F.INVISIBLE);
+        } else if (!powered && info.triggered) {
+          let s = this.states.withBool(info.id, "triggered", false);
+          if (info.kind === K.CRAFTER) s = this.states.withBool(s, "crafting", false);
+          this.setBlock(i, s, F.INVISIBLE);
+        }
+        return;
+      }
+      case K.HOPPER:
+        this.checkHopper(i, info);
+        return;
+      case K.COPPER_BULB:
+        this.checkBulb(i, info);
+        return;
+      case K.TNT:
+        if (this.hasNeighborSignal(i)) this.primeTnt(i);
+        return;
+      case K.POWERED_RAIL:
+        if (!this.canSurvive(i, info)) {
+          this.destroyBlock(i);
+          return;
+        }
+        this.updatePoweredRail(i, info);
+        return;
+      case K.RAIL:
+        if (!this.canSurvive(i, info)) this.destroyBlock(i);
+        return;
+      case K.BELL: {
+        const powered = this.hasNeighborSignal(i);
+        if (powered !== info.powered) {
+          if (powered) this.event("bell", i);
+          this.setBlock(i, this.states.withBool(info.id, "powered", powered), UPDATE_ALL);
+        }
+        return;
+      }
+      default:
+        return;
+    }
+  }
+  // ---------------------------------------------------------------- scheduled tick handlers
+  tickBlock(i) {
+    const info = this.info(i);
+    switch (info.kind) {
+      case K.TORCH:
+      case K.WALL_TORCH:
+        this.tickTorch(i, info);
+        return;
+      case K.REPEATER:
+        this.tickRepeater(i, info);
+        return;
+      case K.COMPARATOR:
+        this.refreshComparator(i, info);
+        return;
+      case K.LAMP:
+        if (info.lit && !this.hasNeighborSignal(i))
+          this.setBlock(i, this.states.withBool(info.id, "lit", false), F.CLIENTS);
+        return;
+      case K.OBSERVER:
+        if (info.powered)
+          this.setBlock(i, this.states.withBool(info.id, "powered", false), F.CLIENTS);
+        else {
+          this.setBlock(i, this.states.withBool(info.id, "powered", true), F.CLIENTS);
+          this.scheduleTick(i, 2);
+        }
+        this.updateObserverFront(i, info);
+        return;
+      case K.BUTTON:
+        if (info.powered) {
+          this.setBlock(i, this.states.withBool(info.id, "powered", false), UPDATE_ALL);
+          this.updateAttachedNeighbours(i, info);
+        }
+        return;
+      case K.PLATE:
+      case K.WEIGHTED_PLATE: {
+        const s = this.plateSignal(info);
+        if (s > 0) this.checkPlate(i, info, s);
+        return;
+      }
+      case K.TARGET:
+        if (info.power > 0) this.setBlock(i, this.states.withPower(info.id, 0), UPDATE_ALL);
+        return;
+      case K.DISPENSER:
+        this.event("dispense", i, info.name);
+        return;
+      case K.CRAFTER:
+        this.event("craft", i);
+        return;
+      default:
+        return;
+    }
+  }
+  // ---------------------------------------------------------------- torches
+  torchHasSignal(i, info) {
+    if (info.kind === K.TORCH) return this.levelSignal(this.rel(i, DOWN), DOWN) > 0;
+    const d = OPPOSITE2[info.facing];
+    return this.levelSignal(this.rel(i, d), d) > 0;
+  }
+  /** RedstoneTorchBlock.isToggledTooFrequently: 8 toggles within 60 ticks burns it out. */
+  toggledTooOften(i, add) {
+    if (add) this.toggles.push({ pos: i, when: this.time });
+    let n = 0;
+    for (const t of this.toggles) if (t.pos === i && ++n >= 8) return true;
+    return false;
+  }
+  tickTorch(i, info) {
+    const powered = this.torchHasSignal(i, info);
+    while (this.toggles.length > 0 && this.time - this.toggles[0].when > 60)
+      this.toggles.shift();
+    if (info.lit) {
+      if (powered) {
+        this.setBlock(i, this.states.withBool(info.id, "lit", false), UPDATE_ALL);
+        if (this.toggledTooOften(i, true)) {
+          this.event("burnout", i);
+          this.scheduleTick(i, 160);
+        }
+      }
+    } else if (!powered && !this.toggledTooOften(i, false)) {
+      this.setBlock(i, this.states.withBool(info.id, "lit", true), UPDATE_ALL);
+    }
+  }
+  // ---------------------------------------------------------------- repeaters and comparators
+  isDiode(info) {
+    return info.kind === K.REPEATER || info.kind === K.COMPARATOR;
+  }
+  /** DiodeBlock.getInputSignal (+ ComparatorBlock's container reading). */
+  diodeInput(i, info) {
+    const d = info.facing;
+    const b = this.rel(i, d);
+    let s = this.levelSignal(b, d);
+    const bi = this.info(b);
+    if (s < 15 && bi.kind === K.WIRE) s = Math.max(s, bi.power);
+    if (info.kind !== K.COMPARATOR) return s;
+    const analog = this.analogSignal(b, bi);
+    if (analog !== null) return analog;
+    if (s < 15 && bi.conductor) {
+      const b2 = this.rel(b, d);
+      const a2 = this.analogSignal(b2, this.info(b2));
+      if (a2 !== null) return a2;
+    }
+    return s;
+  }
+  /** Strongest side input: diodes only for repeaters (locking), any source for comparators. */
+  sideInput(i, info) {
+    const diodesOnly = info.kind === K.REPEATER;
+    let best = 0;
+    for (const d of [clockwise(info.facing), counterClockwise(info.facing)]) {
+      const n = this.rel(i, d);
+      const ni = this.info(n);
+      let s = 0;
+      if (diodesOnly) s = this.isDiode(ni) ? this.directSignal(n, ni, d) : 0;
+      else if (ni.kind === K.REDSTONE_BLOCK) s = 15;
+      else if (ni.kind === K.WIRE) s = ni.power;
+      else if (this.isSignalSource(ni)) s = this.directSignal(n, ni, d);
+      best = Math.max(best, s);
+    }
+    return best;
+  }
+  isLocked(i, info) {
+    return info.kind === K.REPEATER && this.sideInput(i, info) > 0;
+  }
+  /** The diode in front isn't pointing back at this one. */
+  shouldPrioritize(i, info) {
+    const d = OPPOSITE2[info.facing];
+    const front = this.info(this.rel(i, d));
+    return this.isDiode(front) && front.facing !== d;
+  }
+  repeaterCheck(i, info) {
+    if (this.isLocked(i, info)) return;
+    const on = this.diodeInput(i, info) > 0;
+    if (info.powered === on) return;
+    if (this.rules.tickThisTickCheck && this.willTickThisTick(i)) return;
+    const p = this.shouldPrioritize(i, info) ? P_EXTREMELY_HIGH : info.powered ? P_VERY_HIGH : P_HIGH;
+    this.scheduleTick(i, info.delay * 2, p);
+  }
+  tickRepeater(i, info) {
+    if (this.isLocked(i, info)) return;
+    const on = this.diodeInput(i, info) > 0;
+    if (info.powered && !on)
+      this.setBlock(i, this.states.withBool(info.id, "powered", false), F.CLIENTS);
+    else if (!info.powered) {
+      this.setBlock(i, this.states.withBool(info.id, "powered", true), F.CLIENTS);
+      if (!on) this.scheduleTick(i, info.delay * 2, P_VERY_HIGH);
+    }
+  }
+  comparatorOutput(i, info) {
+    const input = this.diodeInput(i, info);
+    if (input === 0) return 0;
+    const side = this.sideInput(i, info);
+    if (side > input) return 0;
+    return info.subtract ? input - side : input;
+  }
+  comparatorOn(i, info) {
+    const input = this.diodeInput(i, info);
+    if (input === 0) return false;
+    const side = this.sideInput(i, info);
+    return input > side || input === side && !info.subtract;
+  }
+  comparatorCheck(i, info) {
+    if (this.rules.tickThisTickCheck && this.willTickThisTick(i)) return;
+    const out = this.comparatorOutput(i, info);
+    const cur = this.comparatorOut.get(i) ?? 0;
+    if (out !== cur || info.powered !== this.comparatorOn(i, info)) {
+      this.scheduleTick(i, 2, this.shouldPrioritize(i, info) ? P_HIGH : P_NORMAL);
+    }
+  }
+  refreshComparator(i, info) {
+    const out = this.comparatorOutput(i, info);
+    const cur = this.comparatorOut.get(i) ?? 0;
+    this.comparatorOut.set(i, out);
+    if (cur === out && info.subtract) return;
+    const on = this.comparatorOn(i, info);
+    if (info.powered && !on)
+      this.setBlock(i, this.states.withBool(info.id, "powered", false), F.CLIENTS);
+    else if (!info.powered && on)
+      this.setBlock(i, this.states.withBool(info.id, "powered", true), F.CLIENTS);
+    this.updateDiodeFront(i, info);
+  }
+  /** DiodeBlock.updateNeighborsInFront. */
+  updateDiodeFront(i, info) {
+    const d = info.facing;
+    const front = this.rel(i, OPPOSITE2[d]);
+    this.neighborChanged(front, info.nameId, i);
+    this.updateNeighborsAt(front, info.nameId, d);
+  }
+  /** Signal a comparator reads from a container or a block with a fill level, or null. */
+  analogSignal(i, info) {
+    const fromState = stateSignal(info.name, info.props);
+    if (fromState !== null) return fromState;
+    const slots = containerSlots(info.name);
+    if (slots === 0) return null;
+    const items = [...this.inventories.get(i) ?? []];
+    let total = slots;
+    if ((info.name === "chest" || info.name === "trapped_chest") && info.props.type !== "single") {
+      const d = info.props.type === "left" ? clockwise(info.facing) : counterClockwise(info.facing);
+      const other = this.rel(i, d);
+      const oi = this.info(other);
+      if (oi.nameId === info.nameId && oi.props.type !== "single") {
+        items.push(...this.inventories.get(other) ?? []);
+        total += slots;
+      }
+    }
+    return containerSignal(items, total);
+  }
+  // ---------------------------------------------------------------- observers
+  updateObserverFront(i, info) {
+    const d = info.facing;
+    const back = this.rel(i, OPPOSITE2[d]);
+    this.neighborChanged(back, info.nameId, i);
+    this.updateNeighborsAt(back, info.nameId, d);
+  }
+  // ---------------------------------------------------------------- levers, buttons, plates
+  updateAttachedNeighbours(i, info) {
+    this.updateNeighborsAt(i, info.nameId);
+    this.updateNeighborsAt(this.rel(i, OPPOSITE2[connectedDir(info)]), info.nameId);
+  }
+  plateSignal(info) {
+    return info.kind === K.WEIGHTED_PLATE ? Math.max(0, info.power) : info.powered ? 15 : 0;
+  }
+  plateTarget(i, info) {
+    const n = this.plateEntities.get(i) ?? 0;
+    if (n <= 0) return 0;
+    if (info.kind === K.PLATE) return 15;
+    const max = plateMaxWeight(info.name);
+    return Math.ceil(Math.min(max, n) / max * 15);
+  }
+  /** BasePressurePlateBlock.checkPressed. */
+  checkPlate(i, info, current) {
+    const target = this.plateTarget(i, info);
+    if (current !== target) {
+      const s = info.kind === K.WEIGHTED_PLATE ? this.states.withPower(info.id, target) : this.states.withBool(info.id, "powered", target > 0);
+      this.setBlock(i, s, F.CLIENTS);
+      this.updateNeighborsAt(i, info.nameId);
+      this.updateNeighborsAt(this.rel(i, DOWN), info.nameId);
+    }
+    if (target > 0) this.scheduleTick(i, info.kind === K.WEIGHTED_PLATE ? 10 : 20);
+  }
+  // ---------------------------------------------------------------- other consumers
+  checkHopper(i, info) {
+    const enabled = !this.hasNeighborSignal(i);
+    if (enabled !== info.enabled)
+      this.setBlock(i, this.states.withBool(info.id, "enabled", enabled), F.INVISIBLE);
+  }
+  checkBulb(i, info) {
+    const powered = this.hasNeighborSignal(i);
+    if (powered === info.powered) return;
+    let s = info.id;
+    if (!info.powered) s = this.states.withBool(s, "lit", !info.lit);
+    this.setBlock(i, this.states.withBool(s, "powered", powered), UPDATE_ALL);
+  }
+  primeTnt(i) {
+    this.event("tnt", i, "primed: explodes 80 ticks later (explosions are not simulated)");
+    this.setBlock(i, this.AIR, UPDATE_ALL);
+  }
+  /** PoweredRailBlock: power travels up to 8 rails from a powered one. */
+  updatePoweredRail(i, info) {
+    const powered = this.hasNeighborSignal(i) || this.findRailSignal(i, info, true, 0) || this.findRailSignal(i, info, false, 0);
+    if (powered === info.powered) return;
+    this.setBlock(i, this.states.withBool(info.id, "powered", powered), UPDATE_ALL);
+    this.updateNeighborsAt(this.rel(i, DOWN), info.nameId);
+    if (/^ascending/.test(info.props.shape ?? ""))
+      this.updateNeighborsAt(this.rel(i, UP), info.nameId);
+  }
+  findRailSignal(i, info, forward, depth) {
+    if (depth >= 8) return false;
+    let dx = 0;
+    let dy = 0;
+    let dz = 0;
+    let flat = true;
+    let shape = info.props.shape ?? "north_south";
+    switch (shape) {
+      case "north_south":
+        dz = forward ? 1 : -1;
+        break;
+      case "east_west":
+        dx = forward ? -1 : 1;
+        break;
+      case "ascending_east":
+        if (forward) dx = -1;
+        else {
+          dx = 1;
+          dy = 1;
+          flat = false;
+        }
+        shape = "east_west";
+        break;
+      case "ascending_west":
+        if (forward) {
+          dx = -1;
+          dy = 1;
+          flat = false;
+        } else dx = 1;
+        shape = "east_west";
+        break;
+      case "ascending_north":
+        if (forward) dz = 1;
+        else {
+          dz = -1;
+          dy = 1;
+          flat = false;
+        }
+        shape = "north_south";
+        break;
+      case "ascending_south":
+        if (forward) {
+          dz = 1;
+          dy = 1;
+          flat = false;
+        } else dz = -1;
+        shape = "north_south";
+        break;
+    }
+    const n = i + dx + this.W * dz + this.W * this.D * dy;
+    if (this.sameRailWithPower(n, info, forward, depth, shape)) return true;
+    return flat && this.sameRailWithPower(this.rel(n, DOWN), info, forward, depth, shape);
+  }
+  sameRailWithPower(i, rail, forward, depth, shape) {
+    const info = this.info(i);
+    if (info.nameId !== rail.nameId) return false;
+    const s = info.props.shape ?? "";
+    if (shape === "east_west" && /north|south/.test(s)) return false;
+    if (shape === "north_south" && /east|west/.test(s)) return false;
+    if (!info.powered) return false;
+    if (this.hasNeighborSignal(i)) return true;
+    return this.findRailSignal(i, info, forward, depth + 1);
+  }
+  // ---------------------------------------------------------------- pistons
+  /** PistonBaseBlock.isPushable; the simulated area's edge stands in for the world limits. */
+  isPushable(i, move, allowDestroy, pistonFacing) {
+    if (!this.valid(i) || !this.valid(this.rel(i, move))) return false;
+    const info = this.info(i);
+    if (info.kind === K.AIR) return true;
+    if (info.kind === K.PISTON) {
+      if (info.extended) return false;
+    } else {
+      if (info.push === PUSH.BLOCK) return false;
+      if (info.push === PUSH.DESTROY) return allowDestroy;
+      if (info.push === PUSH.PUSH_ONLY) return move === pistonFacing;
+    }
+    if (this.rules.noteBlockImmovable && info.kind === K.NOTE_BLOCK) return false;
+    return !info.blockEntity;
+  }
+  pistonPowered(i, facing) {
+    for (const d of ALL) if (d !== facing && this.levelSignal(this.rel(i, d), d) > 0) return true;
+    if (this.levelSignal(i, DOWN) > 0) return true;
+    const above = this.rel(i, UP);
+    for (const d of ALL) if (d !== DOWN && this.levelSignal(this.rel(above, d), d) > 0) return true;
+    return false;
+  }
+  checkIfExtend(i, info) {
+    const d = info.facing;
+    const powered = this.pistonPowered(i, d);
+    if (powered && !info.extended) {
+      if (new PistonStructure(this, i, d, true).resolve()) this.blockEvent(i, 0, d);
+    } else if (!powered && info.extended) {
+      const p2 = this.rel(i, d, 2);
+      const s2 = this.info(p2);
+      let type = 1;
+      if (s2.kind === K.MOVING_PISTON && s2.facing === d) {
+        const m = this.moving.get(p2);
+        if (m && m.extending && (m.progressO < 0.5 || this.time === m.lastTicked || this.handlingTick))
+          type = 2;
+      }
+      this.blockEvent(i, type, d);
+    }
+  }
+  triggerEvent(i, type, param) {
+    const info = this.info(i);
+    if (info.kind === K.NOTE_BLOCK) {
+      this.event("note", i, `${info.props.instrument ?? "harp"} ${info.props.note ?? "0"}`);
+      return;
+    }
+    if (info.kind !== K.PISTON) return;
+    const d = info.facing;
+    const sticky = info.name === "sticky_piston";
+    const extended = this.states.withBool(info.id, "extended", true);
+    const powered = this.pistonPowered(i, d);
+    if (powered && (type === 1 || type === 2)) {
+      this.setBlock(i, extended, F.CLIENTS);
+      return;
+    }
+    if (!powered && type === 0) return;
+    if (type === 0) {
+      if (!this.moveBlocks(i, d, true, sticky)) return;
+      this.setBlock(i, extended, F.MOVED | UPDATE_ALL);
+      return;
+    }
+    const front = this.rel(i, d);
+    const inFront = this.moving.get(front);
+    if (inFront) this.finalTick(inFront);
+    const movingId = this.newState("moving_piston", {
+      facing: DIR_NAMES[d],
+      type: sticky ? "sticky" : "normal"
+    });
+    this.setBlock(i, movingId, F.INVISIBLE | F.KNOWN_SHAPE);
+    const base = this.newState(
+      info.name,
+      {
+        facing: DIR_NAMES[param & 7],
+        extended: "false"
+      },
+      info.id
+    );
+    this.addMoving(i, base, d, false, true);
+    this.updateNeighborsAt(i, this.states.info(movingId).nameId);
+    this.updateNeighbourShapes(this.states.info(movingId), i, F.CLIENTS, 512);
+    if (sticky) {
+      const p2 = this.rel(i, d, 2);
+      const s3 = this.info(p2);
+      let spat = false;
+      if (s3.kind === K.MOVING_PISTON) {
+        const m = this.moving.get(p2);
+        if (m && m.dir === d && m.extending) {
+          this.finalTick(m);
+          spat = true;
+        }
+      }
+      if (!spat) {
+        if (type !== 1 || s3.kind === K.AIR || !this.isPushable(p2, OPPOSITE2[d], false, d) || s3.push !== PUSH.NORMAL && s3.kind !== K.PISTON)
+          this.removeBlock(front);
+        else this.moveBlocks(i, d, false, sticky);
+      }
+    } else {
+      this.removeBlock(front);
+    }
+  }
+  /** A state the engine creates, with this version's properties for that block. */
+  newState(name, props, like) {
+    const base = like !== void 0 ? { ...this.states.info(like).props } : { ...this.defaults[name] ?? {} };
+    for (const [k, v] of Object.entries(props)) if (k in base) base[k] = v;
+    return this.states.idOfName(name, base);
+  }
+  moveBlocks(i, dir, extending, sticky) {
+    const front = this.rel(i, dir);
+    if (!extending && this.info(front).kind === K.PISTON_HEAD)
+      this.setBlock(front, this.AIR, F.INVISIBLE | F.KNOWN_SHAPE);
+    const res = new PistonStructure(this, i, dir, extending);
+    if (!res.resolve()) return false;
+    const toPush = res.toPush;
+    const toDestroy = res.toDestroy;
+    const map = /* @__PURE__ */ new Map();
+    const moved = [];
+    for (const p of toPush) {
+      moved.push(this.cells[p]);
+      map.set(p, this.cells[p]);
+    }
+    const order = [...map.keys()];
+    const blockStates = [];
+    const dir2 = extending ? dir : OPPOSITE2[dir];
+    for (let k = toDestroy.length - 1; k >= 0; k--) {
+      const p = toDestroy[k];
+      const s = this.cells[p];
+      this.event("break", p, this.states.info(s).name);
+      this.setBlock(p, this.AIR, F.CLIENTS | F.KNOWN_SHAPE);
+      blockStates.push(s);
+    }
+    const movingNormal = this.newState("moving_piston", { facing: DIR_NAMES[dir] });
+    for (let k = toPush.length - 1; k >= 0; k--) {
+      const from = toPush[k];
+      const s = this.cells[from];
+      const p = this.rel(from, dir2);
+      map.delete(p);
+      this.setBlock(p, movingNormal, F.MOVED | F.INVISIBLE);
+      this.addMoving(p, moved[k], dir, extending, false);
+      blockStates.push(s);
+    }
+    if (extending) {
+      const type = sticky ? "sticky" : "normal";
+      const head = this.newState("piston_head", {
+        facing: DIR_NAMES[dir],
+        type,
+        short: "false"
+      });
+      const movingHead = this.newState("moving_piston", { facing: DIR_NAMES[dir], type });
+      map.delete(front);
+      this.setBlock(front, movingHead, F.MOVED | F.INVISIBLE);
+      this.addMoving(front, head, dir, true, true);
+    }
+    const left = order.filter((p) => map.has(p));
+    const leftOrder = this.javaHashOrder(
+      left,
+      left.map((p) => this.hashOf(p))
+    );
+    for (const p of leftOrder) this.setBlock(p, this.AIR, F.MOVED | F.KNOWN_SHAPE | F.CLIENTS);
+    const airInfo = this.states.info(this.AIR);
+    for (const p of leftOrder) {
+      this.updateIndirectNeighbourShapes(this.states.info(map.get(p)), p, F.CLIENTS, 512);
+      this.updateNeighbourShapes(airInfo, p, F.CLIENTS, 512);
+    }
+    let j = 0;
+    for (let k = toDestroy.length - 1; k >= 0; k--) {
+      const s = this.states.info(blockStates[j++]);
+      const p = toDestroy[k];
+      this.updateIndirectNeighbourShapes(s, p, F.CLIENTS, 512);
+      this.updateNeighborsAt(p, s.nameId);
+    }
+    for (let k = toPush.length - 1; k >= 0; k--)
+      this.updateNeighborsAt(
+        toPush[k],
+        this.states.info(blockStates[j++]).nameId
+      );
+    if (extending) this.updateNeighborsAt(front, this.states.nameIdOf("piston_head"));
+    return true;
+  }
+  addMoving(i, state, dir, extending, source) {
+    const old = this.moving.get(i);
+    if (old) old.removed = true;
+    const m = {
+      pos: i,
+      state,
+      dir,
+      extending,
+      source,
+      progress: 0,
+      progressO: 0,
+      lastTicked: 0,
+      removed: false
+    };
+    this.moving.set(i, m);
+    this.pendingTickers.push(m);
+    this.markChanged(i);
+  }
+  removeMoving(m) {
+    m.removed = true;
+    if (this.moving.get(m.pos) === m) this.moving.delete(m.pos);
+  }
+  /** PistonMovingBlockEntity.tick. */
+  tickMoving(m) {
+    m.lastTicked = this.time;
+    m.progressO = m.progress;
+    if (m.progressO >= 1) {
+      this.removeMoving(m);
+      if (this.info(m.pos).kind === K.MOVING_PISTON) {
+        const s = this.updateFromNeighbourShapes(m.state, m.pos);
+        if (this.states.kind(s) === K.AIR) {
+          this.setBlock(m.pos, m.state, F.MOVED | F.KNOWN_SHAPE | F.INVISIBLE);
+          this.updateOrDestroy(m.state, s, m.pos, UPDATE_ALL, 512);
+        } else {
+          this.setBlock(m.pos, s, F.MOVED | UPDATE_ALL);
+          this.neighborChanged(m.pos, this.states.info(s).nameId, m.pos);
+        }
+      }
+      this.markChanged(m.pos);
+    } else {
+      m.progress = Math.min(1, m.progress + 0.5);
+    }
+  }
+  /** PistonMovingBlockEntity.finalTick: land the block now. */
+  finalTick(m) {
+    if (m.progressO >= 1) return;
+    m.progress = 1;
+    m.progressO = 1;
+    this.removeMoving(m);
+    if (this.info(m.pos).kind === K.MOVING_PISTON) {
+      const s = m.source ? this.AIR : this.updateFromNeighbourShapes(m.state, m.pos);
+      this.setBlock(m.pos, s, UPDATE_ALL);
+      this.neighborChanged(m.pos, this.states.info(s).nameId, m.pos);
+    }
+    this.markChanged(m.pos);
+  }
+  // ---------------------------------------------------------------- player actions
+  /** Right-click: flip a lever, press a button, cycle a repeater, toggle a comparator or door. */
+  use(i) {
+    const info = this.info(i);
+    switch (info.kind) {
+      case K.LEVER: {
+        const s = this.states.withBool(info.id, "powered", !info.powered);
+        this.setBlock(i, s, UPDATE_ALL);
+        this.updateAttachedNeighbours(i, this.states.info(s));
+        return true;
+      }
+      case K.BUTTON: {
+        if (info.powered) return false;
+        const s = this.states.withBool(info.id, "powered", true);
+        this.setBlock(i, s, UPDATE_ALL);
+        this.updateAttachedNeighbours(i, this.states.info(s));
+        this.scheduleTick(i, buttonTicks(info.name));
+        return true;
+      }
+      case K.REPEATER:
+        this.setBlock(
+          i,
+          this.states.with(info.id, "delay", String(info.delay % 4 + 1)),
+          UPDATE_ALL
+        );
+        return true;
+      case K.COMPARATOR: {
+        const s = this.states.with(info.id, "mode", info.subtract ? "compare" : "subtract");
+        this.setBlock(i, s, F.CLIENTS);
+        this.refreshComparator(i, this.states.info(s));
+        return true;
+      }
+      case K.DOOR:
+      case K.TRAPDOOR:
+      case K.FENCE_GATE:
+        if (/^iron_/.test(info.name)) return false;
+        this.setBlock(i, this.states.withBool(info.id, "open", !info.open), F.CLIENTS | 8);
+        return true;
+      case K.NOTE_BLOCK:
+        this.blockEvent(i, 0, 0);
+        return true;
+      default:
+        return false;
+    }
+  }
+  /** Entities standing on a pressure plate (weighted plates count them). */
+  setPlateEntities(i, count) {
+    this.plateEntities.set(i, Math.max(0, count));
+  }
+  plateEntitiesAt(i) {
+    return this.plateEntities.get(i) ?? 0;
+  }
+  /** A projectile hits a target block: power for `ticks` (arrows 20, others 8). */
+  hitTarget(i, power, ticks = 20) {
+    const info = this.info(i);
+    if (info.kind !== K.TARGET) return;
+    this.setBlock(i, this.states.withPower(info.id, Math.max(0, Math.min(15, power))), UPDATE_ALL);
+    this.scheduleTick(i, ticks);
+  }
+  /** Set the power level a daylight detector, sculk sensor or similar block gives off. */
+  setPower(i, power) {
+    const info = this.info(i);
+    if (info.power < 0) return;
+    this.setBlock(i, this.states.withPower(info.id, Math.max(0, Math.min(15, power))), UPDATE_ALL);
+  }
+  /** Place a block like a player (diodes start their tick if powered). */
+  place(i, state) {
+    const id = this.states.idOf(state);
+    this.setBlock(i, id, UPDATE_ALL | 8);
+    const info = this.states.info(id);
+    if (this.isDiode(info) && this.cells[i] === id) {
+      const on = info.kind === K.COMPARATOR ? this.comparatorOn(i, info) : this.diodeInput(i, info) > 0;
+      if (on) this.scheduleTick(i, 1);
+    }
+  }
+  /** Break a block like a player. */
+  breakBlock(i) {
+    this.destroyBlock(i);
+  }
+  /**
+   * Bring the build to life as if every component had just been placed: refresh dust shapes,
+   * repeater locks and door halves, update every component once, then run until nothing is
+   * scheduled (or maxTicks pass). Returns true when the circuit came to rest.
+   */
+  powerOn(maxTicks = 1200) {
+    const comps = [];
+    for (let i = 0; i < this.cells.length; i++) {
+      const k = this.info(i).kind;
+      if (k !== K.AIR && k !== K.SOLID) comps.push(i);
+    }
+    for (const i of comps) {
+      const id = this.cells[i];
+      const k = this.states.kind(id);
+      if (k !== K.WIRE && k !== K.REPEATER && k !== K.DOOR) continue;
+      const s = this.updateFromNeighbourShapes(id, i);
+      if (s !== id && this.states.kind(s) !== K.AIR) {
+        this.cells[i] = s;
+        this.markChanged(i);
+      }
+    }
+    for (const i of comps) {
+      const info = this.info(i);
+      if (info.kind === K.COMPARATOR && !this.comparatorOut.has(i))
+        this.comparatorOut.set(i, info.powered ? this.comparatorOutput(i, info) : 0);
+      if (info.kind === K.AIR) continue;
+      this.updates = 0;
+      this.neighborChanged(i, info.nameId, i);
+    }
+    return this.settle(maxTicks);
+  }
+  /** Run until idle; false if still busy after maxTicks (a clock, or a long delay line). */
+  settle(maxTicks) {
+    for (let t = 0; t < maxTicks; t++) {
+      if (this.idle) return true;
+      this.tick();
+    }
+    return this.idle;
+  }
+  /** Everything that changes while the world runs, to rewind it (test cases start alike). */
+  snapshot() {
+    const copyMoving = (m) => ({ ...m });
+    const moving = /* @__PURE__ */ new Map();
+    for (const m of [...this.moving.values(), ...this.tickers, ...this.pendingTickers])
+      if (!moving.has(m)) moving.set(m, copyMoving(m));
+    return {
+      cells: this.cells.slice(),
+      time: this.time,
+      seq: this.seq,
+      heap: this.heap.map((t) => ({ ...t })),
+      events: this.eventQueue.slice(this.eventHead).map((e) => ({ ...e })),
+      moving: [...this.moving.entries()].map(([k, m]) => [k, moving.get(m)]),
+      tickers: this.tickers.map((m) => moving.get(m)),
+      pending: this.pendingTickers.map((m) => moving.get(m)),
+      comparatorOut: new Map(this.comparatorOut),
+      inventories: new Map(this.inventories),
+      plateEntities: new Map(this.plateEntities),
+      toggles: this.toggles.map((t) => ({ ...t })),
+      eventLog: this.events.length
+    };
+  }
+  restore(s) {
+    for (let i = 0; i < this.cells.length; i++)
+      if (this.cells[i] !== s.cells[i]) this.markChanged(i);
+    this.cells.set(s.cells);
+    this.time = s.time;
+    this.seq = s.seq;
+    const copies = /* @__PURE__ */ new Map();
+    const copy = (m) => {
+      let c = copies.get(m);
+      if (!c) copies.set(m, c = { ...m });
+      return c;
+    };
+    this.heap = s.heap.map((t) => ({ ...t }));
+    this.scheduled.clear();
+    for (const t of this.heap) this.scheduled.set(this.tickKey(t.pos, t.type), t);
+    this.eventQueue = s.events.map((e) => ({ ...e }));
+    this.eventHead = 0;
+    this.eventKeys.clear();
+    for (const e of this.eventQueue) this.eventKeys.add(`${e.pos},${e.type},${e.b0},${e.b1}`);
+    for (const k of this.moving.keys()) this.markChanged(k);
+    this.moving.clear();
+    for (const [k, m] of s.moving) {
+      this.moving.set(k, copy(m));
+      this.markChanged(k);
+    }
+    this.tickers = s.tickers.map(copy);
+    this.pendingTickers = s.pending.map(copy);
+    this.comparatorOut.clear();
+    for (const [k, v] of s.comparatorOut) this.comparatorOut.set(k, v);
+    this.inventories.clear();
+    for (const [k, v] of s.inventories) this.inventories.set(k, v);
+    this.plateEntities.clear();
+    for (const [k, v] of s.plateEntities) this.plateEntities.set(k, v);
+    this.toggles = s.toggles.map((t) => ({ ...t }));
+    this.events.length = Math.min(this.events.length, s.eventLog);
+  }
+  /**
+   * The state a player placing this block would get from its neighbours: dust connections (a
+   * lone dust is a cross from 1.16), a repeater's lock. Other blocks are returned unchanged.
+   */
+  placementState(i) {
+    const info = this.info(i);
+    if (info.kind === K.WIRE)
+      return this.wireConnectionState(i, this.states.withSides(info.id, 1, 1, 1, 1));
+    if (info.kind === K.REPEATER)
+      return this.states.withBool(info.id, "locked", this.isLocked(i, info));
+    return info.id;
+  }
+  /** Comparator output strength (its block entity), for probes. */
+  comparatorOutputAt(i) {
+    return this.comparatorOut.get(i) ?? 0;
+  }
+};
+function connectedDir(info) {
+  return info.face === "floor" ? UP : info.face === "ceiling" ? DOWN : info.facing;
+}
+function isDot(info) {
+  const s = info.sides;
+  return !s[NORTH] && !s[SOUTH] && !s[EAST] && !s[WEST];
+}
+function isCross(info) {
+  const s = info.sides;
+  return !!s[NORTH] && !!s[SOUTH] && !!s[EAST] && !!s[WEST];
+}
+var PistonStructure = class {
+  constructor(w, piston, pistonDir, extending) {
+    this.w = w;
+    this.piston = piston;
+    this.pistonDir = pistonDir;
+    this.extending = extending;
+    this.pushDir = extending ? pistonDir : OPPOSITE2[pistonDir];
+    this.start = w.rel(piston, pistonDir, extending ? 1 : 2);
+  }
+  toPush = [];
+  toDestroy = [];
+  pushDir;
+  start;
+  resolve() {
+    this.toPush.length = 0;
+    this.toDestroy.length = 0;
+    const w = this.w;
+    const info = w.info(this.start);
+    if (!w.isPushable(this.start, this.pushDir, false, this.pistonDir)) {
+      if (this.extending && info.push === PUSH.DESTROY && w.valid(this.start)) {
+        this.toDestroy.push(this.start);
+        return true;
+      }
+      return false;
+    }
+    if (!this.addBlockLine(this.start, this.pushDir)) return false;
+    for (let k = 0; k < this.toPush.length; k++) {
+      const p = this.toPush[k];
+      if (isStickyBlock(w.info(p)) && !this.addBranchingBlocks(p)) return false;
+    }
+    return true;
+  }
+  addBlockLine(from, dir) {
+    const w = this.w;
+    let info = w.info(from);
+    if (info.kind === K.AIR) return true;
+    if (!w.isPushable(from, this.pushDir, false, dir)) return true;
+    if (from === this.piston) return true;
+    if (this.toPush.includes(from)) return true;
+    let i = 1;
+    if (i + this.toPush.length > 12) return false;
+    const back = OPPOSITE2[this.pushDir];
+    while (isStickyBlock(info)) {
+      const p = w.rel(from, back, i);
+      const prev = info;
+      info = w.info(p);
+      if (info.kind === K.AIR || !canStickBlocks(prev, info) || !w.isPushable(p, this.pushDir, false, back) || p === this.piston)
+        break;
+      if (++i + this.toPush.length > 12) return false;
+    }
+    let j = 0;
+    for (let k = i - 1; k >= 0; k--) {
+      this.toPush.push(w.rel(from, back, k));
+      j++;
+    }
+    for (let k = 1; ; k++) {
+      const p = w.rel(from, this.pushDir, k);
+      const l = this.toPush.indexOf(p);
+      if (l > -1) {
+        this.reorder(j, l);
+        for (let m = 0; m <= l + j; m++) {
+          const q = this.toPush[m];
+          if (isStickyBlock(w.info(q)) && !this.addBranchingBlocks(q)) return false;
+        }
+        return true;
+      }
+      info = w.info(p);
+      if (info.kind === K.AIR) return true;
+      if (!w.isPushable(p, this.pushDir, true, this.pushDir) || p === this.piston) return false;
+      if (info.push === PUSH.DESTROY) {
+        this.toDestroy.push(p);
+        return true;
+      }
+      if (this.toPush.length >= 12) return false;
+      this.toPush.push(p);
+      j++;
+    }
+  }
+  reorder(i, j) {
+    const a = this.toPush.slice(0, j);
+    const b = this.toPush.slice(this.toPush.length - i);
+    const c = this.toPush.slice(j, this.toPush.length - i);
+    this.toPush.length = 0;
+    this.toPush.push(...a, ...b, ...c);
+  }
+  addBranchingBlocks(from) {
+    const w = this.w;
+    const info = w.info(from);
+    for (const d of ALL) {
+      if (axisOf(d) === axisOf(this.pushDir)) continue;
+      const p = w.rel(from, d);
+      if (!canStickBlocks(w.info(p), info) || this.addBlockLine(p, d)) continue;
+      return false;
+    }
+    return true;
+  }
+};
+function isStickyBlock(info) {
+  return info.name === "slime_block" || info.name === "honey_block";
+}
+function canStickBlocks(a, b) {
+  if (a.name === "honey_block" && b.name === "slime_block") return false;
+  if (a.name === "slime_block" && b.name === "honey_block") return false;
+  return isStickyBlock(a) || isStickyBlock(b);
+}
+
+// packages/redstone/src/expr.ts
+var BINARY = {
+  "||": 1,
+  "&&": 2,
+  "|": 3,
+  "^": 4,
+  "&": 5,
+  "==": 6,
+  "!=": 6,
+  "<": 7,
+  "<=": 7,
+  ">": 7,
+  ">=": 7,
+  "<<": 8,
+  ">>": 8,
+  "+": 9,
+  "-": 9,
+  "*": 10,
+  "/": 10,
+  "%": 10,
+  "**": 11
+};
+var FUNCS = {
+  min: (...a) => Math.min(...a),
+  max: (...a) => Math.max(...a),
+  abs: (a = 0) => Math.abs(a),
+  floor: (a = 0) => Math.floor(a),
+  bit: (x = 0, i = 0) => Math.floor(x / 2 ** i) % 2 === 0 ? 0 : 1
+};
+var TOKEN = /\s*(\d+(?:\.\d+)?|0x[0-9a-fA-F]+|0b[01]+|[A-Za-z_][\w]*|\*\*|<<|>>|<=|>=|==|!=|&&|\|\||[-+*/%&|^~!<>?:(),])/y;
+function tokenize(src) {
+  const out = [];
+  TOKEN.lastIndex = 0;
+  let pos = 0;
+  while (pos < src.length) {
+    if (/^\s*$/.test(src.slice(pos))) break;
+    TOKEN.lastIndex = pos;
+    const m = TOKEN.exec(src);
+    if (!m) throw new Error(`Unexpected "${src.slice(pos).trim().slice(0, 12)}" in "${src}".`);
+    out.push(m[1]);
+    pos = TOKEN.lastIndex;
+  }
+  return out;
+}
+var Expr = class {
+  constructor(source) {
+    this.source = source;
+    const tokens = tokenize(source);
+    let k = 0;
+    const names = /* @__PURE__ */ new Set();
+    const peek = () => tokens[k];
+    const next = () => tokens[k++];
+    const expect = (t) => {
+      if (next() !== t) throw new Error(`Expected "${t}" in "${source}".`);
+    };
+    const primary = () => {
+      const tok = next();
+      if (tok === void 0) throw new Error(`"${source}" ends too early.`);
+      if (tok === "(") {
+        const e = ternary();
+        expect(")");
+        return e;
+      }
+      if (tok === "-" || tok === "+" || tok === "!" || tok === "~")
+        return { t: "un", op: tok, a: unary() };
+      if (/^0x/.test(tok)) return { t: "num", v: Number.parseInt(tok.slice(2), 16) };
+      if (/^0b/.test(tok)) return { t: "num", v: Number.parseInt(tok.slice(2), 2) };
+      if (/^\d/.test(tok)) return { t: "num", v: Number(tok) };
+      if (tok === "true" || tok === "false") return { t: "num", v: tok === "true" ? 1 : 0 };
+      if (/^[A-Za-z_]/.test(tok)) {
+        if (peek() === "(") {
+          if (!FUNCS[tok]) throw new Error(`Unknown function ${tok}() in "${source}".`);
+          next();
+          const args = [];
+          if (peek() !== ")") {
+            for (; ; ) {
+              args.push(ternary());
+              if (peek() === ",") next();
+              else break;
+            }
+          }
+          expect(")");
+          return { t: "call", f: tok, args };
+        }
+        names.add(tok);
+        return { t: "name", v: tok };
+      }
+      throw new Error(`Unexpected "${tok}" in "${source}".`);
+    };
+    const unary = () => primary();
+    const binary = (minPrec) => {
+      let left = unary();
+      for (; ; ) {
+        const op = peek();
+        const prec = op !== void 0 ? BINARY[op] : void 0;
+        if (prec === void 0 || prec < minPrec) return left;
+        next();
+        const right = binary(op === "**" ? prec : prec + 1);
+        left = { t: "bin", op, a: left, b: right };
+      }
+    };
+    const ternary = () => {
+      const c = binary(1);
+      if (peek() !== "?") return c;
+      next();
+      const a = ternary();
+      expect(":");
+      return { t: "if", c, a, b: ternary() };
+    };
+    this.node = ternary();
+    if (k !== tokens.length) throw new Error(`Unexpected "${tokens[k]}" in "${source}".`);
+    this.names = names;
+  }
+  node;
+  names;
+  eval(vars) {
+    const ev = (n) => {
+      switch (n.t) {
+        case "num":
+          return n.v;
+        case "name": {
+          const v = vars(n.v);
+          if (v === void 0) throw new Error(`Unknown name "${n.v}" in "${this.source}".`);
+          return v;
+        }
+        case "un": {
+          const a = ev(n.a);
+          return n.op === "-" ? -a : n.op === "!" ? a ? 0 : 1 : n.op === "~" ? -Math.trunc(a) - 1 : a;
+        }
+        case "if":
+          return ev(n.c) ? ev(n.a) : ev(n.b);
+        case "call":
+          return FUNCS[n.f](...n.args.map(ev));
+        case "bin": {
+          if (n.op === "&&") return ev(n.a) && ev(n.b) ? 1 : 0;
+          if (n.op === "||") return ev(n.a) || ev(n.b) ? 1 : 0;
+          const a = ev(n.a);
+          const b = ev(n.b);
+          switch (n.op) {
+            case "+":
+              return a + b;
+            case "-":
+              return a - b;
+            case "*":
+              return a * b;
+            case "/":
+              return b === 0 ? 0 : Math.trunc(a / b);
+            case "%":
+              return b === 0 ? 0 : a % b;
+            case "**":
+              return a ** b;
+            case "&":
+              return Number(BigInt.asIntN(64, BigInt(Math.trunc(a)) & BigInt(Math.trunc(b))));
+            case "|":
+              return Number(BigInt.asIntN(64, BigInt(Math.trunc(a)) | BigInt(Math.trunc(b))));
+            case "^":
+              return Number(BigInt.asIntN(64, BigInt(Math.trunc(a)) ^ BigInt(Math.trunc(b))));
+            case "<<":
+              return Math.trunc(a) * 2 ** Math.trunc(b);
+            case ">>":
+              return Math.floor(Math.trunc(a) / 2 ** Math.trunc(b));
+            case "==":
+              return a === b ? 1 : 0;
+            case "!=":
+              return a !== b ? 1 : 0;
+            case "<":
+              return a < b ? 1 : 0;
+            case "<=":
+              return a <= b ? 1 : 0;
+            case ">":
+              return a > b ? 1 : 0;
+            case ">=":
+              return a >= b ? 1 : 0;
+          }
+          return 0;
+        }
+      }
+    };
+    return ev(this.node);
+  }
+};
+
+// packages/redstone/src/circuit.ts
+var INPUT_KINDS = /* @__PURE__ */ new Set([
+  K.LEVER,
+  K.BUTTON,
+  K.PLATE,
+  K.WEIGHTED_PLATE,
+  K.TARGET,
+  K.DAYLIGHT,
+  K.SCULK_SENSOR
+]);
+var NOTABLE = /* @__PURE__ */ new Set(["burnout", "break", "suppressed", "left-area", "tnt"]);
+var Circuit = class {
+  constructor(world, spec, origin) {
+    this.world = world;
+    this.spec = spec;
+    this.origin = origin;
+    const list2 = (at) => Array.isArray(at[0]) ? at : [at];
+    for (const [kind, map, target] of [
+      ["input", spec.inputs, this.inputs],
+      ["output", spec.outputs, this.outputs]
+    ]) {
+      for (const [name, io] of Object.entries(map ?? {})) {
+        if (!/^[A-Za-z_]\w*$/.test(name)) {
+          this.errors.push(
+            `${kind} "${name}": names are letters, digits and _ (like A, sum, clk_2).`
+          );
+          continue;
+        }
+        if (this.inputs.has(name) || this.outputs.has(name)) {
+          this.errors.push(`"${name}" is both an input and an output.`);
+          continue;
+        }
+        const bits = [];
+        for (const p of list2(io.at)) {
+          const local = [p[0] - origin[0], p[1] - origin[1], p[2] - origin[2]];
+          const i = world.index(...local);
+          if (!world.valid(i)) {
+            this.errors.push(`${kind} ${name} at [${p.join(", ")}] is outside the build.`);
+            continue;
+          }
+          const info = world.info(i);
+          if (kind === "input" && !io.as && !INPUT_KINDS.has(info.kind)) {
+            this.errors.push(
+              `input ${name} at [${p.join(", ")}] is ${info.name}: an input must be a lever, button, pressure plate, target or daylight detector \u2014 or give "as" (e.g. "redstone_block") to place a block there for 1.`
+            );
+          }
+          bits.push({ i, original: info.state });
+        }
+        target.set(name, { name, bits, spec: io });
+      }
+    }
+  }
+  inputs = /* @__PURE__ */ new Map();
+  outputs = /* @__PURE__ */ new Map();
+  errors = [];
+  io(name) {
+    const io = this.inputs.get(name) ?? this.outputs.get(name);
+    if (!io) throw new Error(`No input or output named "${name}".`);
+    return io;
+  }
+  readBit(i, mode) {
+    const w = this.world;
+    const info = w.info(i);
+    if (mode === "block")
+      return /^minecraft:(air|cave_air|void_air)$/.test(w.displayState(i)) ? 0 : 1;
+    let p;
+    switch (info.kind) {
+      case K.WIRE:
+      case K.WEIGHTED_PLATE:
+      case K.TARGET:
+      case K.DAYLIGHT:
+      case K.SCULK_SENSOR:
+        p = Math.max(0, info.power);
+        break;
+      case K.COMPARATOR:
+        p = info.powered ? w.comparatorOutputAt(i) : 0;
+        break;
+      case K.LAMP:
+      case K.TORCH:
+      case K.WALL_TORCH:
+      case K.COPPER_BULB:
+        p = info.lit ? 15 : 0;
+        break;
+      case K.PISTON:
+        p = info.extended ? 15 : 0;
+        break;
+      case K.DOOR:
+      case K.TRAPDOOR:
+      case K.FENCE_GATE:
+        p = info.open ? 15 : 0;
+        break;
+      case K.DISPENSER:
+      case K.CRAFTER:
+        p = info.triggered ? 15 : 0;
+        break;
+      case K.HOPPER:
+        p = info.enabled ? 0 : 15;
+        break;
+      case K.REPEATER:
+      case K.OBSERVER:
+      case K.LEVER:
+      case K.BUTTON:
+      case K.NOTE_BLOCK:
+      case K.POWERED_RAIL:
+      case K.BELL:
+      case K.PLATE:
+        p = info.powered ? 15 : 0;
+        break;
+      default:
+        p = w.receivedPower(i);
+    }
+    return mode === "power" ? p : p > 0 ? 1 : 0;
+  }
+  /** Current value: a bus reads as an integer, bit 0 first. */
+  read(name) {
+    const io = this.io(name);
+    const mode = this.outputs.has(name) ? io.spec.read ?? "bit" : "bit";
+    if (io.bits.length === 1) return this.readBit(io.bits[0].i, mode);
+    let v = 0;
+    io.bits.forEach((b, k) => {
+      if (this.readBit(b.i, mode === "block" ? "block" : "bit")) v += 2 ** k;
+    });
+    return v;
+  }
+  values() {
+    const out = {};
+    for (const n of [...this.inputs.keys(), ...this.outputs.keys()]) out[n] = this.read(n);
+    return out;
+  }
+  /** Drive an input like a player would. Between ticks, like a click. */
+  set(name, value) {
+    const io = this.inputs.get(name);
+    if (!io) throw new Error(`No input named "${name}".`);
+    const w = this.world;
+    const single = io.bits.length === 1;
+    io.bits.forEach((b, k) => {
+      const bit = Math.floor(value / 2 ** k) % 2 === 1;
+      const info = w.info(b.i);
+      if (io.spec.as) {
+        const want = bit ? io.spec.as : b.original;
+        const cur = info.state.replace(/^minecraft:/, "");
+        if (cur !== want.replace(/^minecraft:/, "") && info.state !== want) {
+          if (bit) w.place(b.i, want.includes(":") ? want : `minecraft:${want}`);
+          else if (b.original === "minecraft:air") w.breakBlock(b.i);
+          else w.place(b.i, b.original);
+        }
+        return;
+      }
+      switch (info.kind) {
+        case K.LEVER:
+          if (info.powered !== bit) w.use(b.i);
+          return;
+        case K.BUTTON:
+          if (bit) w.use(b.i);
+          return;
+        case K.PLATE:
+        case K.WEIGHTED_PLATE:
+          w.setPlateEntities(b.i, single ? value : bit ? 1 : 0);
+          return;
+        case K.TARGET:
+          if (bit || single && value > 0)
+            w.hitTarget(b.i, single ? Math.min(15, value) || 15 : 15);
+          return;
+        case K.DAYLIGHT:
+        case K.SCULK_SENSOR:
+          w.setPower(b.i, single ? Math.min(15, value) : bit ? 15 : 0);
+          return;
+        default:
+          throw new Error(`${name}: ${info.name} at bit ${k} can't be driven.`);
+      }
+    });
+  }
+  /** Press a button input (every bit). */
+  press(name) {
+    const io = this.inputs.get(name);
+    if (!io) throw new Error(`No input named "${name}".`);
+    for (const b of io.bits) {
+      const info = this.world.info(b.i);
+      if (info.kind !== K.BUTTON)
+        throw new Error(
+          `press ${name}: ${info.name} isn't a button \u2014 use {"pulse": {"${name}": ticks}}.`
+        );
+      this.world.use(b.i);
+    }
+  }
+  local(p) {
+    return this.world.index(p[0] - this.origin[0], p[1] - this.origin[1], p[2] - this.origin[2]);
+  }
+};
+function mulberry(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = a + 1831565813 >>> 0;
+    let t = a;
+    t = Math.imul(t ^ t >>> 15, t | 1);
+    t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+function testCases(test) {
+  const entries = Object.entries(test.forAll ?? {});
+  if (entries.length === 0) return [{}];
+  const domains = entries.map(([name, d]) => {
+    const values = Array.isArray(d) ? Array.from({ length: Math.max(0, d[1] - d[0] + 1) }, (_, k) => d[0] + k) : d.values;
+    return { name, values };
+  });
+  const total = domains.reduce((n, d) => n * d.values.length, 1);
+  const limit = test.samples ?? 256;
+  const pick = (index2) => {
+    const v = {};
+    let rest = index2;
+    for (const d of domains) {
+      v[d.name] = d.values[rest % d.values.length];
+      rest = Math.floor(rest / d.values.length);
+    }
+    return v;
+  };
+  if (total <= limit) return Array.from({ length: total }, (_, k) => pick(k));
+  const rand = mulberry(test.seed ?? 1);
+  const out = [];
+  out.push(pick(0), pick(total - 1));
+  while (out.length < limit) out.push(pick(Math.floor(rand() * total)));
+  return out;
+}
+function stepName(s) {
+  return Object.keys(s)[0] ?? "?";
+}
+function* runCase(c, test, vars, out) {
+  const w = c.world;
+  const t0 = w.time;
+  const pulses = [];
+  const traced = out.trace ? test.trace ?? [] : [];
+  const last = /* @__PURE__ */ new Map();
+  const sample = () => {
+    for (const n of traced) {
+      const v = c.read(n);
+      if (last.get(n) !== v) {
+        last.set(n, v);
+        out.trace[n] ??= [];
+        out.trace[n]?.push([w.time - t0, v]);
+      }
+    }
+  };
+  const lookup = (name) => name in vars ? vars[name] : c.inputs.has(name) || c.outputs.has(name) ? c.read(name) : void 0;
+  const value = (v) => {
+    if (typeof v === "boolean") return v ? 1 : 0;
+    if (typeof v === "number") return v;
+    return expr(v).eval(lookup);
+  };
+  const ticks = (v) => Math.max(0, Math.floor(typeof v === "number" ? v : value(v)));
+  const fail = (step, message) => ({
+    ...Object.keys(vars).length ? { vars } : {},
+    tick: w.time - t0,
+    step,
+    message
+  });
+  function* tick() {
+    w.tick();
+    for (let k = pulses.length - 1; k >= 0; k--) {
+      const p = pulses[k];
+      if (w.time - t0 >= p.at) {
+        c.set(p.name, p.value);
+        pulses.splice(k, 1);
+      }
+    }
+    sample();
+    yield w.time - t0;
+  }
+  const check = (spec) => {
+    if (typeof spec === "string") {
+      const e = expr(spec);
+      return e.eval(lookup) ? null : `${spec} is false (${describe2(e.names)})`;
+    }
+    const wrong = [];
+    for (const [name, want] of Object.entries(spec)) {
+      const got = c.read(name);
+      const exp = value(want);
+      if (got !== exp) wrong.push(`${name} is ${got}, expected ${exp}`);
+    }
+    return wrong.length ? wrong.join("; ") : null;
+  };
+  const describe2 = (names) => [...names].map((n) => `${n}=${lookup(n) ?? "?"}`).join(", ");
+  sample();
+  for (let s = 0; s < test.steps.length; s++) {
+    const step = test.steps[s];
+    if (out.progress) out.progress.step = s;
+    try {
+      if ("set" in step) {
+        for (const [name, v] of Object.entries(step.set)) c.set(name, value(v));
+        sample();
+      } else if ("pulse" in step) {
+        for (const [name, n] of Object.entries(step.pulse)) {
+          c.set(name, 1);
+          pulses.push({ at: w.time - t0 + Math.max(1, ticks(n)), name, value: 0 });
+        }
+        sample();
+      } else if ("press" in step) {
+        for (const name of Array.isArray(step.press) ? step.press : [step.press]) c.press(name);
+        sample();
+      } else if ("wait" in step) {
+        const n = ticks(step.wait);
+        for (let k = 0; k < n; k++) yield* tick();
+      } else if ("settle" in step) {
+        const max = step.settle === true ? 400 : ticks(step.settle);
+        let k = 0;
+        while ((!w.idle || pulses.length > 0) && k < max) {
+          yield* tick();
+          k++;
+        }
+        if (!w.idle) return fail(s, `still changing after ${max} ticks (a clock never settles)`);
+      } else if ("measure" in step) {
+        const rises = [];
+        let highTicks = 0;
+        let prev = c.read(step.measure);
+        const total = ticks(step.ticks);
+        for (let k = 0; k < total; k++) {
+          yield* tick();
+          const v = c.read(step.measure);
+          if (v && !prev) rises.push(k);
+          if (v) highTicks++;
+          prev = v;
+        }
+        const period = rises.length >= 2 ? (rises[rises.length - 1] - rises[0]) / (rises.length - 1) : 0;
+        const high = rises.length ? highTicks / rises.length : highTicks ? total : 0;
+        const m = { pulses: rises.length, period, high };
+        if (out.notes.length < 40)
+          out.notes.push(
+            `${step.measure}: ${m.pulses} pulses in ${total} ticks` + (m.pulses >= 2 ? `, period ${round(m.period)}` : "") + (m.pulses ? `, high ${round(m.high)} ticks each` : "")
+          );
+        for (const [k, want] of Object.entries(step.expect ?? {})) {
+          const got = m[k];
+          if (Math.abs(got - want) > 0.01)
+            return fail(s, `${step.measure} ${k} is ${round(got)}, expected ${want}`);
+        }
+      } else if ("expect" in step) {
+        if (step.within !== void 0) {
+          const within = ticks(step.within);
+          let k = 0;
+          let wrong = check(step.expect);
+          while (wrong && k < within) {
+            yield* tick();
+            k++;
+            wrong = check(step.expect);
+          }
+          if (wrong) return fail(s, `not within ${within} ticks: ${wrong}`);
+          if (out.notes.length < 40) out.notes.push(`${label(step.expect)} after ${k} ticks`);
+        } else {
+          let wrong = check(step.expect);
+          if (wrong) return fail(s, wrong);
+          const hold = ticks(step.for ?? 0);
+          for (let k = 0; k < hold; k++) {
+            yield* tick();
+            wrong = check(step.expect);
+            if (wrong) return fail(s, `held ${k} ticks, then ${wrong}`);
+          }
+        }
+      } else if ("log" in step) {
+        const names = Array.isArray(step.log) ? step.log : [step.log];
+        if (out.notes.length < 40)
+          out.notes.push(`t=${w.time - t0}: ${names.map((n) => `${n}=${c.read(n)}`).join(", ")}`);
+      } else if ("use" in step) {
+        w.use(c.local(step.use));
+      } else if ("place" in step) {
+        const b = step.place.block;
+        w.place(c.local(step.place.at), b.includes(":") ? b : `minecraft:${b}`);
+      } else if ("break" in step) {
+        w.breakBlock(c.local(step.break));
+      } else {
+        return fail(s, `unknown step ${stepName(step)}`);
+      }
+    } catch (error) {
+      return fail(s, error instanceof Error ? error.message : String(error));
+    }
+  }
+  return null;
+}
+var exprCache = /* @__PURE__ */ new Map();
+function expr(src) {
+  let e = exprCache.get(src);
+  if (!e) {
+    e = new Expr(src);
+    if (exprCache.size > 500) exprCache.clear();
+    exprCache.set(src, e);
+  }
+  return e;
+}
+function round(n) {
+  return Number.isInteger(n) ? String(n) : n.toFixed(2);
+}
+function label(e) {
+  return typeof e === "string" ? e : Object.entries(e).map(([k, v]) => `${k}=${String(v)}`).join(", ");
+}
+function runTest(c, test, start, deadline = Infinity) {
+  const result = {
+    name: test.name,
+    ok: true,
+    cases: 0,
+    failed: 0,
+    failures: [],
+    notes: [],
+    events: [],
+    ticks: 0
+  };
+  const cases = testCases(test);
+  for (const vars of cases) {
+    c.world.restore(start);
+    const first = result.cases === 0;
+    const out = first && test.trace?.length ? { notes: result.notes, trace: {} } : { notes: first ? result.notes : [] };
+    const eventsBefore = c.world.events.length;
+    const t0 = c.world.time;
+    const gen = runCase(c, test, vars, out);
+    let failure = null;
+    let timedOut = false;
+    try {
+      let r = gen.next();
+      for (let n = 1; !r.done; n++) {
+        if ((n & 255) === 0 && Date.now() > deadline) {
+          timedOut = true;
+          break;
+        }
+        r = gen.next();
+      }
+      if (r.done) failure = r.value;
+    } catch (error) {
+      failure = {
+        tick: c.world.time - t0,
+        step: 0,
+        message: `the simulation stopped: ${error instanceof Error ? error.message : String(error)}`
+      };
+    }
+    if (timedOut) {
+      result.ok = false;
+      result.failed++;
+      result.failures.push({
+        tick: c.world.time - t0,
+        step: 0,
+        message: "ran out of time (the tests of one build may take 15 s): fewer cases or shorter waits"
+      });
+      break;
+    }
+    result.cases++;
+    result.ticks += c.world.time - t0;
+    if (first) {
+      if ("trace" in out && out.trace) result.trace = out.trace;
+      const o = c.origin;
+      for (const e of c.world.events.slice(eventsBefore))
+        if (NOTABLE.has(e.type) && result.events.length < 20)
+          result.events.push({
+            ...e,
+            tick: e.tick - t0,
+            pos: [e.pos[0] + o[0], e.pos[1] + o[1], e.pos[2] + o[2]]
+          });
+    }
+    if (failure) {
+      result.ok = false;
+      result.failed++;
+      if (result.failures.length < 5) result.failures.push(failure);
+    }
+  }
+  c.world.restore(start);
+  return result;
+}
+function runCircuit(world, spec, origin, opts = {}) {
+  const started = Date.now();
+  const circuit = new Circuit(world, spec, origin);
+  const t0 = world.time;
+  const report = {
+    errors: [...circuit.errors],
+    powerOn: { settled: false, ticks: 0 },
+    tests: [],
+    skipped: [],
+    ms: 0
+  };
+  try {
+    report.powerOn.settled = world.powerOn(spec.settleTicks ?? 1200);
+  } catch (error) {
+    report.errors.push(
+      `Power-on stopped: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+  report.powerOn.ticks = world.time - t0;
+  const tests = opts.tests ?? spec.tests ?? [];
+  if (report.errors.length === 0 && tests.length) {
+    const start = world.snapshot();
+    const deadline = started + (opts.budgetMs ?? 15e3);
+    for (const t of tests) {
+      if (Date.now() > deadline) {
+        report.skipped.push(t.name);
+        continue;
+      }
+      report.tests.push(runTest(circuit, t, start, deadline));
+    }
+    world.restore(start);
+  }
+  report.ms = Date.now() - started;
+  return { circuit, report };
+}
+function fmtVars(v) {
+  return v ? ` [${Object.entries(v).map(([k, n]) => `${k}=${n}`).join(", ")}]` : "";
+}
+function formatReport(r) {
+  const lines = [];
+  for (const e of r.errors) lines.push(`\u2717 ${e}`);
+  lines.push(
+    r.powerOn.settled ? `Power-on: the circuit rests after ${r.powerOn.ticks} ticks.` : `Power-on: still changing after ${r.powerOn.ticks} ticks \u2014 a clock, or something oscillating.`
+  );
+  const passed = r.tests.filter((t) => t.ok).length;
+  if (r.tests.length) lines.push(`Tests: ${passed}/${r.tests.length} passed (${r.ms} ms).`);
+  for (const t of r.tests) {
+    const cases = t.cases > 1 ? ` (${t.cases - t.failed}/${t.cases} cases)` : "";
+    lines.push(`${t.ok ? "\u2713" : "\u2717"} ${t.name}${cases}`);
+    for (const f of t.failures)
+      lines.push(`    step ${f.step + 1}, t=${f.tick}${fmtVars(f.vars)}: ${f.message}`);
+    if (t.failed > t.failures.length)
+      lines.push(`    \u2026and ${t.failed - t.failures.length} more failing cases`);
+    for (const n of t.notes.slice(0, 12)) lines.push(`    \xB7 ${n}`);
+    for (const [name, changes] of Object.entries(t.trace ?? {}))
+      lines.push(`    ~ ${name}: ${changes.map(([tick, v]) => `${v}@${tick}`).join(" ")}`);
+    for (const e of t.events.slice(0, 6))
+      lines.push(
+        `    ! ${e.type} at [${e.pos.join(", ")}] t=${e.tick}${e.detail ? ` (${e.detail})` : ""}`
+      );
+  }
+  if (r.skipped.length) lines.push(`Not run (time budget): ${r.skipped.join(", ")}`);
+  return lines.join("\n");
+}
+
+// packages/block-compiler/src/redstone.ts
+function worldFor(volume, catalog, opts = {}) {
+  return new World({
+    version: catalog.version.id,
+    size: [volume.sizeX, volume.sizeY, volume.sizeZ],
+    palette: volume.palette,
+    data: volume.data,
+    isFullCube: (n) => catalog.isFullCube(n),
+    defaults: {
+      piston_head: catalog.defaultProps("piston_head"),
+      moving_piston: catalog.defaultProps("moving_piston")
+    },
+    margin: opts.margin ?? 6,
+    ...opts.offset ? { offset: opts.offset } : {},
+    blockEntities: volume.blockEntities
+  });
+}
+function applyRedstoneShapes(volume, entries, catalog) {
+  const flagged = new Uint8Array(volume.palette.length);
+  let any = false;
+  entries.forEach((e, id) => {
+    if (e.flags & FLAG_REDSTONE && id < flagged.length) {
+      flagged[id] = 1;
+      any = true;
+    }
+  });
+  if (!any) return;
+  const world = worldFor(volume, catalog, { margin: 0 });
+  const { sizeX, sizeY, sizeZ } = volume;
+  const data = volume.data;
+  const updates = [];
+  let i = 0;
+  for (let y = 0; y < sizeY; y++)
+    for (let z3 = 0; z3 < sizeZ; z3++)
+      for (let x = 0; x < sizeX; x++, i++) {
+        if (!flagged[data[i]]) continue;
+        const id = world.placementState(world.index(x, y, z3));
+        updates.push([i, world.states.info(id).state]);
+      }
+  for (const [k, state] of updates) data[k] = volume.idFor(state);
+}
+function runBuildCircuit(volume, circuit, catalog) {
+  const world = worldFor(volume, catalog);
+  const { report } = runCircuit(world, circuit, volume.origin);
+  if (!report.powerOn.settled) return report;
+  const { sizeX, sizeY, sizeZ } = volume;
+  let i = 0;
+  const comparators = /* @__PURE__ */ new Map();
+  for (let y = 0; y < sizeY; y++)
+    for (let z3 = 0; z3 < sizeZ; z3++)
+      for (let x = 0; x < sizeX; x++, i++) {
+        const w = world.index(x, y, z3);
+        const state = world.displayState(w);
+        if (state !== volume.palette[volume.data[i]])
+          volume.data[i] = volume.idFor(state);
+        if (world.info(w).kind === K.COMPARATOR)
+          comparators.set(`${x},${y},${z3}`, world.comparatorOutputAt(w));
+      }
+  for (const be of volume.blockEntities) {
+    const key = be.pos.join(",");
+    const out = comparators.get(key);
+    if (out === void 0) continue;
+    be.data = { ...be.data, OutputSignal: out };
+    comparators.delete(key);
+  }
+  for (const [key, out] of comparators) {
+    if (out === 0) continue;
+    const pos = key.split(",").map(Number);
+    volume.blockEntities.push({ id: "minecraft:comparator", pos, data: { OutputSignal: out } });
+  }
+  return report;
 }
 
 // packages/block-compiler/src/noise.ts
@@ -2633,12 +6004,12 @@ var BlockResolver = class {
   }
   /** Every concrete block name a reference can produce (for masks and replace targets). */
   namesOf(ref, where, depth = 0) {
-    const parts = splitRef(ref);
-    if (!parts) {
+    const parts2 = splitRef(ref);
+    if (!parts2) {
       this.fail(where, `"${ref}" is not a valid block reference.`);
       return { names: [], states: [] };
     }
-    const entry = this.lookup(parts.key);
+    const entry = this.lookup(parts2.key);
     if (entry !== void 0 && depth < 8) {
       const refs = typeof entry === "string" ? [entry] : "mix" in entry ? Object.keys(entry.mix) : entry.gradient.blocks;
       const out = { names: [], states: [] };
@@ -2649,15 +6020,15 @@ var BlockResolver = class {
       }
       return out;
     }
-    const name = parts.key.replace(/^minecraft:/, "").toLowerCase();
+    const name = parts2.key.replace(/^minecraft:/, "").toLowerCase();
     const resolved2 = this.catalog.resolveName(name);
     if (!resolved2) {
       const r2 = this.catalog.normalize(name);
       this.fail(where, r2.ok ? `Unknown block "${name}".` : r2.error);
       return { names: [], states: [] };
     }
-    if (Object.keys(parts.props).length === 0) return { names: [resolved2], states: [] };
-    const r = this.catalog.normalize(`${resolved2}${propsString(parts.props)}`);
+    if (Object.keys(parts2.props).length === 0) return { names: [resolved2], states: [] };
+    const r = this.catalog.normalize(`${resolved2}${propsString(parts2.props)}`);
     if (!r.ok) {
       this.fail(where, r.error);
       return { names: [], states: [] };
@@ -2686,23 +6057,23 @@ var BlockResolver = class {
       this.fail(where, `palette reference "${ref}" is circular or too deeply nested.`);
       return SKIP;
     }
-    const parts = splitRef(ref);
-    if (!parts) {
+    const parts2 = splitRef(ref);
+    if (!parts2) {
       this.fail(
         where,
         `"${ref}" is not a valid block reference (expected name or name[prop=value]).`
       );
       return SKIP;
     }
-    const merged = { ...parts.props, ...strict };
-    const entry = this.lookup(parts.key);
+    const merged = { ...parts2.props, ...strict };
+    const entry = this.lookup(parts2.key);
     if (entry !== void 0) {
-      const ctx = `${where}${where ? " " : ""}(palette "${parts.key}")`;
+      const ctx = `${where}${where ? " " : ""}(palette "${parts2.key}")`;
       if (typeof entry === "string") return this.resolve(entry, merged, soft, ctx, depth + 1);
-      if ("mix" in entry) return this.mix(parts.key, entry, merged, soft, ctx, depth);
-      return this.gradient(parts.key, entry, merged, soft, ctx, depth);
+      if ("mix" in entry) return this.mix(parts2.key, entry, merged, soft, ctx, depth);
+      return this.gradient(parts2.key, entry, merged, soft, ctx, depth);
     }
-    return this.block(parts.key, merged, soft, where);
+    return this.block(parts2.key, merged, soft, where);
   }
   block(rawName, strict, soft, where) {
     const name = rawName.replace(/^minecraft:/, "").toLowerCase();
@@ -2917,9 +6288,9 @@ var CompileContext = class {
     return this.resolver.source(ref, this.where, soft);
   }
   /** Make a provenance entry for the current operation path. */
-  enterProv(label) {
+  enterProv(label2) {
     if (this.provTable.length >= 65535) return 65535;
-    this.provTable.push(label);
+    this.provTable.push(label2);
     this.prov = this.provTable.length - 1;
     return this.prov;
   }
@@ -4224,6 +7595,8 @@ function compileBuildSpec(input, options = {}) {
   completeMultiBlocks(sparse, palette);
   const { volume, clipped } = finalize(sparse, palette, spec, ctx);
   applyAutoStates(volume, palette.entries, catalog);
+  applyRedstoneShapes(volume, palette.entries, catalog);
+  const circuit = spec.circuit ? runBuildCircuit(volume, spec.circuit, catalog) : void 0;
   const compact = volume.compact();
   const warnings = [...resolver.notes, ...ctx.warnings];
   for (const key of Object.keys(spec.palette ?? {})) {
@@ -4263,7 +7636,8 @@ function compileBuildSpec(input, options = {}) {
     blockCount: [...counts.values()].reduce((a, b) => a + b, 0),
     palette: [...counts.keys()].sort(),
     anchor,
-    compileMs: Math.round(performance.now() - started)
+    compileMs: Math.round(performance.now() - started),
+    ...circuit ? { circuit } : {}
   };
 }
 function dedupeWarnings(list2) {
@@ -4331,7 +7705,7 @@ var OperationRunner = class {
   depth = 0;
   run(op, path, trail) {
     const ctx = this.ctx;
-    const label = op.id ? `${path} (${op.id})` : path;
+    const label2 = op.id ? `${path} (${op.id})` : path;
     const prevWhere = ctx.where;
     const prevMask = ctx.mask;
     ctx.where = op.id ? `${path} "${op.id}"` : path;
@@ -4340,7 +7714,7 @@ var OperationRunner = class {
       if (op.type === "group") {
         this.transformed(op, Transform.translate(...op.offset ?? [0, 0, 0]), () => {
           op.operations.forEach(
-            (child, i) => this.run(child, `${path}.operations[${i}]`, [...trail, label])
+            (child, i) => this.run(child, `${path}.operations[${i}]`, [...trail, label2])
           );
         });
         return;
@@ -4353,17 +7727,17 @@ var OperationRunner = class {
           );
           return;
         }
-        this.placeComponent(op.component, comp, op, trail, label);
+        this.placeComponent(op.component, comp, op, trail, label2);
         return;
       }
-      ctx.enterProv([...trail, label].join(" > "));
+      ctx.enterProv([...trail, label2].join(" > "));
       this.leaf(op);
     } finally {
       ctx.where = prevWhere;
       ctx.mask = prevMask;
     }
   }
-  placeComponent(name, comp, op, trail, label) {
+  placeComponent(name, comp, op, trail, label2) {
     if (this.depth > 16) {
       this.ctx.error(`component "${name}" nests too deeply (recursive components?).`);
       return;
@@ -4374,7 +7748,7 @@ var OperationRunner = class {
         comp.operations.forEach(
           (child, i) => this.run(child, `components.${name}.operations[${i}]`, [
             ...trail,
-            `${label} place ${name}`
+            `${label2} place ${name}`
           ])
         );
       });
@@ -4495,8 +7869,8 @@ var OperationRunner = class {
       chance: (p) => rnd() < p,
       noise: (x, y = 0, z3 = 0) => perlin.noise(x, y, z3),
       fbm: (x, y = 0, z3 = 0, octaves = 4) => perlin.fbm(x, y, z3, octaves),
-      log: (...parts) => {
-        if (logs++ < 20) ctx.warnings.add(`${where} log: ${parts.map(String).join(" ")}`);
+      log: (...parts2) => {
+        if (logs++ < 20) ctx.warnings.add(`${where} log: ${parts2.map(String).join(" ")}`);
       }
     };
     try {
@@ -5515,6 +8889,41 @@ function applyEdits(input, edits) {
         Object.assign(spec, edit.set);
         break;
       }
+      case "circuit": {
+        if (edit.set === null) {
+          delete spec.circuit;
+          break;
+        }
+        const c = { ...spec.circuit ?? {} };
+        for (const key of ["inputs", "outputs"]) {
+          const patch = edit.set[key];
+          if (!patch) continue;
+          const merged = { ...c[key] ?? {} };
+          for (const [name, io] of Object.entries(patch)) {
+            if (io === null) delete merged[name];
+            else merged[name] = io;
+          }
+          c[key] = merged;
+        }
+        if (edit.set.tests) {
+          const tests = [...c.tests ?? []];
+          for (const t of edit.set.tests) {
+            const k = tests.findIndex((x) => x.name === t.name);
+            if ("remove" in t) {
+              if (k < 0) throw new EditError(`circuit: no test named "${t.name}" to remove.`);
+              tests.splice(k, 1);
+            } else if (k >= 0) tests[k] = t;
+            else tests.push(t);
+          }
+          c.tests = tests;
+        }
+        if (edit.set.settleTicks !== void 0) {
+          if (edit.set.settleTicks === null) delete c.settleTicks;
+          else c.settleTicks = edit.set.settleTicks;
+        }
+        spec.circuit = c;
+        break;
+      }
       default:
         throw new EditError(`Unknown edit op "${edit.op}".`);
     }
@@ -5530,6 +8939,7 @@ var UserError = class extends Error {
   }
 };
 var augmented = /* @__PURE__ */ new Set();
+var VIEWER_RECONNECT_MS = 4e3;
 var BuildService = class {
   constructor(store, assets, hub, capture, config) {
     this.store = store;
@@ -5587,8 +8997,8 @@ var BuildService = class {
     void this.assets.ensure(build.assetVersion).catch(() => void 0);
     return build;
   }
-  async commit(spec, label, newProject) {
-    this.hub.broadcast({ type: "compiling", label });
+  async commit(spec, label2, newProject) {
+    this.hub.broadcast({ type: "compiling", label: label2 });
     const compiled = await this.compile(spec);
     if (!compiled.ok) {
       this.hub.broadcast({ type: "build-error", errors: compiled.errors });
@@ -5597,7 +9007,7 @@ var BuildService = class {
     const result = compiled.result;
     const project = newProject || !this.current ? this.store.create(spec.name, spec.minecraftVersion) : this.current.project;
     const record = this.store.addVersion(project.id, {
-      label,
+      label: label2,
       createdAt: Date.now(),
       spec: result.spec,
       blockCount: result.blockCount,
@@ -5896,13 +9306,21 @@ ${body}`;
       return c ? { top: hex(c.top), side: hex(c.side) } : defaultColors(state);
     };
   }
+  /**
+   * Make sure the user has a viewer, reusing the tab that is already open: a tab left open from
+   * an earlier session reconnects by itself within a few seconds, so a new tab opens only when
+   * none comes back.
+   */
+  async showViewer(waitMs = 15e3) {
+    if (this.hub.count > 0) return true;
+    if (await this.hub.waitForClient(VIEWER_RECONNECT_MS)) return true;
+    openViewer(`${this.config.baseUrl}/`);
+    return this.hub.waitForClient(waitMs);
+  }
   /** Real textured views from the open viewer; flat-colour fallback when there is none. */
   async render(opts) {
     const b = this.requireCurrent();
-    if (this.hub.count === 0) {
-      openViewer(`${this.config.baseUrl}/`);
-      await this.hub.waitForClient(15e3);
-    }
+    await this.showViewer();
     if (this.hub.count > 0) {
       try {
         const images = await this.capture.request({
@@ -5954,6 +9372,136 @@ ${body}`;
     }
     this.hub.broadcast({ type: "projects" });
   }
+  // ---------------------------------------------------------------- redstone
+  /** What the viewer's simulator needs to run the same simulation as the server. */
+  simInfo() {
+    const b = this.requireCurrent();
+    const catalog = getCatalog(b.result.version);
+    return {
+      buildId: b.buildId,
+      version: b.result.version.id,
+      fullCubes: catalogData.fullCubes.filter((n) => catalog.has(n)),
+      defaults: {
+        piston_head: catalog.defaultProps("piston_head"),
+        moving_piston: catalog.defaultProps("moving_piston")
+      },
+      circuit: b.result.spec.circuit ?? null,
+      blockEntities: b.result.volume.blockEntities.map((be) => ({ pos: be.pos, data: be.data }))
+    };
+  }
+  /**
+   * Run redstone tests on the current build: the stored ones, or ones given here (with extra
+   * inputs/outputs for this run). `locations` reruns everything at other world positions, where
+   * dust and pistons update their neighbours in another order, to catch location-dependent
+   * circuits. `show` plays one test live in the viewer.
+   */
+  simulate(opts) {
+    const b = this.requireCurrent();
+    const stored = b.result.spec.circuit ?? {};
+    const errors = [];
+    const parseIo = (map, kind) => {
+      const out = {};
+      for (const [name, io] of Object.entries(map ?? {})) {
+        const r = circuitIoSchema.safeParse(io);
+        if (r.success) out[name] = r.data;
+        else
+          errors.push(
+            `${kind}.${name}: ${r.error.issues.map((i) => `${i.path.join(".") || "value"} ${i.message}`).join("; ")}`
+          );
+      }
+      return out;
+    };
+    const circuit = {
+      ...stored,
+      inputs: { ...stored.inputs, ...parseIo(opts.inputs, "inputs") },
+      outputs: { ...stored.outputs, ...parseIo(opts.outputs, "outputs") }
+    };
+    let tests = [];
+    if (opts.tests) {
+      opts.tests.forEach((t, k) => {
+        const r = circuitTestSchema.safeParse(t);
+        if (r.success) tests.push(r.data);
+        else
+          errors.push(
+            `tests[${k}]: ${r.error.issues.map((i) => `${i.path.join(".") || "test"}: ${i.message}`).join("; ")}`
+          );
+      });
+    } else {
+      tests = stored.tests ?? [];
+      if (opts.only?.length) {
+        const missing = opts.only.filter((n2) => !tests.some((t) => t.name === n2));
+        if (missing.length)
+          errors.push(`No stored test named ${missing.map((n2) => `"${n2}"`).join(", ")}.`);
+        tests = tests.filter((t) => opts.only?.includes(t.name));
+      }
+    }
+    if (errors.length) return { text: `Not run:
+- ${errors.join("\n- ")}`, ok: false };
+    const catalog = getCatalog(b.result.version);
+    const volume = b.result.volume;
+    const run = (offset) => runCircuit(
+      worldFor(volume, catalog, offset ? { offset } : {}),
+      circuit,
+      volume.origin,
+      {
+        tests
+      }
+    ).report;
+    const report = run();
+    const lines = [formatReport(report)];
+    if (tests.length === 0)
+      lines.push(
+        'No tests: give `tests` here, or store them in the spec under circuit.tests (edit_build {op:"circuit"}).'
+      );
+    const values = this.circuitValues(circuit);
+    if (values) lines.push(`At rest: ${values}`);
+    let ok = report.errors.length === 0 && report.tests.every((t) => t.ok);
+    const n = Math.min(16, Math.max(1, opts.locations ?? 1));
+    if (n > 1) {
+      const differing = /* @__PURE__ */ new Set();
+      for (let k = 1; k < n; k++) {
+        const other = run([k * 7, 64 + k, k * 3]);
+        other.tests.forEach((t, j) => {
+          const base = report.tests[j];
+          if (base && base.ok !== t.ok) differing.add(t.name);
+        });
+      }
+      lines.push(
+        differing.size ? `\u26A0 Location-dependent: ${[...differing].join(", ")} pass at some world positions and fail at others (update order). Make the design independent of it.` : `Same results at ${n} world positions.`
+      );
+      if (differing.size) ok = false;
+    }
+    if (opts.show) {
+      const test = tests.find((t) => t.name === opts.show);
+      if (!test) lines.push(`show: no test named "${opts.show}".`);
+      else {
+        this.hub.broadcast({
+          type: "sim",
+          buildId: b.buildId,
+          test,
+          circuit
+        });
+        lines.push(
+          this.hub.count > 0 ? `Playing "${test.name}" in the viewer.` : "No viewer is open to play it in."
+        );
+      }
+    }
+    return { text: lines.join("\n"), ok };
+  }
+  /** "A=0, B=0, S=0" for the circuit's named I/O at rest, or null without any. */
+  circuitValues(circuit) {
+    const b = this.requireCurrent();
+    const names = [...Object.keys(circuit.inputs ?? {}), ...Object.keys(circuit.outputs ?? {})];
+    if (!names.length) return null;
+    const { circuit: c } = runCircuit(
+      worldFor(b.result.volume, getCatalog(b.result.version)),
+      { inputs: circuit.inputs, outputs: circuit.outputs },
+      b.result.volume.origin,
+      { tests: [] }
+    );
+    if (c.errors.length) return null;
+    return Object.entries(c.values()).map(([k, v]) => `${k}=${v}`).join(", ");
+  }
   /** Compact text summary used in tool results. */
   summary(build) {
     const v = build.result.volume;
@@ -5968,6 +9516,7 @@ ${body}`;
     if (build.result.warnings.length)
       lines.push(`Warnings:
 - ${build.result.warnings.join("\n- ")}`);
+    if (build.result.circuit) lines.push(`Redstone \u2014 ${formatReport(build.result.circuit)}`);
     const open = this.feedback().filter((f) => f.status === "open").length;
     if (open)
       lines.push(`${open} open feedback note(s) from the user in the viewer: call get_feedback.`);
@@ -6246,6 +9795,7 @@ async function createHttpServer({
       connection: "keep-alive",
       "x-accel-buffering": "no"
     });
+    res.write("retry: 1000\n\n");
     const client = hub.add(res);
     hub.send(client, {
       type: "hello",
@@ -6265,20 +9815,20 @@ async function createHttpServer({
   });
   app.get("/api/build", async () => ({ build: builds.header() }));
   app.post("/api/build", async (req, reply) => {
-    const { spec, newProject, label } = req.body ?? {};
+    const { spec, newProject, label: label2 } = req.body ?? {};
     const out = await builds.create(spec ?? req.body, {
       newProject: newProject ?? true,
-      ...label ? { label } : {}
+      ...label2 ? { label: label2 } : {}
     });
     if (!out.ok) return reply.status(422).send({ ok: false, errors: out.errors });
     return { ok: true, summary: builds.summary(out.build), build: builds.header() };
   });
   app.post("/api/build/edit", async (req, reply) => {
-    const { edits, patch, label } = req.body ?? {};
+    const { edits, patch, label: label2 } = req.body ?? {};
     const out = await builds.edit({
       ...edits ? { edits } : {},
       ...patch ? { patch } : {},
-      ...label ? { label } : {}
+      ...label2 ? { label: label2 } : {}
     });
     if (!out.ok) return reply.status(422).send({ ok: false, errors: out.errors });
     return { ok: true, summary: builds.summary(out.build), build: builds.header() };
@@ -6306,6 +9856,7 @@ async function createHttpServer({
     async (req) => builds.inspectAt(vec(req.query, "x", "y", "z"))
   );
   app.get("/api/build/spec", async () => builds.requireCurrent().record.spec);
+  app.get("/api/build/sim", async () => builds.simInfo());
   app.post("/api/build/version", async (req, reply) => {
     const { version, apply } = req.body ?? {};
     if (!version) throw new UserError('Missing "version".');
@@ -6436,6 +9987,8 @@ New build:
 
 Changes: when the user asks to change something, call get_feedback first \u2014 they can pin notes on blocks in the viewer, and each note says which operation placed that block. Edit with edit_build by operation id, then resolve_feedback with a one-line reply.
 
+Redstone: VibeSchem simulates Minecraft Java redstone faithfully for the build's version (game ticks, update order, quasi-connectivity, pistons, torch burnout). For any circuit, read read_guide("redstone"), declare named inputs/outputs and tests in the spec's "circuit" section \u2014 they run on every build like unit tests, and the summary reports them \u2014 and use simulate to try scenarios, measure delays and catch location-dependent designs. Never hand over a circuit whose tests fail.
+
 Rules: minecraftVersion is strict \u2014 only blocks that exist in that version are accepted; errors suggest alternatives and list_blocks checks availability. Coordinates: +X east, +Y up, +Z south (north = -Z); y=0 is ground level. Give every operation a short "id".`;
 var GUIDE_TOPICS = [
   "workflow",
@@ -6448,6 +10001,7 @@ var GUIDE_TOPICS = [
   "landscape",
   "scripts",
   "versions",
+  "redstone",
   "examples"
 ];
 var vec32 = z2.array(z2.number().int()).length(3).describe("[x, y, z]");
@@ -6495,11 +10049,10 @@ function buildMcpServer({ builds, config }) {
         content.push({ type: "image", data: img.png.toString("base64"), mimeType: "image/png" });
       if (r.note) content.push(text(r.note));
     } else {
-      openViewerIfClosed();
+      void builds.showViewer();
     }
     return { content };
   };
-  const openViewerIfClosed = () => openViewer(`${config.baseUrl}/`);
   server.registerTool(
     "read_guide",
     {
@@ -6527,7 +10080,7 @@ function buildMcpServer({ builds, config }) {
         idempotentHint: false,
         openWorldHint: true
       },
-      description: 'Build a Minecraft structure in VibeSchem: compile a BuildSpec and show it in the live 3D viewer (opens the browser if needed). Returns a summary and a rendered preview image. Starts a new project (with its own version history) unless newProject is false, which replaces the current build as a new version. Errors (unknown blocks for the version, bad fields) come back as a list to fix. BuildSpec: {name, minecraftVersion, palette?, components?, operations:[{type, id, \u2026}]}; operation types: box, line, cylinder, cone, sphere, dome, polygon, roof, arch, blocks, layers, terrain, tree, scatter, replace, group, place, script \u2014 see read_guide("spec").',
+      description: 'Build a Minecraft structure in VibeSchem: compile a BuildSpec and show it in the live 3D viewer (opens the browser if needed). Returns a summary and a rendered preview image. Starts a new project (with its own version history) unless newProject is false, which replaces the current build as a new version. Errors (unknown blocks for the version, bad fields) come back as a list to fix. BuildSpec: {name, minecraftVersion, palette?, components?, operations:[{type, id, \u2026}], circuit?}; operation types: box, line, cylinder, cone, sphere, dome, polygon, roof, arch, blocks, layers, terrain, tree, scatter, replace, group, place, script \u2014 see read_guide("spec"). circuit = named redstone inputs/outputs + tests, run by the simulator on every build \u2014 see read_guide("redstone").',
       inputSchema: {
         spec: z2.record(z2.string(), z2.unknown()).describe("The BuildSpec object."),
         newProject: z2.boolean().optional().describe("Default true. false = new version of the current project."),
@@ -6535,11 +10088,11 @@ function buildMcpServer({ builds, config }) {
         preview: z2.boolean().optional().describe("Return a rendered image (default true).")
       }
     },
-    async ({ spec, newProject, label, preview }) => guarded(
+    async ({ spec, newProject, label: label2, preview }) => guarded(
       async () => outcome(
         await builds.create(spec, {
           newProject: newProject ?? true,
-          ...label ? { label } : {}
+          ...label2 ? { label: label2 } : {}
         }),
         preview ?? true
       )
@@ -6555,7 +10108,7 @@ function buildMcpServer({ builds, config }) {
         idempotentHint: false,
         openWorldHint: true
       },
-      description: 'Change the current VibeSchem Minecraft build without resending it; saved as a new version. "edits" (preferred) target operations by id: {op:"add", operations, after?|before?|into?: id} \xB7 {op:"replace", id, with} \xB7 {op:"update", id, set:{field: value|null}} \xB7 {op:"remove", ids} \xB7 {op:"palette", set:{key: entry|null}} \xB7 {op:"component", name, set} \xB7 {op:"meta", set:{name?, minecraftVersion?, anchor?, \u2026}}. "patch" accepts RFC 6902 JSON Patch on the spec for anything else.',
+      description: 'Change the current VibeSchem Minecraft build without resending it; saved as a new version. "edits" (preferred) target operations by id: {op:"add", operations, after?|before?|into?: id} \xB7 {op:"replace", id, with} \xB7 {op:"update", id, set:{field: value|null}} \xB7 {op:"remove", ids} \xB7 {op:"palette", set:{key: entry|null}} \xB7 {op:"component", name, set} \xB7 {op:"meta", set:{name?, minecraftVersion?, anchor?, \u2026}} \xB7 {op:"circuit", set:{inputs?, outputs?: {name: io|null}, tests?: [test | {name, remove:true}], settleTicks?}} (redstone I/O and tests, merged by name). "patch" accepts RFC 6902 JSON Patch on the spec for anything else.',
       inputSchema: {
         edits: z2.array(z2.object({ op: z2.string() }).passthrough()).optional(),
         patch: z2.array(z2.object({ op: z2.string(), path: z2.string() }).passthrough()).optional(),
@@ -6563,12 +10116,12 @@ function buildMcpServer({ builds, config }) {
         preview: z2.boolean().optional().describe("Return a rendered image (default true).")
       }
     },
-    async ({ edits, patch, label, preview }) => guarded(
+    async ({ edits, patch, label: label2, preview }) => guarded(
       async () => outcome(
         await builds.edit({
           ...edits ? { edits } : {},
           ...patch ? { patch } : {},
-          ...label ? { label } : {}
+          ...label2 ? { label: label2 } : {}
         }),
         preview ?? true
       )
@@ -6641,14 +10194,14 @@ function buildMcpServer({ builds, config }) {
       const lines = items.map((f) => {
         const where = f.region ? `region ${f.region.from.join(",")} \u2192 ${f.region.to.join(",")}` : f.pos ? `at ${f.pos.join(",")}` : "whole build";
         const num = open.indexOf(f) + 1;
-        const parts = [
+        const parts2 = [
           `${num ? `#${num} ` : ""}[${f.id}] (${f.status}, v${f.n ?? "?"}) ${where}: "${f.text}"`
         ];
-        if (f.block) parts.push(`   block: ${f.block.replace("minecraft:", "")}`);
-        if (f.source) parts.push(`   placed by: ${f.source}`);
-        if (f.targetVersion) parts.push(`   wants Minecraft ${f.targetVersion}`);
-        if (f.reply) parts.push(`   your reply: ${f.reply}`);
-        return parts.join("\n");
+        if (f.block) parts2.push(`   block: ${f.block.replace("minecraft:", "")}`);
+        if (f.source) parts2.push(`   placed by: ${f.source}`);
+        if (f.targetVersion) parts2.push(`   wants Minecraft ${f.targetVersion}`);
+        if (f.reply) parts2.push(`   your reply: ${f.reply}`);
+        return parts2.join("\n");
       });
       const content = [text(lines.join("\n"))];
       const pinned = open.filter((f) => f.pos || f.region);
@@ -6887,6 +10440,39 @@ Can also save directly to: ${targets.join(", ")}` : "")
     async ({ from, to, message }) => guarded(async () => {
       builds.focus(from, to ?? from, message);
       return { content: [text("Done.")] };
+    })
+  );
+  server.registerTool(
+    "simulate",
+    {
+      title: "Test the redstone",
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      description: "Run the current VibeSchem build's redstone in a simulator that follows Minecraft Java's own mechanics for the build's version: game ticks (20/s; repeater delay 1 = 2 ticks), neighbour and shape updates in the game's order, scheduled-tick priorities, quasi-connectivity, pistons with slime/honey and 0-tick spitting, observers, comparators reading containers, torch burnout. Runs the stored tests (spec.circuit.tests) or the `tests` given here, and reports pass/fail per test with failing cases, latencies (\"expect \u2026 within\"), measured clock periods, traces of signal changes, and problems such as torches burning out or blocks popping off. `inputs`/`outputs` add or override named I/O for this run only. `locations` (2\u201316) re-runs at other world positions, where dust and pistons update in another order, to catch location-dependent designs. `show` plays one test live in the user's viewer. Test format and step reference: read_guide(\"redstone\").",
+      inputSchema: {
+        tests: z2.array(z2.record(z2.string(), z2.unknown())).optional().describe(
+          "Tests to run instead of the stored ones: {name, steps:[{set:{A:1}}, {wait:4}, {expect:{L:1}, within:10}, \u2026], forAll?:{A:[0,15]}, samples?, trace?:[names]}."
+        ),
+        only: z2.array(z2.string()).optional().describe("Run only these stored tests (by name)."),
+        inputs: z2.record(z2.string(), z2.record(z2.string(), z2.unknown())).optional().describe(
+          'Extra named inputs for this run: {"A": {"at": [x,y,z]}} (lever, button, plate\u2026; "as" to place a block).'
+        ),
+        outputs: z2.record(z2.string(), z2.record(z2.string(), z2.unknown())).optional().describe(
+          'Extra named outputs: {"Q": {"at": [x,y,z]}} or a bus {"at": [[x,y,z], \u2026]}; "read": "power" for 0\u201315.'
+        ),
+        locations: z2.number().int().min(1).max(16).optional(),
+        show: z2.string().optional().describe("Name of a test to play live in the viewer.")
+      }
+    },
+    async ({ tests, only, inputs, outputs, locations, show }) => guarded(async () => {
+      const r = builds.simulate({
+        ...tests ? { tests } : {},
+        ...only ? { only } : {},
+        ...inputs ? { inputs } : {},
+        ...outputs ? { outputs } : {},
+        ...locations ? { locations } : {},
+        ...show ? { show } : {}
+      });
+      return { content: [text(r.text)] };
     })
   );
   return server;

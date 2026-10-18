@@ -90,6 +90,9 @@ importers:
       '@minecraft-schematic-lab/formats':
         specifier: workspace:*
         version: link:../../packages/formats
+      '@minecraft-schematic-lab/redstone':
+        specifier: workspace:*
+        version: link:../../packages/redstone
       '@minecraft-schematic-lab/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -121,6 +124,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@minecraft-schematic-lab/redstone':
+        specifier: workspace:*
+        version: link:../../packages/redstone
       '@minecraft-schematic-lab/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -161,6 +167,9 @@ importers:
       '@minecraft-schematic-lab/catalog':
         specifier: workspace:*
         version: link:../catalog
+      '@minecraft-schematic-lab/redstone':
+        specifier: workspace:*
+        version: link:../redstone
     devDependencies:
       '@types/node':
         specifier: ^22.10.2
@@ -192,6 +201,12 @@ importers:
       prismarine-nbt:
         specifier: ^2.5.0
         version: 2.8.0
+
+  packages/redstone:
+    devDependencies:
+      '@minecraft-schematic-lab/catalog':
+        specifier: workspace:*
+        version: link:../catalog
 
   packages/shared:
     devDependencies:

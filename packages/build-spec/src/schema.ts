@@ -492,6 +492,98 @@ export const componentSchema = z
   })
   .strict();
 
+// ---------------------------------------------------------------- redstone circuits
+
+/** Ticks: a number, or an expression over forAll variables ("k * 4"). */
+const tickCount = z.union([z.number().int().nonnegative().max(1_000_000), z.string().min(1)]);
+/** An input or output: one block, or a bus of blocks (bit 0 first). */
+export const circuitIoSchema = z
+  .object({
+    at: z.union([vec3, z.array(vec3).min(1).max(64)]),
+    /** Input: place this block for 1 and restore the original for 0 (e.g. "redstone_block"). */
+    as: blockRef.optional(),
+    /** Output: "bit" (0/1, default), "power" (0–15) or "block" (1 when a block stands there). */
+    read: z.enum(['bit', 'power', 'block']).optional(),
+  })
+  .strict();
+const ioValue = z.union([z.number(), z.boolean(), z.string().min(1)]);
+const ioName = z.string().regex(/^[A-Za-z_]\w*$/, 'names are letters, digits and _');
+const STEP_SCHEMAS: Record<string, z.ZodTypeAny> = {
+  set: z.object({ set: z.record(ioName, ioValue) }).strict(),
+  pulse: z.object({ pulse: z.record(ioName, tickCount) }).strict(),
+  press: z.object({ press: z.union([ioName, z.array(ioName).min(1)]) }).strict(),
+  wait: z.object({ wait: tickCount }).strict(),
+  settle: z.object({ settle: z.union([z.literal(true), tickCount]) }).strict(),
+  measure: z
+    .object({
+      measure: ioName,
+      ticks: tickCount,
+      expect: z
+        .object({ period: z.number(), high: z.number(), pulses: z.number().int() })
+        .partial()
+        .strict()
+        .optional(),
+    })
+    .strict(),
+  expect: z
+    .object({
+      expect: z.union([z.record(ioName, ioValue), z.string().min(1)]),
+      within: tickCount.optional(),
+      for: tickCount.optional(),
+    })
+    .strict(),
+  log: z.object({ log: z.union([ioName, z.array(ioName).min(1)]) }).strict(),
+  use: z.object({ use: vec3 }).strict(),
+  place: z.object({ place: z.object({ at: vec3, block: blockRef }).strict() }).strict(),
+  break: z.object({ break: vec3 }).strict(),
+};
+export const CIRCUIT_STEPS = Object.keys(STEP_SCHEMAS);
+
+/** Dispatch on the step's key, like operations dispatch on `type`, for one precise error. */
+export const circuitStepSchema = z.record(z.string(), z.unknown()).superRefine((value, ctx) => {
+  const key = CIRCUIT_STEPS.find((k) => k in value);
+  const schema = key ? STEP_SCHEMAS[key] : undefined;
+  if (!schema) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `Unknown step. Use one of: ${CIRCUIT_STEPS.map((k) => `{"${k}": …}`).join(', ')}.`,
+    });
+    return;
+  }
+  const parsed = schema.safeParse(value);
+  if (!parsed.success) for (const issue of parsed.error.issues) ctx.addIssue(issue);
+});
+
+export const circuitTestSchema = z
+  .object({
+    name: z.string().min(1),
+    steps: z.array(circuitStepSchema).min(1),
+    /** Run once per combination: {"A": [0, 15]} is every A from 0 to 15. */
+    forAll: z
+      .record(
+        ioName,
+        z.union([
+          z.tuple([z.number().int(), z.number().int()]),
+          z.object({ values: z.array(z.number().int()).min(1) }).strict(),
+        ]),
+      )
+      .optional(),
+    samples: z.number().int().positive().max(100_000).optional(),
+    seed: z.number().int().optional(),
+    trace: z.array(ioName).optional(),
+  })
+  .strict();
+
+export const circuitSchema = z
+  .object({
+    inputs: z.record(ioName, circuitIoSchema).optional(),
+    outputs: z.record(ioName, circuitIoSchema).optional(),
+    tests: z.array(circuitTestSchema).optional(),
+    /** Ticks power-on may take before the circuit counts as never resting (default 1200). */
+    settleTicks: z.number().int().positive().max(100_000).optional(),
+  })
+  .strict();
+
 export const buildSpecSchema = z
   .object({
     $schema: z.string().optional(),
@@ -515,6 +607,8 @@ export const buildSpecSchema = z
     palette: z.record(z.string().min(1), paletteEntrySchema).optional(),
     components: z.record(z.string().min(1), componentSchema).optional(),
     operations: z.array(operationSchema),
+    /** A redstone circuit: named inputs/outputs and tests the simulator runs on every build. */
+    circuit: circuitSchema.optional(),
     metadata: z
       .object({
         prompt: z.string().optional(),

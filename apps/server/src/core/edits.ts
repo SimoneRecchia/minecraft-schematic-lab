@@ -1,6 +1,9 @@
 import type {
   BuildOperation,
   BuildSpec,
+  CircuitDefinition,
+  CircuitIo,
+  CircuitTest,
   Component,
   PaletteEntry,
 } from '@minecraft-schematic-lab/build-spec';
@@ -18,6 +21,16 @@ export type Edit =
       set: Partial<
         Pick<BuildSpec, 'name' | 'description' | 'minecraftVersion' | 'anchor' | 'seed' | 'size'>
       >;
+    }
+  | {
+      op: 'circuit';
+      /** Merged by name; null removes an input, output or test. */
+      set: {
+        inputs?: Record<string, CircuitIo | null>;
+        outputs?: Record<string, CircuitIo | null>;
+        tests?: (CircuitTest | { name: string; remove: true })[];
+        settleTicks?: number | null;
+      } | null;
     };
 
 export class EditError extends Error {}
@@ -130,6 +143,41 @@ export function applyEdits(input: BuildSpec, edits: Edit[]): BuildSpec {
       }
       case 'meta': {
         Object.assign(spec, edit.set);
+        break;
+      }
+      case 'circuit': {
+        if (edit.set === null) {
+          delete spec.circuit;
+          break;
+        }
+        const c: CircuitDefinition = { ...(spec.circuit ?? {}) };
+        for (const key of ['inputs', 'outputs'] as const) {
+          const patch = edit.set[key];
+          if (!patch) continue;
+          const merged: Record<string, CircuitIo> = { ...(c[key] ?? {}) };
+          for (const [name, io] of Object.entries(patch)) {
+            if (io === null) delete merged[name];
+            else merged[name] = io;
+          }
+          c[key] = merged;
+        }
+        if (edit.set.tests) {
+          const tests = [...(c.tests ?? [])];
+          for (const t of edit.set.tests) {
+            const k = tests.findIndex((x) => x.name === t.name);
+            if ('remove' in t) {
+              if (k < 0) throw new EditError(`circuit: no test named "${t.name}" to remove.`);
+              tests.splice(k, 1);
+            } else if (k >= 0) tests[k] = t;
+            else tests.push(t);
+          }
+          c.tests = tests;
+        }
+        if (edit.set.settleTicks !== undefined) {
+          if (edit.set.settleTicks === null) delete c.settleTicks;
+          else c.settleTicks = edit.set.settleTicks;
+        }
+        spec.circuit = c;
         break;
       }
       default:

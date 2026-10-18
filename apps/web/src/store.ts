@@ -9,8 +9,8 @@ import type {
   VersionSummary,
 } from '@minecraft-schematic-lab/shared';
 
-export type Panel = 'build' | 'materials' | 'history' | 'notes';
-export type Tool = 'navigate' | 'note';
+export type Panel = 'build' | 'materials' | 'history' | 'notes' | 'redstone';
+export type Tool = 'navigate' | 'use' | 'note';
 
 export interface Toast {
   id: number;

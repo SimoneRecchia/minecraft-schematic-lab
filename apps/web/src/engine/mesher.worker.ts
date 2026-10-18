@@ -29,9 +29,9 @@ let SY = 0;
 let SZ = 0;
 let data: Uint16Array<ArrayBufferLike> = new Uint16Array(0);
 let variants: (Variants | null)[] = [];
-let full = new Uint8Array(0);
-let selfCull = new Uint8Array(0);
-let fluid = new Uint8Array(0); // 0 none, 1 water, 2 lava
+let full: Uint8Array<ArrayBuffer> = new Uint8Array(0);
+let selfCull: Uint8Array<ArrayBuffer> = new Uint8Array(0);
+let fluid: Uint8Array<ArrayBuffer> = new Uint8Array(0); // 0 none, 1 water, 2 lava
 let fluidTex: [number, number][] = [];
 let fluidTint: number[] = [];
 let nameIds: Int32Array<ArrayBufferLike> = new Int32Array(0);
@@ -259,30 +259,51 @@ function meshChunk(cx: number, cy: number, cz: number, clipY: number): ChunkMesh
   return { key: `${cx},${cy},${cz}`, cx, cy, cz, layers: layers.map((l) => l.build()) };
 }
 
-function init(models: (BakedBlock | null)[]): void {
-  const n = models.length;
-  full = new Uint8Array(n);
-  selfCull = new Uint8Array(n);
-  fluid = new Uint8Array(n);
-  fluidTex = [];
-  fluidTint = [];
-  variants = models.map((m, i) => {
-    if (!m) return null;
+function grow(a: Uint8Array<ArrayBuffer>, n: number): Uint8Array<ArrayBuffer> {
+  if (a.length >= n) return a;
+  const b = new Uint8Array(Math.max(n, a.length * 2));
+  b.set(a);
+  return b;
+}
+
+/** Register the models of palette entries [from, from + models.length). */
+function addModels(from: number, models: (BakedBlock | null)[]): void {
+  const n = from + models.length;
+  full = grow(full, n);
+  selfCull = grow(selfCull, n);
+  fluid = grow(fluid, n);
+  models.forEach((m, k) => {
+    const i = from + k;
+    full[i] = 0;
+    selfCull[i] = 0;
+    fluid[i] = 0;
+    variants[i] = null;
+    if (!m) return;
     full[i] = m.full ? 1 : 0;
     selfCull[i] = m.self ? 1 : 0;
     if (m.fluid) {
       fluid[i] = m.fluid === 'water' ? 1 : 2;
       fluidTex[i] = m.fluidTex ?? [0, 0];
       fluidTint[i] = m.fluidTint ?? -1;
-      return null;
+      return;
     }
     const total = m.v.reduce((s, v) => s + v.w, 0) || 1;
     let acc = 0;
-    return {
+    variants[i] = {
       cumulative: m.v.map((v) => (acc += v.w / total)),
       quads: m.v.map((v) => new Float32Array(v.q)),
     };
   });
+}
+
+function init(models: (BakedBlock | null)[]): void {
+  full = new Uint8Array(0);
+  selfCull = new Uint8Array(0);
+  fluid = new Uint8Array(0);
+  fluidTex = [];
+  fluidTint = [];
+  variants = [];
+  addModels(0, models);
 }
 
 const ctx = globalThis as unknown as DedicatedWorkerGlobalScope;
@@ -298,15 +319,29 @@ ctx.onmessage = (e: MessageEvent<WorkerIn>) => {
     return;
   }
   if (msg.generation !== generation) return;
+  if (msg.type === 'patch') {
+    if (msg.models.length) addModels(msg.from, msg.models);
+    nameIds = msg.nameIds;
+    for (let k = 0; k < msg.cells.length; k += 2)
+      data[msg.cells[k] as number] = msg.cells[k + 1] as number;
+    return;
+  }
   const clip = msg.clipY ?? Number.MAX_SAFE_INTEGER;
   for (const [cx, cy, cz] of msg.chunks) {
     const mesh = meshChunk(cx, cy, cz, clip);
     const transfer: Transferable[] = [];
     for (const l of mesh.layers)
       if (l) transfer.push(l.positions.buffer, l.uvw.buffer, l.colors.buffer, l.indices.buffer);
-    const out: WorkerOut = { type: 'chunk', generation, clipY: msg.clipY, mesh };
+    const out: WorkerOut = {
+      type: 'chunk',
+      generation,
+      clipY: msg.clipY,
+      mesh,
+      ...(msg.live ? { live: true } : {}),
+    };
     ctx.postMessage(out, transfer);
   }
+  if (msg.live) return;
   const done: WorkerOut = { type: 'done', generation };
   ctx.postMessage(done);
 };

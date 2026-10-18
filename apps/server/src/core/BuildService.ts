@@ -8,16 +8,31 @@ import {
   BuildSpecError,
   compileBuildSpec,
   nodeScriptRunner,
+  worldFor,
   type CompileResult,
 } from '@minecraft-schematic-lab/block-compiler';
-import type { BuildSpec } from '@minecraft-schematic-lab/build-spec';
+import {
+  circuitIoSchema,
+  circuitTestSchema,
+  type BuildSpec,
+  type CircuitDefinition,
+  type CircuitTest,
+} from '@minecraft-schematic-lab/build-spec';
 import {
   assetVersionFor,
   blockDataIsOlder,
   blockNameOf,
+  catalogData,
   getCatalog,
   resolveVersion,
 } from '@minecraft-schematic-lab/catalog';
+import {
+  formatReport,
+  runCircuit,
+  type CircuitReport,
+  type CircuitSpec,
+  type TestSpec,
+} from '@minecraft-schematic-lab/redstone';
 import {
   exportBuild,
   formatsFor,
@@ -29,6 +44,7 @@ import type {
   FeedbackItem,
   InspectResult,
   ProjectInfo,
+  SimInfo,
   Vec3,
   ViewName,
   ExportTarget,
@@ -64,6 +80,9 @@ export class UserError extends Error {
 }
 
 const augmented = new Set<string>();
+
+/** How long an open viewer tab may take to reconnect (it retries every second). */
+const VIEWER_RECONNECT_MS = 4000;
 
 export class BuildService {
   current: CurrentBuild | null = null;
@@ -479,6 +498,18 @@ export class BuildService {
     };
   }
 
+  /**
+   * Make sure the user has a viewer, reusing the tab that is already open: a tab left open from
+   * an earlier session reconnects by itself within a few seconds, so a new tab opens only when
+   * none comes back.
+   */
+  async showViewer(waitMs = 15_000): Promise<boolean> {
+    if (this.hub.count > 0) return true;
+    if (await this.hub.waitForClient(VIEWER_RECONNECT_MS)) return true;
+    openViewer(`${this.config.baseUrl}/`);
+    return this.hub.waitForClient(waitMs);
+  }
+
   /** Real textured views from the open viewer; flat-colour fallback when there is none. */
   async render(opts: {
     views: ViewName[];
@@ -488,10 +519,7 @@ export class BuildService {
     pins?: boolean;
   }): Promise<{ images: CapturedImage[]; fallback: boolean; note?: string }> {
     const b = this.requireCurrent();
-    if (this.hub.count === 0) {
-      openViewer(`${this.config.baseUrl}/`);
-      await this.hub.waitForClient(15_000);
-    }
+    await this.showViewer();
     if (this.hub.count > 0) {
       try {
         const images = await this.capture.request({
@@ -550,6 +578,155 @@ export class BuildService {
     this.hub.broadcast({ type: 'projects' });
   }
 
+  // ---------------------------------------------------------------- redstone
+
+  /** What the viewer's simulator needs to run the same simulation as the server. */
+  simInfo(): SimInfo {
+    const b = this.requireCurrent();
+    const catalog = getCatalog(b.result.version);
+    return {
+      buildId: b.buildId,
+      version: b.result.version.id,
+      fullCubes: catalogData.fullCubes.filter((n) => catalog.has(n)),
+      defaults: {
+        piston_head: catalog.defaultProps('piston_head'),
+        moving_piston: catalog.defaultProps('moving_piston'),
+      },
+      circuit: (b.result.spec.circuit as Record<string, unknown> | undefined) ?? null,
+      blockEntities: b.result.volume.blockEntities.map((be) => ({ pos: be.pos, data: be.data })),
+    };
+  }
+
+  /**
+   * Run redstone tests on the current build: the stored ones, or ones given here (with extra
+   * inputs/outputs for this run). `locations` reruns everything at other world positions, where
+   * dust and pistons update their neighbours in another order, to catch location-dependent
+   * circuits. `show` plays one test live in the viewer.
+   */
+  simulate(opts: {
+    tests?: unknown[];
+    only?: string[];
+    inputs?: Record<string, unknown>;
+    outputs?: Record<string, unknown>;
+    locations?: number;
+    show?: string;
+  }): { text: string; ok: boolean } {
+    const b = this.requireCurrent();
+    const stored: CircuitDefinition = b.result.spec.circuit ?? {};
+    const errors: string[] = [];
+    const parseIo = (map: Record<string, unknown> | undefined, kind: string) => {
+      const out: NonNullable<CircuitDefinition['inputs']> = {};
+      for (const [name, io] of Object.entries(map ?? {})) {
+        const r = circuitIoSchema.safeParse(io);
+        if (r.success) out[name] = r.data;
+        else
+          errors.push(
+            `${kind}.${name}: ${r.error.issues.map((i) => `${i.path.join('.') || 'value'} ${i.message}`).join('; ')}`,
+          );
+      }
+      return out;
+    };
+    const circuit: CircuitDefinition = {
+      ...stored,
+      inputs: { ...stored.inputs, ...parseIo(opts.inputs, 'inputs') },
+      outputs: { ...stored.outputs, ...parseIo(opts.outputs, 'outputs') },
+    };
+    let tests: CircuitTest[] = [];
+    if (opts.tests) {
+      opts.tests.forEach((t, k) => {
+        const r = circuitTestSchema.safeParse(t);
+        if (r.success) tests.push(r.data);
+        else
+          errors.push(
+            `tests[${k}]: ${r.error.issues.map((i) => `${i.path.join('.') || 'test'}: ${i.message}`).join('; ')}`,
+          );
+      });
+    } else {
+      tests = stored.tests ?? [];
+      if (opts.only?.length) {
+        const missing = opts.only.filter((n) => !tests.some((t) => t.name === n));
+        if (missing.length)
+          errors.push(`No stored test named ${missing.map((n) => `"${n}"`).join(', ')}.`);
+        tests = tests.filter((t) => opts.only?.includes(t.name));
+      }
+    }
+    if (errors.length) return { text: `Not run:\n- ${errors.join('\n- ')}`, ok: false };
+
+    const catalog = getCatalog(b.result.version);
+    const volume = b.result.volume;
+    const run = (offset?: Vec3): CircuitReport =>
+      runCircuit(
+        worldFor(volume, catalog, offset ? { offset } : {}),
+        circuit as CircuitSpec,
+        volume.origin,
+        {
+          tests: tests as TestSpec[],
+        },
+      ).report;
+    const report = run();
+    const lines = [formatReport(report)];
+    if (tests.length === 0)
+      lines.push(
+        'No tests: give `tests` here, or store them in the spec under circuit.tests (edit_build {op:"circuit"}).',
+      );
+    const values = this.circuitValues(circuit);
+    if (values) lines.push(`At rest: ${values}`);
+    let ok = report.errors.length === 0 && report.tests.every((t) => t.ok);
+    const n = Math.min(16, Math.max(1, opts.locations ?? 1));
+    if (n > 1) {
+      // BlockPos hashes order dust and piston updates: shifting x walks through the orders.
+      const differing = new Set<string>();
+      for (let k = 1; k < n; k++) {
+        const other = run([k * 7, 64 + k, k * 3]);
+        other.tests.forEach((t, j) => {
+          const base = report.tests[j];
+          if (base && base.ok !== t.ok) differing.add(t.name);
+        });
+      }
+      lines.push(
+        differing.size
+          ? `⚠ Location-dependent: ${[...differing].join(', ')} pass at some world positions and fail at others (update order). Make the design independent of it.`
+          : `Same results at ${n} world positions.`,
+      );
+      if (differing.size) ok = false;
+    }
+    if (opts.show) {
+      const test = tests.find((t) => t.name === opts.show);
+      if (!test) lines.push(`show: no test named "${opts.show}".`);
+      else {
+        this.hub.broadcast({
+          type: 'sim',
+          buildId: b.buildId,
+          test: test as Record<string, unknown>,
+          circuit: circuit as Record<string, unknown>,
+        });
+        lines.push(
+          this.hub.count > 0
+            ? `Playing "${test.name}" in the viewer.`
+            : 'No viewer is open to play it in.',
+        );
+      }
+    }
+    return { text: lines.join('\n'), ok };
+  }
+
+  /** "A=0, B=0, S=0" for the circuit's named I/O at rest, or null without any. */
+  private circuitValues(circuit: CircuitDefinition): string | null {
+    const b = this.requireCurrent();
+    const names = [...Object.keys(circuit.inputs ?? {}), ...Object.keys(circuit.outputs ?? {})];
+    if (!names.length) return null;
+    const { circuit: c } = runCircuit(
+      worldFor(b.result.volume, getCatalog(b.result.version)),
+      { inputs: circuit.inputs, outputs: circuit.outputs } as CircuitSpec,
+      b.result.volume.origin,
+      { tests: [] },
+    );
+    if (c.errors.length) return null;
+    return Object.entries(c.values())
+      .map(([k, v]) => `${k}=${v}`)
+      .join(', ');
+  }
+
   /** Compact text summary used in tool results. */
   summary(build: CurrentBuild): string {
     const v = build.result.volume;
@@ -567,6 +744,7 @@ export class BuildService {
     ];
     if (build.result.warnings.length)
       lines.push(`Warnings:\n- ${build.result.warnings.join('\n- ')}`);
+    if (build.result.circuit) lines.push(`Redstone — ${formatReport(build.result.circuit)}`);
     const open = this.feedback().filter((f) => f.status === 'open').length;
     if (open)
       lines.push(`${open} open feedback note(s) from the user in the viewer: call get_feedback.`);

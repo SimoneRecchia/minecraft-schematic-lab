@@ -112,11 +112,14 @@ export function isTransparent(state: string): boolean {
   return /glass|pane|ice|slime|honey|barrier|tinted/.test(cleanName(state));
 }
 
-export type BlockShape = 'full' | 'slab' | 'stairs' | 'thin' | 'glass';
+export type BlockShape = 'full' | 'slab' | 'stairs' | 'thin' | 'glass' | 'flat' | 'low' | 'small';
 
 /** Coarse geometric class that drives how a block is drawn (a full cube, half-slab, thin bar, …). */
 export function blockShape(state: string): BlockShape {
   const s = cleanName(state);
+  if (/^redstone_wire$|pressure_plate$|_carpet$|^tripwire$/.test(s)) return 'flat';
+  if (/^(repeater|comparator|daylight_detector)$/.test(s)) return 'low';
+  if (/_button$|^lever$|torch$|^tripwire_hook$/.test(s)) return 'small';
   if (/stairs/.test(s)) return 'stairs';
   if (/slab/.test(s)) return 'slab';
   if (
@@ -131,6 +134,17 @@ export function blockShape(state: string): BlockShape {
 export function colorFor(state: string): string {
   const s = state.toLowerCase();
   const name = cleanName(state);
+  if (name === 'redstone_wire') {
+    // Brighter with power, like the game's dust (dark red at 0, red-orange at 15).
+    const p = Number(/power=(\d+)/.exec(s)?.[1] ?? 0) / 15;
+    const r = Math.round((p * 0.6 + (p > 0 ? 0.4 : 0.3)) * 255);
+    const g = Math.round(Math.max(0, p * p * 0.7 - 0.5) * 255);
+    return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}00`;
+  }
+  if (/lamp|torch|bulb/.test(name) && /lit=/.test(s))
+    return /lit=true/.test(s) ? '#ffd25a' : '#7a5a34';
+  if (/powered=true/.test(s) && /^(repeater|comparator|observer|lever)$|_button$/.test(name))
+    return '#ff5a36';
   // Colored variants carry the dye as a prefix — map those first so red/green/blue/… differ.
   if (COLORED_BLOCK.test(name)) {
     const dye = dyeColorFor(name);

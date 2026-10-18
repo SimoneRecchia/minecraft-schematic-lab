@@ -3,9 +3,11 @@ import type { FeedbackItem } from '@minecraft-schematic-lab/shared';
 import { api } from '../api';
 import { controller } from '../controller';
 import { blockLabel, t } from '../i18n';
+import { useSim } from '../sim/simStore';
 import { useApp, type Panel } from '../store';
 import { blockIcon } from './blockIcons';
-import { IconCheck, IconChevron, IconFolder, IconTrash, IconWarn } from './Icons';
+import { IconBolt, IconCheck, IconChevron, IconFolder, IconTrash, IconWarn } from './Icons';
+import { RedstonePane } from './Redstone';
 
 function timeAgo(ms: number): string {
   const d = (Date.now() - ms) / 1000;
@@ -44,7 +46,14 @@ export function Sidebar() {
   const s = useApp();
   const h = s.header;
   const openNotes = s.feedback.filter((f) => f.status === 'open').length;
-  const tabs: Panel[] = ['build', 'materials', 'history', 'notes'];
+  const redstone = useSim((x) => x.available);
+  const tabs: Panel[] = [
+    'build',
+    'materials',
+    'history',
+    'notes',
+    ...(redstone ? (['redstone'] as const) : []),
+  ];
   return (
     <aside className={`sidebar glass panel ${s.sidebarOpen ? '' : 'closed'}`}>
       <div className="sidebar-head">
@@ -83,20 +92,22 @@ export function Sidebar() {
           {tabs.map((p) => (
             <button
               key={p}
-              className={s.panel === p ? 'on' : ''}
+              className={`${s.panel === p || (p === 'build' && s.panel === 'redstone' && !redstone) ? 'on' : ''} ${p === 'redstone' ? 'icon-tab' : ''}`}
+              title={t.tabs[p]}
               onClick={() => s.set({ panel: p })}
             >
-              {t.tabs[p]}
+              {p === 'redstone' ? <IconBolt width={14} height={14} /> : t.tabs[p]}
               {p === 'notes' && openNotes > 0 ? ` ${openNotes}` : ''}
             </button>
           ))}
         </div>
       </div>
       <div className="sidebar-body">
-        {s.panel === 'build' && <BuildPane />}
+        {(s.panel === 'build' || (s.panel === 'redstone' && !redstone)) && <BuildPane />}
         {s.panel === 'materials' && <MaterialsPane />}
         {s.panel === 'history' && <HistoryPane />}
         {s.panel === 'notes' && <NotesPane />}
+        {s.panel === 'redstone' && <RedstonePane />}
       </div>
     </aside>
   );

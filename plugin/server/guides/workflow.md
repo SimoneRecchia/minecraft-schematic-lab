@@ -8,6 +8,8 @@ The user describes a subject (and maybe size, version, style, allowed blocks). Y
 - **Constraints**: "only these blocks", style, colors — they override every default in these guides.
 - **Ground**: unless the user wants a bare schematic, give the build a base (plinth, terrain patch, path, a few trees). Buildings floating on nothing look unfinished.
 
+**Redstone** (doors, clocks, logic, farms' control, computers): read_guide("redstone") and drive the work with tests in the spec's `circuit` section.
+
 ## 1. Plan before writing (think, don't output)
 1. **Massing**: 2–5 volumes with a clear hierarchy (one dominant mass/tower, secondary masses ~0.6×, small additions). Plan footprints at ~1:1.6, odd widths for centered doors and single-row ridges, heights that differ by ≥2 between neighbours. Roofs are 30–60% of what you see on traditional styles.
 2. **Grid & proportions**: floor-to-floor 4–5 (houses) / 5–6 (manors) / 6–8 (palaces); doors 1×2 (2×3 or arched for grand); windows aligned in bays of 3–5; walls ≥1 from corners to openings.

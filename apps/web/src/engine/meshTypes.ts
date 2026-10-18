@@ -33,8 +33,25 @@ export type WorkerIn =
       /** Block name id per palette index (same block, different states → same id). */
       nameIds: Int32Array;
     }
-  | { type: 'mesh'; generation: number; chunks: [number, number, number][]; clipY: number | null };
+  | {
+      type: 'mesh';
+      generation: number;
+      chunks: [number, number, number][];
+      clipY: number | null;
+      /** Live updates (redstone) mesh quietly, without progress reports. */
+      live?: boolean;
+    }
+  | {
+      type: 'patch';
+      generation: number;
+      /** Pairs of (cell index, palette index). */
+      cells: Uint32Array;
+      /** Palette entries added since the last message, starting at palette index `from`. */
+      from: number;
+      models: (BakedBlock | null)[];
+      nameIds: Int32Array;
+    };
 
 export type WorkerOut =
-  | { type: 'chunk'; generation: number; clipY: number | null; mesh: ChunkMesh }
+  | { type: 'chunk'; generation: number; clipY: number | null; mesh: ChunkMesh; live?: boolean }
   | { type: 'done'; generation: number };

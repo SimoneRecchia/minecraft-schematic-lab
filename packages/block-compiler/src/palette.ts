@@ -9,6 +9,8 @@ export const FLAG_CONNECT = 1;
 export const FLAG_STAIR_SHAPE = 2;
 /** Add the missing half of a door / tall plant / bed. */
 export const FLAG_COMPLETE = 4;
+/** Dust connections or a repeater lock, worked out by the redstone engine. */
+export const FLAG_REDSTONE = 8;
 
 export interface PaletteEntry {
   state: string;
@@ -52,6 +54,8 @@ export class InternalPalette {
       flags |= FLAG_CONNECT;
     }
     if (name.endsWith('_stairs') && !ex.has('shape')) flags |= FLAG_STAIR_SHAPE;
+    if (name === 'redstone_wire' && !SIDES.some((s) => ex.has(s))) flags |= FLAG_REDSTONE;
+    if (name === 'repeater' && !ex.has('locked')) flags |= FLAG_REDSTONE;
     if ((props.half === 'lower' && 'half' in props) || props.part === 'foot')
       flags |= FLAG_COMPLETE;
     return this.addRaw(name, props, flags);

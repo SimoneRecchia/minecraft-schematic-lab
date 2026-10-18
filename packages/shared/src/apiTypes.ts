@@ -131,6 +131,20 @@ export interface InspectResult {
   source: string | null;
 }
 
+/** What the viewer's redstone simulator needs besides the voxels (GET /api/build/sim). */
+export interface SimInfo {
+  buildId: string;
+  /** Minecraft release whose mechanics apply. */
+  version: string;
+  /** Block names whose collision box is a full cube in this version. */
+  fullCubes: string[];
+  /** Default properties of blocks the simulation creates (piston_head, moving_piston). */
+  defaults: Record<string, Record<string, string>>;
+  /** The spec's circuit: named inputs/outputs and tests (null when there is none). */
+  circuit: Record<string, unknown> | null;
+  blockEntities: { pos: Vec3; data: Record<string, unknown> }[];
+}
+
 /** Server -> viewer events over SSE. */
 export type ServerEvent =
   | { type: 'hello'; clientId: string; buildId: string | null }
@@ -141,4 +155,11 @@ export type ServerEvent =
   | { type: 'projects' }
   | { type: 'assets'; version: string; state: string; message?: string; progress?: number }
   | { type: 'capture'; request: CaptureRequest }
-  | { type: 'focus'; from: Vec3; to: Vec3; message?: string };
+  | { type: 'focus'; from: Vec3; to: Vec3; message?: string }
+  /** Play a redstone test live in the viewer (the same simulation the server ran). */
+  | {
+      type: 'sim';
+      buildId: string;
+      test: Record<string, unknown>;
+      circuit: Record<string, unknown>;
+    };

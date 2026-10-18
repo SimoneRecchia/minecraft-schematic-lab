@@ -1,9 +1,9 @@
 # VibeSchem
 
 **AI builder for Minecraft.** Describe a build to Claude — a cottage, a fantasy castle on a floating
-island, a gothic cathedral, a whole village — and Claude designs it automatically, shows it in 3D
-with the real game textures, and exports an expert-quality schematic for WorldEdit, Litematica or
-structure blocks that you can paste into your world.
+island, a gothic cathedral, a whole village, a piston door or a redstone computer — and Claude
+designs it automatically, shows it in 3D with the real game textures, and exports an expert-quality
+schematic for WorldEdit, Litematica or structure blocks that you can paste into your world.
 
 - **Builds like an experienced builder.** Claude follows a building guide distilled from expert
   practice (massing, depth, palettes and gradients, roofs, styles, landscaping) and writes a compact
@@ -15,6 +15,16 @@ structure blocks that you can paste into your world.
 - **Claude sees what you see.** It renders the build from any angle, close-ups and sections; you can
   pin numbered notes on blocks ("make this roof steeper") and Claude knows exactly which part of the
   spec made that block.
+- **Redstone that works, like tested code.** A simulator follows Minecraft Java's own redstone
+  mechanics for the build's version: game ticks, neighbour and shape updates in the game's order,
+  scheduled-tick priorities, quasi-connectivity, pistons with slime and honey, observers,
+  comparators reading containers, torch burnout, and the differences between versions. A build
+  can declare named inputs and outputs (single blocks or multi-bit buses) and tests (truth tables,
+  delays, clock periods, memory). The tests run on every build like unit tests, and Claude fixes
+  the circuit until they pass. It can try any scenario with the `simulate` tool, and check that a
+  design works wherever it is pasted, since update order depends on world position. In the viewer
+  you flip levers with the hand tool, run the circuit at ¼× to max speed, step tick by tick, watch
+  inputs and outputs, and replay tests in 3D.
 - **Strict Minecraft versions** from 1.8 to the newest release: only blocks that exist in the chosen
   version are accepted (experimental ones excluded), with suggestions for substitutes.
 - **Export**: WorldEdit `.schem` (Sponge v2/v3), MCEdit `.schematic` for 1.8–1.12, Litematica
@@ -159,6 +169,8 @@ Found a vulnerability? Report it privately, as [SECURITY.md](SECURITY.md) explai
 | `Home` / `F` | frame everything / the selection |
 | `L` + `↑` `↓` | layer cut |
 | `V` / `N` | navigate / pin a note (Shift-click a second block for an area) |
+| `U` | use: flip levers, press buttons, change repeaters and comparators (redstone builds) |
+| `Space` · `T` | run/pause the redstone simulation · advance one game tick |
 | `G` · `S` · `Esc` | grid · sidebar · clear |
 
 ## Development

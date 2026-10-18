@@ -13,7 +13,9 @@ import {
   type Component,
   type PaletteEntry as SpecPaletteEntry,
 } from '@minecraft-schematic-lab/build-spec';
+import type { CircuitReport } from '@minecraft-schematic-lab/redstone';
 import { applyAutoStates, completeMultiBlocks } from './autoStates';
+import { applyRedstoneShapes, runBuildCircuit } from './redstone';
 import { BlockVolume, type BlockEntityData } from './BlockVolume';
 import { CompileContext, type ScriptRunner } from './context';
 import { hashString, makeRng, Perlin } from './noise';
@@ -45,6 +47,8 @@ export interface CompileResult {
   /** Local coordinates of the paste anchor (lands at the player's feet). */
   anchor: [number, number, number];
   compileMs: number;
+  /** Power-on and test results when the spec has a circuit. */
+  circuit?: CircuitReport;
 }
 
 export class BuildSpecError extends Error {
@@ -109,6 +113,8 @@ export function compileBuildSpec(input: unknown, options: CompileOptions = {}): 
   completeMultiBlocks(sparse, palette);
   const { volume, clipped } = finalize(sparse, palette, spec, ctx);
   applyAutoStates(volume, palette.entries, catalog);
+  applyRedstoneShapes(volume, palette.entries, catalog);
+  const circuit = spec.circuit ? runBuildCircuit(volume, spec.circuit, catalog) : undefined;
   const compact = volume.compact();
 
   const warnings: string[] = [...resolver.notes, ...ctx.warnings];
@@ -152,6 +158,7 @@ export function compileBuildSpec(input: unknown, options: CompileOptions = {}): 
     palette: [...counts.keys()].sort(),
     anchor,
     compileMs: Math.round(performance.now() - started),
+    ...(circuit ? { circuit } : {}),
   };
 }
 

@@ -16,7 +16,6 @@ import { APP_VERSION, type ViewName, type Vec3 } from '@minecraft-schematic-lab/
 import type { AppConfig } from '../config';
 import type { BuildOutcome, BuildService } from '../core/BuildService';
 import type { Edit } from '../core/edits';
-import { openViewer } from '../openBrowser';
 
 export interface McpDeps {
   builds: BuildService;
@@ -35,6 +34,8 @@ New build:
 
 Changes: when the user asks to change something, call get_feedback first — they can pin notes on blocks in the viewer, and each note says which operation placed that block. Edit with edit_build by operation id, then resolve_feedback with a one-line reply.
 
+Redstone: VibeSchem simulates Minecraft Java redstone faithfully for the build's version (game ticks, update order, quasi-connectivity, pistons, torch burnout). For any circuit, read read_guide("redstone"), declare named inputs/outputs and tests in the spec's "circuit" section — they run on every build like unit tests, and the summary reports them — and use simulate to try scenarios, measure delays and catch location-dependent designs. Never hand over a circuit whose tests fail.
+
 Rules: minecraftVersion is strict — only blocks that exist in that version are accepted; errors suggest alternatives and list_blocks checks availability. Coordinates: +X east, +Y up, +Z south (north = -Z); y=0 is ground level. Give every operation a short "id".`;
 
 const GUIDE_TOPICS = [
@@ -48,6 +49,7 @@ const GUIDE_TOPICS = [
   'landscape',
   'scripts',
   'versions',
+  'redstone',
   'examples',
 ] as const;
 
@@ -102,12 +104,10 @@ export function buildMcpServer({ builds, config }: McpDeps): McpServer {
         content.push({ type: 'image', data: img.png.toString('base64'), mimeType: 'image/png' });
       if (r.note) content.push(text(r.note));
     } else {
-      openViewerIfClosed();
+      void builds.showViewer();
     }
     return { content };
   };
-
-  const openViewerIfClosed = () => openViewer(`${config.baseUrl}/`);
 
   server.registerTool(
     'read_guide',
@@ -141,7 +141,7 @@ export function buildMcpServer({ builds, config }: McpDeps): McpServer {
         openWorldHint: true,
       },
       description:
-        'Build a Minecraft structure in VibeSchem: compile a BuildSpec and show it in the live 3D viewer (opens the browser if needed). Returns a summary and a rendered preview image. Starts a new project (with its own version history) unless newProject is false, which replaces the current build as a new version. Errors (unknown blocks for the version, bad fields) come back as a list to fix. BuildSpec: {name, minecraftVersion, palette?, components?, operations:[{type, id, …}]}; operation types: box, line, cylinder, cone, sphere, dome, polygon, roof, arch, blocks, layers, terrain, tree, scatter, replace, group, place, script — see read_guide("spec").',
+        'Build a Minecraft structure in VibeSchem: compile a BuildSpec and show it in the live 3D viewer (opens the browser if needed). Returns a summary and a rendered preview image. Starts a new project (with its own version history) unless newProject is false, which replaces the current build as a new version. Errors (unknown blocks for the version, bad fields) come back as a list to fix. BuildSpec: {name, minecraftVersion, palette?, components?, operations:[{type, id, …}], circuit?}; operation types: box, line, cylinder, cone, sphere, dome, polygon, roof, arch, blocks, layers, terrain, tree, scatter, replace, group, place, script — see read_guide("spec"). circuit = named redstone inputs/outputs + tests, run by the simulator on every build — see read_guide("redstone").',
       inputSchema: {
         spec: z.record(z.string(), z.unknown()).describe('The BuildSpec object.'),
         newProject: z
@@ -175,7 +175,7 @@ export function buildMcpServer({ builds, config }: McpDeps): McpServer {
         openWorldHint: true,
       },
       description:
-        'Change the current VibeSchem Minecraft build without resending it; saved as a new version. "edits" (preferred) target operations by id: {op:"add", operations, after?|before?|into?: id} · {op:"replace", id, with} · {op:"update", id, set:{field: value|null}} · {op:"remove", ids} · {op:"palette", set:{key: entry|null}} · {op:"component", name, set} · {op:"meta", set:{name?, minecraftVersion?, anchor?, …}}. "patch" accepts RFC 6902 JSON Patch on the spec for anything else.',
+        'Change the current VibeSchem Minecraft build without resending it; saved as a new version. "edits" (preferred) target operations by id: {op:"add", operations, after?|before?|into?: id} · {op:"replace", id, with} · {op:"update", id, set:{field: value|null}} · {op:"remove", ids} · {op:"palette", set:{key: entry|null}} · {op:"component", name, set} · {op:"meta", set:{name?, minecraftVersion?, anchor?, …}} · {op:"circuit", set:{inputs?, outputs?: {name: io|null}, tests?: [test | {name, remove:true}], settleTicks?}} (redstone I/O and tests, merged by name). "patch" accepts RFC 6902 JSON Patch on the spec for anything else.',
       inputSchema: {
         edits: z.array(z.object({ op: z.string() }).passthrough()).optional(),
         patch: z.array(z.object({ op: z.string(), path: z.string() }).passthrough()).optional(),
@@ -561,6 +561,51 @@ export function buildMcpServer({ builds, config }: McpDeps): McpServer {
       guarded(async () => {
         builds.focus(from as Vec3, (to ?? from) as Vec3, message);
         return { content: [text('Done.')] };
+      }),
+  );
+
+  server.registerTool(
+    'simulate',
+    {
+      title: 'Test the redstone',
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      description:
+        "Run the current VibeSchem build's redstone in a simulator that follows Minecraft Java's own mechanics for the build's version: game ticks (20/s; repeater delay 1 = 2 ticks), neighbour and shape updates in the game's order, scheduled-tick priorities, quasi-connectivity, pistons with slime/honey and 0-tick spitting, observers, comparators reading containers, torch burnout. Runs the stored tests (spec.circuit.tests) or the `tests` given here, and reports pass/fail per test with failing cases, latencies (\"expect … within\"), measured clock periods, traces of signal changes, and problems such as torches burning out or blocks popping off. `inputs`/`outputs` add or override named I/O for this run only. `locations` (2–16) re-runs at other world positions, where dust and pistons update in another order, to catch location-dependent designs. `show` plays one test live in the user's viewer. Test format and step reference: read_guide(\"redstone\").",
+      inputSchema: {
+        tests: z
+          .array(z.record(z.string(), z.unknown()))
+          .optional()
+          .describe(
+            'Tests to run instead of the stored ones: {name, steps:[{set:{A:1}}, {wait:4}, {expect:{L:1}, within:10}, …], forAll?:{A:[0,15]}, samples?, trace?:[names]}.',
+          ),
+        only: z.array(z.string()).optional().describe('Run only these stored tests (by name).'),
+        inputs: z
+          .record(z.string(), z.record(z.string(), z.unknown()))
+          .optional()
+          .describe(
+            'Extra named inputs for this run: {"A": {"at": [x,y,z]}} (lever, button, plate…; "as" to place a block).',
+          ),
+        outputs: z
+          .record(z.string(), z.record(z.string(), z.unknown()))
+          .optional()
+          .describe(
+            'Extra named outputs: {"Q": {"at": [x,y,z]}} or a bus {"at": [[x,y,z], …]}; "read": "power" for 0–15.',
+          ),
+        locations: z.number().int().min(1).max(16).optional(),
+        show: z.string().optional().describe('Name of a test to play live in the viewer.'),
+      },
+    },
+    async ({ tests, only, inputs, outputs, locations, show }) =>
+      guarded(async () => {
+        const r = builds.simulate({
+          ...(tests ? { tests } : {}),
+          ...(only ? { only } : {}),
+          ...(inputs ? { inputs } : {}),
+          ...(outputs ? { outputs } : {}),
+          ...(locations ? { locations } : {}),
+          ...(show ? { show } : {}),
+        });
+        return { content: [text(r.text)] };
       }),
   );
 

@@ -2,9 +2,9 @@
   "manifest_version": "0.3",
   "name": "vibeschem",
   "display_name": "VibeSchem",
-  "version": "0.3.1",
-  "description": "AI builder for Minecraft: describe a build in your own words and Claude designs it automatically, with a live 3D preview and schematic export for WorldEdit, Litematica or structure blocks.",
-  "long_description": "Ask Claude for a build in your own words (\"build me a fantasy castle\", \"make the roof darker\") and it designs it automatically, like an experienced Minecraft builder.\n\n- **Live 3D viewer** in your browser (http://127.0.0.1:8765) with the real game textures: orbit, zoom, cut layers, pin notes on blocks for Claude to fix.\n- **Every Java version from 1.8 to the newest**: only blocks that exist in your version are used.\n- **Exports** for WorldEdit (`.schem`, `.schematic`), Litematica (`.litematic`), vanilla structure blocks (`.nbt`) and a material list; it can save straight into your WorldEdit or Litematica folder.\n\nEverything runs on your computer. The only download is the official Minecraft client from Mojang, once per version, for the textures (skipped when your launcher already has that version).\n\nNot an official Minecraft product. Not approved by or associated with Mojang or Microsoft.",
+  "version": "0.4.0",
+  "description": "AI builder for Minecraft: describe a build or a redstone circuit and Claude designs it, tests the redstone in a faithful simulator, shows it in 3D and exports a schematic for WorldEdit, Litematica or structure blocks.",
+  "long_description": "Ask Claude for a build in your own words (\"build me a fantasy castle\", \"make the roof darker\") and it designs it automatically, like an experienced Minecraft builder.\n\n- **Live 3D viewer** in your browser (http://127.0.0.1:8765) with the real game textures: orbit, zoom, cut layers, pin notes on blocks for Claude to fix.\n- **Working redstone**: a simulator that follows Minecraft Java's own mechanics for your version. Claude tests circuits (truth tables, delays, clocks) and fixes them until they pass. In the viewer you flip levers and run the circuit at any speed.\n- **Every Java version from 1.8 to the newest**: only blocks that exist in your version are used.\n- **Exports** for WorldEdit (`.schem`, `.schematic`), Litematica (`.litematic`), vanilla structure blocks (`.nbt`) and a material list; it can save straight into your WorldEdit or Litematica folder.\n\nEverything runs on your computer. The only download is the official Minecraft client from Mojang, once per version, for the textures (skipped when your launcher already has that version).\n\nNot an official Minecraft product. Not approved by or associated with Mojang or Microsoft.",
   "author": {
     "name": "SimoneRecchia",
     "url": "https://github.com/SimoneRecchia"
@@ -79,12 +79,17 @@
     {
       "name": "focus_view",
       "description": "Point the 3D viewer's camera at a part of the build, with a message."
+    },
+    {
+      "name": "simulate",
+      "description": "Test redstone circuits in a faithful Minecraft Java simulator: truth tables, delays, clocks, pistons."
     }
   ],
   "keywords": [
     "minecraft",
     "schematic",
     "ai-builder",
+    "redstone",
     "worldedit",
     "litematica",
     "building",
