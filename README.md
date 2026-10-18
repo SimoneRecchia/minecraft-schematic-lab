@@ -213,7 +213,8 @@ the smoke test (an Electron binary works as `--node`, to try the app's runtime).
 1. Bump `version` in `package.json` and `packages/shared/src/version.ts`, run `pnpm bundle`, and
    add a `## <version>` section to [CHANGELOG.md](CHANGELOG.md).
 2. Merge into `main`: Claude Code users and, after its review, Anthropic's directory pick it up.
-3. Push the tag `v<version>` on that commit: the release with the desktop extension follows.
+3. Push the tag `v<version>` on that commit, or run **Actions → Release → Run workflow** on `main`
+   (it creates the tag): the release with the desktop extension follows.
 
 See [CLAUDE.md](CLAUDE.md) for the architecture, API and the protocol Claude follows.
 
