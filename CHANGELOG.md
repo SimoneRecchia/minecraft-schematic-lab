@@ -12,6 +12,12 @@ desktop extension by `pnpm bundle`).
   `start-server.cmd` on Windows), and Node is downloaded when missing, without admin rights.
 - Ready for **Anthropic's plugin directory**: listing page (`plugin/README.md`), icon, privacy
   policy, documentation and support links, third-party notices.
+- **Security**: build scripts run in a sandbox that can't reach Node; the local server answers only
+  its own viewer (no DNS rebinding or cross-site requests) and binds to `127.0.0.1` only; a stray
+  promise rejection no longer stops it; fastify, @fastify/static and the MCP SDK updated past their
+  advisories; Node downloads pinned to v24.22.0 with SHA-256 sums; exports never overwrite a file.
+  See [SECURITY.md](SECURITY.md) to report a problem.
+- MCP tools carry titles and read-only/destructive annotations, and say they are for Minecraft.
 - **License: GNU AGPL v3** (`AGPL-3.0-only`) instead of MIT. The name and logo are reserved
   ([TRADEMARKS.md](TRADEMARKS.md)). Versions up to 0.2.0 stay available under MIT.
 

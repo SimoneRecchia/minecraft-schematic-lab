@@ -17,11 +17,9 @@ in plain words, in their language:
   task: the first start prepares everything once.
 - **A chat** (claude.ai, the desktop app's chat or the phone app) where this skill came with the
   plugin: a chat can't start the plugin's server. The builder works in Claude Code (terminal or the
-  desktop app's Code tab) and in desktop-app tasks on their computer. In the desktop app's chat they
-  can use the desktop extension instead: download `vibeschem.mcpb` from
-  https://github.com/SimoneRecchia/minecraft-schematic-lab/releases/latest and double-click it (or
-  turn it on in Settings → Extensions), then start a new chat. A browser or a phone alone can't run
-  it.
+  desktop app's Code tab) and in desktop-app tasks on their computer; a browser or a phone alone
+  can't run it. If the VibeSchem desktop extension is installed in the Claude desktop app, it can
+  provide the tools in its chat: it is turned on in Settings → Extensions.
 - **Claude Code without the plugin**: ask them to install it with
   `/plugin marketplace add SimoneRecchia/minecraft-schematic-lab`, then
   `/plugin install vibeschem@vibeschem` (or from **Customize → Plugins** in the Claude app), and to

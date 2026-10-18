@@ -23,15 +23,17 @@ structure blocks that you can paste into your world.
 
 Everything runs locally. The textures come from the official Minecraft client: from your launcher if
 that version is installed, otherwise downloaded once from Mojang's servers into
-`~/.minecraft-schematic-lab` — they are never redistributed. See [PRIVACY.md](PRIVACY.md).
+`~/.minecraft-schematic-lab` — they are never redistributed.
+
+[Changelog](CHANGELOG.md) · [Privacy](PRIVACY.md) · [Security](SECURITY.md) ·
+[Contributing](CONTRIBUTING.md) · [License](#license)
 
 ## Install the plugin
 
 Requirements: macOS, Windows 10/11 or Linux, and Claude Code (terminal or desktop app) or the Claude
 desktop app. Nothing else: Node 22+ is used if you have it, otherwise downloaded once (no admin
-rights). The
-plugin runs a small server on your computer, so it works in Claude Code and in desktop-app tasks that
-run on your computer, not in a browser or phone chat without a computer.
+rights). The plugin runs a small server on your computer, so it works in Claude Code and in
+desktop-app tasks that run on your computer, not in a browser or phone chat without a computer.
 
 **From Anthropic's plugin directory** (once VibeSchem is listed there): in the Claude app open
 **Customize → Plugins → Discover**, search for VibeSchem and click **Add**. In Claude Code, run
@@ -130,6 +132,22 @@ bash scripts/setup.sh
 Restart Claude Code once and open it in this folder: the setup registers a connector that runs the
 sources directly, and the skill in `.claude/skills` loads from the project.
 
+## Privacy and security
+
+- **Nothing leaves your computer** except downloads: the Minecraft client from Mojang (only for game
+  versions your launcher doesn't have), Node.js from nodejs.org and the server's npm packages (only
+  on the first start, if missing). No account, analytics or telemetry. Details in
+  [PRIVACY.md](PRIVACY.md); `MSL_OFFLINE=1` turns the Mojang download off.
+- **The local server answers only its own viewer**: it listens on `127.0.0.1` and refuses requests
+  from other websites (foreign `Host`, `Origin` or `Sec-Fetch-Site`).
+- **Build scripts run in a sandbox**: the JavaScript Claude writes for `script` operations runs in an
+  isolated V8 context with a time limit and no way back to Node (files, network, processes).
+- **Downloads are verified**: Node.js is pinned to an exact version with SHA-256 sums in the
+  launchers, the Minecraft client is checked against Mojang's SHA-1, npm packages come from the
+  lockfile. Exports never overwrite an existing file.
+
+Found a vulnerability? Report it privately, as [SECURITY.md](SECURITY.md) explains.
+
 ## Viewer shortcuts
 
 | | |
@@ -167,11 +185,16 @@ to the server, viewer, guides or skill. Installed plugins only update when the v
 `plugin/` is also what the directory lists. Its `README.md` is the listing page (it must say what the
 plugin runs, downloads and stores), and `plugin.json` gives the name, description, keywords, icon
 (`mcpb/icon.svg`, rendered to `mcpb/icon.png` and copied by `pnpm bundle`) and the documentation,
-support and privacy links. The `name` `vibeschem` is permanent. To submit or follow a submission,
-open the [developer portal](https://claude.ai/directory/manage) → **Submit new** → **Plugin
-bundle**, repository `SimoneRecchia/minecraft-schematic-lab`, plugin path `plugin`, and select
-**Validate**. After that, every version merged into the tracked branch is scanned and published, so
-bump `version` for each release. See
+support and privacy links. The `name` `vibeschem` is permanent; `apps/server/src/plugin.test.ts`
+checks the directory's blocking rules.
+
+To submit or follow a submission, open the [developer portal](https://claude.ai/directory/manage)
+(paid Claude plan, GitHub account connected) → **Submit new** → **Plugin bundle**: repository
+`SimoneRecchia/minecraft-schematic-lab`, plugin path `plugin`, tracked branch `main`, then
+**Validate**. Expect a reviewer on every version: the directory always holds plugins that install
+npm packages from a lockfile, run launcher scripts from a repository subfolder, or ship files over
+256 KiB or bundled code. After the first listing, every version merged into `main` is scanned and
+published, so bump `version` for each release (and add it to [CHANGELOG.md](CHANGELOG.md)). See
 [Submit your plugin](https://claude.com/docs/plugins/submit) and the
 [pre-submission checklist](https://claude.com/docs/plugins/pre-submission-checklist).
 

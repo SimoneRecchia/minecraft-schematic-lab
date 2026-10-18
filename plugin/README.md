@@ -26,15 +26,21 @@ world.
    From its GitHub repository instead, run this in Claude Code 2.1.275 or later:
    `/plugin install vibeschem --marketplace SimoneRecchia/minecraft-schematic-lab`
 2. In Claude Code, or in a Claude desktop app task on your computer (see
-   [Where it works](#where-it-works)), ask for a build, for example:
+   [Where it works](#where-it-works)), ask for a build. The 3D viewer opens in your browser.
+3. Ask for changes in the chat, or pin notes on blocks with the Note tool (N) and tell Claude to
+   look at them.
+4. Export with the **Export** button in the viewer, or ask Claude. With WorldEdit, put the `.schem`
+   file in `config/worldedit/schematics`, then run `//schem load <name>` and `//paste` in game.
 
-   > Build me a fantasy castle on a floating island for 1.20.1, at most 100×100.
+### Try these
 
-3. The 3D viewer opens in your browser. Ask for changes in the chat, or pin notes on blocks with the
-   Note tool (N) and tell Claude to look at them.
-4. Export with the **Export** button in the viewer, or ask Claude ("export it for WorldEdit"). With
-   WorldEdit, put the `.schem` file in `config/worldedit/schematics`, then run `//schem load <name>`
-   and `//paste` in game.
+> Build me a fantasy castle on a floating island for 1.20.1, at most 100×100.
+
+> Costruiscimi una casa giapponese per la 1.20.1, solo legni scuri, con un giardino zen.
+
+> A gothic cathedral for 1.12.2 in stone bricks, very detailed, with flying buttresses.
+
+> Make the roof darker and add a chimney, then export it for Litematica.
 
 ## Where it works
 
@@ -44,7 +50,7 @@ Claude desktop app that run on your computer. A chat in a web browser or on a ph
 attached, can't start it. Supported systems: macOS, Windows 10 and 11, and Linux.
 
 The very first start prepares the builder once, which takes about a minute and needs internet. It
-uses Node.js 22 or newer if you have it; otherwise it downloads the official Node.js into your home
+uses Node.js 22 or newer if you have it; otherwise it downloads the official Node.js into your user
 folder, with no administrator password. If the tools don't show up the first time, open a new
 session.
 
@@ -56,17 +62,22 @@ never sends your builds, notes or prompts anywhere. Claude sees your conversatio
 **Programs.** The plugin starts `scripts/start-server` (on Windows, `scripts/start-server.cmd`),
 which finds Node.js 22+ or downloads it, then runs `scripts/launch.mjs`. That installs the server's
 open-source dependencies if Claude didn't already install them, and starts `server/server.mjs`. The
-server listens only on your own computer (`127.0.0.1`, port 8765 or the next free one) and opens the
-viewer in your default browser.
+server listens only on your own computer (`127.0.0.1`, port 8765 or the next free one), answers only
+its own viewer (requests from other websites are refused), and opens the viewer in your default
+browser.
+
+**Build scripts.** For organic shapes Claude can write small JavaScript snippets inside a build
+(`script` operations). The server runs them in an isolated sandbox with a time limit: they can only
+place and read blocks of the build, with no access to your files, the network or other programs.
 
 **Downloads**, each only when needed:
 
-- **Mojang** (`piston-meta.mojang.com` and the official download links it lists): the Minecraft
-  client for the version you build for, once per version, to read its textures and block models.
-  Skipped when your Minecraft launcher already has that version. Checked against Mojang's checksum,
-  kept on your computer, never redistributed.
-- **Node.js** (`nodejs.org`): the official Node.js LTS, only if no Node.js 22+ is installed.
-  Checked against the published checksum.
+- **Mojang** (`piston-meta.mojang.com` for the version list, `piston-data.mojang.com` for the file):
+  the Minecraft client for the version you build for, once per version, to read its textures and
+  block models. Skipped when your Minecraft launcher already has that version. Checked against
+  Mojang's SHA-1, kept on your computer, never redistributed.
+- **Node.js** (`nodejs.org`): Node.js v24.22.0 (LTS), only if no Node.js 22+ is installed. Checked
+  against SHA-256 sums written in the launcher scripts.
 - **npm** (`registry.npmjs.org`): the exact package versions pinned in `package-lock.json`, only if
   Claude didn't already install them.
 
@@ -74,21 +85,50 @@ viewer in your default browser.
 `~/Library/Application Support/minecraft` on macOS, `~/.minecraft` on Linux), to reuse a game
 version you already installed and to find your WorldEdit and Litematica folders.
 
-**Files it writes**: its own folder `.minecraft-schematic-lab` in your user folder (your builds and
-their history, the extracted textures, downloaded game clients and Node.js). Exported schematics go only where you ask:
-a download from the viewer, your `Downloads` folder, or your WorldEdit or Litematica folder.
+**Files it writes**:
+
+- its own folder `.minecraft-schematic-lab` in your user folder: your builds and their history, the
+  extracted textures, downloaded game clients and Node.js;
+- inside the plugin's own folder, when it installs the dependencies itself: `node_modules`,
+  `.install.log` and a temporary `.install-lock`;
+- exported schematics, only where you ask: a download from the viewer, your `Downloads` folder, or
+  your WorldEdit or Litematica folder. An existing file is never overwritten: the new one gets a
+  number, like `castle (2).schem`.
+
+**Switches**, as environment variables: `MSL_OFFLINE=1` never downloads the Minecraft client (the
+preview then needs that version installed in your launcher), `MSL_NO_BROWSER=1` doesn't open the
+browser, `MSL_HOME` moves the `.minecraft-schematic-lab` folder.
 
 To remove everything, uninstall the plugin and delete the `.minecraft-schematic-lab` folder in your
 user folder.
 
-Privacy policy:
+## Privacy Policy
+
+VibeSchem collects no personal data and sends nothing about you or your builds to anyone. The full
+policy, with what it stores and the services it downloads from:
 [PRIVACY.md](https://github.com/SimoneRecchia/minecraft-schematic-lab/blob/main/PRIVACY.md).
+
+## Troubleshooting
+
+- **The tools don't appear after installing.** The first start may still be preparing. Open a new
+  session, or ask Claude to run `start-server --check`: it finishes the preparation and says what is
+  missing. In Claude Code, `/mcp` shows the server's state and its last error.
+- **No internet on the first start.** It needs internet once, for Node.js (if missing) and the
+  dependencies. Later starts work offline; each new Minecraft version needs one download unless your
+  launcher has it.
+- **The dependency install failed.** Its log is `.install.log` in the plugin's folder.
+- **The viewer doesn't open.** Open `http://127.0.0.1:8765` yourself (or the port Claude mentions).
+  If 8765 is busy, the server takes the next free port.
+- **The tools appear twice.** You also have the old `minecraft-schematic-lab` plugin or the desktop
+  extension: keep one.
 
 ## Support and source
 
 Questions and bug reports:
-[GitHub issues](https://github.com/SimoneRecchia/minecraft-schematic-lab/issues). The full source
-code, including the server bundled here, is at
+[GitHub issues](https://github.com/SimoneRecchia/minecraft-schematic-lab/issues). Security
+problems: report them privately as
+[SECURITY.md](https://github.com/SimoneRecchia/minecraft-schematic-lab/blob/main/SECURITY.md)
+explains. The full source code, including the server bundled here, is at
 [SimoneRecchia/minecraft-schematic-lab](https://github.com/SimoneRecchia/minecraft-schematic-lab).
 
 ## License
