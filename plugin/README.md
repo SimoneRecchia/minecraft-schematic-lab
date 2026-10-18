@@ -23,9 +23,10 @@ world.
 ## How to use it
 
 1. Add VibeSchem from **Customize → Plugins** in the Claude app, or with `/plugin` in Claude Code.
-   From its GitHub repository instead, run this in Claude Code:
+   From its GitHub repository instead, run this in Claude Code 2.1.275 or later:
    `/plugin install vibeschem --marketplace SimoneRecchia/minecraft-schematic-lab`
-2. Ask for a build, for example:
+2. In Claude Code, or in a Claude desktop app task on your computer (see
+   [Where it works](#where-it-works)), ask for a build, for example:
 
    > Build me a fantasy castle on a floating island for 1.20.1, at most 100×100.
 

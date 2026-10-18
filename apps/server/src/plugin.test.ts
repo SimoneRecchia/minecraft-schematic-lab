@@ -11,8 +11,10 @@ const STALE = 'plugin/ is out of date: run "pnpm bundle"';
 
 describe('plugin', () => {
   it('ships the current skill', () => {
-    const skill = ['skills', 'minecraft-builder', 'SKILL.md'];
-    expect(read(plugin, ...skill), STALE).toBe(read(repo, '.claude', ...skill));
+    const src = join(repo, '.claude', 'skills', 'minecraft-builder');
+    const out = join(plugin, 'skills', 'minecraft-builder');
+    expect(readdirSync(out).sort(), STALE).toEqual(readdirSync(src).sort());
+    for (const f of readdirSync(src)) expect(read(out, f), `${f}: ${STALE}`).toBe(read(src, f));
   });
 
   it('ships the current guides', () => {
@@ -47,7 +49,7 @@ describe('plugin', () => {
       mcpServers: Record<string, { command: string; args?: string[] }>;
     };
     expect(mcpServers).toEqual({
-      vibeschem: { command: '${CLAUDE_PLUGIN_ROOT}/scripts/start-server' },
+      vibeschem: { command: '${CLAUDE_PLUGIN_ROOT}/scripts/start-server', args: [] },
     });
     const sh = join(plugin, 'scripts', 'start-server');
     expect(read(sh).startsWith('#!/bin/sh\n')).toBe(true);

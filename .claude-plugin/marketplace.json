@@ -1,5 +1,4 @@
 {
-  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "vibeschem",
   "description": "VibeSchem: an AI builder for Minecraft schematics, for Claude.",
   "owner": {
