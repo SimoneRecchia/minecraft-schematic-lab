@@ -27,8 +27,9 @@ that version is installed, otherwise downloaded once from Mojang's servers into
 
 ## Install the plugin
 
-Requirements: macOS or Linux, and Claude Code (terminal or desktop app) or the Claude desktop app.
-Nothing else: Node 22+ is used if you have it, otherwise downloaded once (no admin rights). The
+Requirements: macOS, Windows 10/11 or Linux, and Claude Code (terminal or desktop app) or the Claude
+desktop app. Nothing else: Node 22+ is used if you have it, otherwise downloaded once (no admin
+rights). The
 plugin runs a small server on your computer, so it works in Claude Code and in desktop-app tasks that
 run on your computer, not in a browser or phone chat without a computer.
 
@@ -85,7 +86,9 @@ twice: `/plugin uninstall minecraft-schematic-lab@minecraft-schematic-lab`, then
 Set the tools up by hand before (`scripts/setup.sh` or `npx github:…`)? Remove that connector too:
 `claude mcp remove --scope user minecraft-schematic-lab`.
 
-Windows isn't supported by the plugin yet.
+Windows support is new: if the tools don't start there, please
+[open an issue](https://github.com/SimoneRecchia/minecraft-schematic-lab/issues) with what Claude
+shows in `/mcp`.
 
 ## Use it in a Claude desktop chat (extension)
 

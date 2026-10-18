@@ -16,7 +16,7 @@
 // The workspace packages (@minecraft-schematic-lab/{shared,catalog,build-spec,
 // block-compiler,formats}, including the block catalog JSON) are INLINED into server.mjs. The real npm deps stay
 // EXTERNAL: Claude Code installs them from plugin/package-lock.json when it caches the plugin, and
-// plugin/scripts/start-server.sh installs them itself when that didn't happen (this keeps the
+// plugin/scripts/launch.mjs installs them itself when that didn't happen (this keeps the
 // native @napi-rs/canvas binary out of the bundle, where esbuild can't put it anyway).
 //
 // Run AFTER the web viewer has been built (`pnpm build`, which produces

@@ -31,15 +31,15 @@ does.
 
 ## What it stores on your computer
 
-- `~/.minecraft-schematic-lab`: your builds and their history, extracted textures and models, the
-  downloaded game clients and, if needed, Node.js;
+- the `.minecraft-schematic-lab` folder in your user folder: your builds and their history,
+  extracted textures and models, the downloaded game clients and, if needed, Node.js;
 - exported schematics, only where you ask: a browser download, your `Downloads` folder, or your
   WorldEdit or Litematica folder.
 
 It reads your Minecraft launcher folder to reuse game versions you already installed and to find the
 WorldEdit and Litematica folders. Its local viewer listens only on your own computer (`127.0.0.1`).
 
-To delete everything, uninstall VibeSchem and delete the `~/.minecraft-schematic-lab` folder.
+To delete everything, uninstall VibeSchem and delete that `.minecraft-schematic-lab` folder.
 
 ## Contact
 

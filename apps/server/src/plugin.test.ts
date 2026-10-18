@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -36,17 +36,38 @@ describe('plugin', () => {
   it('has the release version and a launcher', () => {
     const root = json(repo, 'package.json');
     expect(json(plugin, '.claude-plugin', 'plugin.json').version, STALE).toBe(root.version);
-    expect(read(plugin, '.mcp.json')).toContain('${CLAUDE_PLUGIN_ROOT}/scripts/start-server.sh');
-    expect(existsSync(join(plugin, 'scripts', 'start-server.sh'))).toBe(true);
     expect(existsSync(join(plugin, 'server', 'server.mjs')), STALE).toBe(true);
     expect(existsSync(join(plugin, 'server', 'web', 'dist', 'index.html')), STALE).toBe(true);
+  });
+
+  // Claude Code spawns MCP servers with cross-spawn: the extensionless name runs the sh script on
+  // macOS/Linux and resolves to start-server.cmd (PATHEXT) on Windows.
+  it('launches the same way on macOS, Linux and Windows', () => {
+    const { mcpServers } = json(plugin, '.mcp.json') as {
+      mcpServers: Record<string, { command: string; args?: string[] }>;
+    };
+    expect(mcpServers).toEqual({
+      vibeschem: { command: '${CLAUDE_PLUGIN_ROOT}/scripts/start-server' },
+    });
+    const sh = join(plugin, 'scripts', 'start-server');
+    expect(read(sh).startsWith('#!/bin/sh\n')).toBe(true);
+    expect(statSync(sh).mode & 0o111, 'start-server must be executable').not.toBe(0);
+    expect(read(sh)).toContain('"$ROOT/scripts/launch.mjs"');
+
+    const cmd = read(plugin, 'scripts', 'start-server.cmd');
+    expect(
+      cmd.split('\r\n').every((line) => !line.includes('\n')),
+      'start-server.cmd needs CRLF',
+    ).toBe(true);
+    expect(cmd).toContain('"%ROOT%\\scripts\\launch.mjs" %*');
+    expect(existsSync(join(plugin, 'scripts', 'launch.mjs'))).toBe(true);
   });
 });
 
 // What Anthropic's plugin directory blocks on (https://claude.com/docs/plugins/pre-submission-checklist).
 describe('plugin directory listing', () => {
   const manifest = json(plugin, '.claude-plugin', 'plugin.json') as Record<string, string>;
-  // Every file the directory would scan: the committed plugin, not what start-server.sh installs.
+  // Every file the directory would scan: the committed plugin, not what launch.mjs installs.
   const local = new Set(['node_modules', '.install.log', '.install-lock']);
   const files = readdirSync(plugin, { recursive: true, withFileTypes: true })
     .map((d) => relative(plugin, join(d.parentPath, d.name)))

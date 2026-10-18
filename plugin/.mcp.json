@@ -1,8 +1,7 @@
 {
   "mcpServers": {
     "vibeschem": {
-      "command": "/bin/sh",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/start-server.sh"]
+      "command": "${CLAUDE_PLUGIN_ROOT}/scripts/start-server"
     }
   }
 }

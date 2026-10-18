@@ -40,7 +40,7 @@ world.
 VibeSchem starts a small server on your own computer, so it works where Claude can run programs on
 your computer: Claude Code (terminal, IDE extensions, or the desktop app's Code tab) and tasks in the
 Claude desktop app that run on your computer. A chat in a web browser or on a phone, with no computer
-attached, can't start it. Supported systems: macOS and Linux.
+attached, can't start it. Supported systems: macOS, Windows 10 and 11, and Linux.
 
 The very first start prepares the builder once, which takes about a minute and needs internet. It
 uses Node.js 22 or newer if you have it; otherwise it downloads the official Node.js into your home
@@ -52,10 +52,11 @@ session.
 Everything runs on your computer. VibeSchem has no account, no analytics and no telemetry, and it
 never sends your builds, notes or prompts anywhere. Claude sees your conversation as usual.
 
-**Programs.** The plugin starts `scripts/start-server.sh`, which finds Node.js 22+, installs the
-server's open-source dependencies if Claude didn't already install them, and starts
-`server/server.mjs`. The server listens only on your own computer (`127.0.0.1`, port 8765 or the
-next free one) and opens the viewer in your default browser.
+**Programs.** The plugin starts `scripts/start-server` (on Windows, `scripts/start-server.cmd`),
+which finds Node.js 22+ or downloads it, then runs `scripts/launch.mjs`. That installs the server's
+open-source dependencies if Claude didn't already install them, and starts `server/server.mjs`. The
+server listens only on your own computer (`127.0.0.1`, port 8765 or the next free one) and opens the
+viewer in your default browser.
 
 **Downloads**, each only when needed:
 
@@ -68,15 +69,16 @@ next free one) and opens the viewer in your default browser.
 - **npm** (`registry.npmjs.org`): the exact package versions pinned in `package-lock.json`, only if
   Claude didn't already install them.
 
-**Files it reads**: your Minecraft launcher folder (`~/.minecraft`, or
-`~/Library/Application Support/minecraft` on macOS), to reuse a game version you already installed
-and to find your WorldEdit and Litematica folders.
+**Files it reads**: your Minecraft launcher folder (`%APPDATA%\.minecraft` on Windows,
+`~/Library/Application Support/minecraft` on macOS, `~/.minecraft` on Linux), to reuse a game
+version you already installed and to find your WorldEdit and Litematica folders.
 
-**Files it writes**: its own folder `~/.minecraft-schematic-lab` (your builds and their history, the
-extracted textures, downloaded game clients and Node.js). Exported schematics go only where you ask:
+**Files it writes**: its own folder `.minecraft-schematic-lab` in your user folder (your builds and
+their history, the extracted textures, downloaded game clients and Node.js). Exported schematics go only where you ask:
 a download from the viewer, your `Downloads` folder, or your WorldEdit or Litematica folder.
 
-To remove everything, uninstall the plugin and delete `~/.minecraft-schematic-lab`.
+To remove everything, uninstall the plugin and delete the `.minecraft-schematic-lab` folder in your
+user folder.
 
 Privacy policy:
 [PRIVACY.md](https://github.com/SimoneRecchia/minecraft-schematic-lab/blob/main/PRIVACY.md).
