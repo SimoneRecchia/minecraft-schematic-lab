@@ -71,13 +71,18 @@ async function main(): Promise<void> {
     const note = existsSync(config.webDist)
       ? ''
       : ' (run "pnpm build" once to enable the browser viewer)';
-    process.stderr.write(
-      `minecraft-schematic-lab: MCP ready; viewer on ${config.baseUrl}${note}\n`,
-    );
+    process.stderr.write(`vibeschem: MCP ready; viewer on ${config.baseUrl}${note}\n`);
   } else {
-    process.stdout.write(`minecraft-schematic-lab listening on ${config.baseUrl}\n`);
+    process.stdout.write(`vibeschem listening on ${config.baseUrl}\n`);
   }
 }
+
+// A build script can leave a rejected promise behind in its sandbox: log it and keep serving
+// instead of letting Node end the process. Its value is not inspected (it may come from the script).
+process.on('unhandledRejection', (reason) => {
+  const detail = reason instanceof Error ? (reason.stack ?? reason.message) : 'a non-Error value';
+  process.stderr.write(`vibeschem: unhandled promise rejection: ${detail}\n`);
+});
 
 main().catch((error) => {
   process.stderr.write(

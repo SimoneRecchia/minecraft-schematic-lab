@@ -1,21 +1,27 @@
 {
-  "name": "minecraft-schematic-lab",
-  "displayName": "Minecraft Schematic Lab",
-  "version": "0.2.0",
-  "description": "Describe a Minecraft build and get an expert-quality schematic (WorldEdit .schem/.schematic, Litematica, structure .nbt) with a live 3D preview using the real game textures, for any Java version from 1.8 to the latest.",
+  "name": "vibeschem",
+  "displayName": "VibeSchem",
+  "version": "0.3.0",
+  "description": "AI builder for Minecraft: describe a build and Claude designs it, shows it in 3D with the real textures, and exports a schematic for WorldEdit, Litematica or structure blocks. Java 1.8 to latest.",
   "author": {
     "name": "SimoneRecchia",
     "url": "https://github.com/SimoneRecchia"
   },
   "homepage": "https://github.com/SimoneRecchia/minecraft-schematic-lab",
   "repository": "https://github.com/SimoneRecchia/minecraft-schematic-lab",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "keywords": [
     "minecraft",
     "schematic",
+    "ai-builder",
     "worldedit",
     "litematica",
+    "structure-block",
     "building",
     "3d-viewer"
-  ]
+  ],
+  "icon": "./icon.png",
+  "documentationUrl": "https://github.com/SimoneRecchia/minecraft-schematic-lab/tree/main/plugin#readme",
+  "supportUrl": "https://github.com/SimoneRecchia/minecraft-schematic-lab/issues",
+  "privacyPolicyUrl": "https://github.com/SimoneRecchia/minecraft-schematic-lab/blob/main/PRIVACY.md"
 }

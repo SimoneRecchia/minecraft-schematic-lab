@@ -709,7 +709,7 @@ function colorFor(state) {
 }
 
 // packages/shared/src/version.ts
-var APP_VERSION = "0.2.0";
+var APP_VERSION = "0.3.0";
 
 // apps/server/src/assets/ModelBaker.ts
 var DIRS = ["down", "up", "north", "south", "west", "east"];
@@ -1304,7 +1304,7 @@ function resolveWebDist() {
   return candidates[candidates.length - 1];
 }
 function loadConfig(argv = process.argv.slice(2)) {
-  const host = process.env.HOST || "127.0.0.1";
+  const host = "127.0.0.1";
   const port = Number.parseInt(process.env.PORT ?? "", 10) || 8765;
   const mcpMode = argv.includes("--mcp") || process.env.MCP === "1";
   const baseUrl = `http://${host}:${port}`;
@@ -1315,7 +1315,7 @@ function loadConfig(argv = process.argv.slice(2)) {
 // apps/server/src/core/BuildService.ts
 import { existsSync as existsSync4, mkdirSync as mkdirSync2, writeFileSync as writeFileSync3 } from "node:fs";
 import { homedir as homedir2 } from "node:os";
-import { join as join4 } from "node:path";
+import { extname, join as join4 } from "node:path";
 import { gzipSync as gzipSync2 } from "node:zlib";
 import jsonpatch from "fast-json-patch";
 
@@ -4511,25 +4511,108 @@ var OperationRunner = class {
 
 // packages/block-compiler/src/nodeScriptRunner.ts
 import vm from "node:vm";
+var PRIMITIVE_CALLS = ["set", "get", "rand", "randInt", "chance", "noise", "fbm"];
+function describe(thrown) {
+  try {
+    const message = thrown && typeof thrown === "object" && "message" in thrown ? thrown.message : thrown;
+    return String(message);
+  } catch {
+    return "the script threw an unreadable error";
+  }
+}
 var nodeScriptRunner = (code, api, timeoutMs) => {
-  const sandbox = vm.createContext({
-    __api: api,
-    Math,
-    JSON,
-    Number,
-    String,
-    Array,
-    Object,
-    Set,
-    Map
-  });
-  const names = Object.keys(api).filter((k) => /^[A-Za-z_$][\w$]*$/.test(k));
-  const wrapped = `(function () {
-"use strict";
-const { ${names.join(", ")} } = __api;
-${code}
-})();`;
-  vm.runInContext(wrapped, sandbox, { timeout: timeoutMs, filename: "build-script.js" });
+  const FAIL = Symbol("fail");
+  const seen = {
+    failure: null,
+    limit: null
+  };
+  const bridge = (name, ...args) => {
+    try {
+      if (name === "__failure") return seen.failure?.message ?? "script error";
+      const key = String(name);
+      const fn = key === "args" ? void 0 : api[key];
+      if (typeof fn !== "function") throw new Error(`${key} is not a function`);
+      let values;
+      if (PRIMITIVE_CALLS.includes(key)) {
+        values = args.map((a, i) => key === "set" && i === 3 ? String(a) : Number(a));
+      } else {
+        const parsed = typeof args[0] === "string" ? JSON.parse(args[0]) : null;
+        if (!Array.isArray(parsed)) throw new Error(`bad arguments for ${key}`);
+        values = parsed;
+      }
+      const result = fn(...values);
+      return result === null || typeof result !== "object" && typeof result !== "function" ? result : void 0;
+    } catch (error) {
+      if (error instanceof CompileLimitError) seen.limit ??= error;
+      seen.failure = error instanceof Error ? error : new Error(describe(error));
+      return FAIL;
+    }
+  };
+  const context = vm.createContext({}, { microtaskMode: "afterEvaluate" });
+  const install = vm.runInContext(
+    `(function (bridge, FAIL, primitiveJson, namesJson, argsJson) {
+      'use strict';
+      const primitive = JSON.parse(primitiveJson);
+      const call = (name, args) => {
+        const value = primitive.includes(name)
+          ? bridge(name, ...args)
+          : bridge(name, JSON.stringify(args));
+        if (value === FAIL) throw new Error(bridge('__failure'));
+        return value;
+      };
+      for (const name of JSON.parse(namesJson)) {
+        globalThis[name] = (...args) => call(name, args);
+      }
+      globalThis.set = (x, y, z, block) => call('set', [+x, +y, +z, String(block)]);
+      globalThis.pick = (list) => list[Math.floor(globalThis.rand() * list.length)];
+      globalThis.log = (...parts) => call('log', parts.map(String));
+      globalThis.args = JSON.parse(argsJson);
+      delete globalThis.Atomics;
+      delete globalThis.SharedArrayBuffer;
+      delete globalThis.WebAssembly;
+    })`,
+    context
+  );
+  const names = Object.keys(api).filter(
+    (k) => /^[A-Za-z_$][\w$]*$/.test(k) && typeof api[k] === "function"
+  );
+  install(
+    bridge,
+    FAIL,
+    JSON.stringify(PRIMITIVE_CALLS),
+    JSON.stringify(names),
+    JSON.stringify(api.args ?? {})
+  );
+  context.__source = code;
+  const outcome = (() => {
+    try {
+      return vm.runInContext(
+        `(() => {
+          const source = globalThis.__source;
+          delete globalThis.__source;
+          try {
+            new Function("'use strict';\\n" + source)();
+            return '';
+          } catch (error) {
+            try {
+              return 'E' + (error && typeof error === 'object' && 'message' in error ? error.message : error);
+            } catch {
+              return 'Ethe script threw an unreadable error';
+            }
+          }
+        })()`,
+        context,
+        { timeout: timeoutMs, filename: "build-script.js" }
+      );
+    } catch {
+      return `Escript timed out after ${timeoutMs} ms`;
+    }
+  })();
+  if (seen.limit) throw seen.limit;
+  if (typeof outcome === "string" && outcome.startsWith("E")) {
+    const message = outcome.slice(1);
+    throw seen.failure?.message === message ? seen.failure : new Error(message);
+  }
 };
 
 // packages/formats/src/materials.ts
@@ -4778,7 +4861,7 @@ function jsonToTag(value) {
 }
 
 // packages/formats/src/writers.ts
-var AUTHOR = "minecraft-schematic-lab";
+var AUTHOR = "VibeSchem";
 function dataVersionOf(v) {
   return v.dataVersion ?? 1343;
 }
@@ -5795,8 +5878,11 @@ ${body}`;
     if (!target) throw new UserError(`Unknown destination "${targetId}".`);
     const out = this.export(format);
     mkdirSync2(target.path, { recursive: true });
-    const path = join4(target.path, out.filename);
-    writeFileSync3(path, out.buffer);
+    const ext = extname(out.filename);
+    const stem = out.filename.slice(0, out.filename.length - ext.length);
+    let path = join4(target.path, out.filename);
+    for (let n = 2; existsSync4(path); n++) path = join4(target.path, `${stem} (${n})${ext}`);
+    writeFileSync3(path, out.buffer, { flag: "wx" });
     return { path, warnings: out.warnings };
   }
   // ---------------------------------------------------------------- rendering
@@ -6137,9 +6223,18 @@ async function createHttpServer({
     const status = error instanceof UserError ? error.status : error.statusCode ?? 500;
     reply.status(status).send({ error: error instanceof Error ? error.message : String(error) });
   });
+  app.addHook("onRequest", async (req, reply) => {
+    const hosts = [`127.0.0.1:${config.port}`, `localhost:${config.port}`];
+    const { host, origin } = req.headers;
+    const site = req.headers["sec-fetch-site"];
+    const foreign = !hosts.includes(host ?? "") || origin !== void 0 && !hosts.some((h) => origin === `http://${h}`) || site === "cross-site" || site === "same-site";
+    if (foreign) {
+      return reply.code(403).send({ error: "VibeSchem only answers its own viewer on this computer." });
+    }
+  });
   app.get("/api/health", async () => ({
     ok: true,
-    name: "minecraft-schematic-lab",
+    name: "vibeschem",
     version: APP_VERSION
   }));
   app.get("/api/events", (req, reply) => {
@@ -6331,7 +6426,7 @@ import { join as join6 } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z as z2 } from "zod";
-var INSTRUCTIONS = `minecraft-schematic-lab builds Minecraft structures from a BuildSpec (JSON) and shows them in a live 3D viewer in the user's browser, textured with the real game's blocks. The user looks at the viewer; you look at renders returned by the tools.
+var INSTRUCTIONS = `VibeSchem builds Minecraft structures from a BuildSpec (JSON) and shows them in a live 3D viewer in the user's browser, textured with the real game's blocks. The user looks at the viewer; you look at renders returned by the tools.
 
 New build:
 1. Once per session, before your first build, call read_guide("workflow") \u2014 it is short and sets the bar for quality. Read read_guide("spec") for the BuildSpec language, and the topic guides you need (roofs, styles, palettes, details, landscape, scripts).
@@ -6383,7 +6478,7 @@ async function guarded(fn) {
 }
 function buildMcpServer({ builds, config }) {
   const server = new McpServer(
-    { name: "minecraft-schematic-lab", version: APP_VERSION },
+    { name: "vibeschem", version: APP_VERSION },
     { instructions: INSTRUCTIONS }
   );
   const outcome = async (out, preview) => {
@@ -6411,7 +6506,7 @@ function buildMcpServer({ builds, config }) {
       title: "Read building guide",
       description: `Expert building guides and the full BuildSpec reference. Topics: ${GUIDE_TOPICS.join(", ")}. Start with "workflow"; read "spec" before writing your first BuildSpec.`,
       inputSchema: { topic: z2.enum(GUIDE_TOPICS) },
-      annotations: { readOnlyHint: true }
+      annotations: { readOnlyHint: true, openWorldHint: false }
     },
     async ({ topic }) => guarded(async () => {
       const file = join6(config.guidesDir, `${topic}.md`);
@@ -6426,7 +6521,13 @@ function buildMcpServer({ builds, config }) {
     "create_build",
     {
       title: "Create build",
-      description: 'Compile a BuildSpec and show it in the live viewer (opens the browser if needed). Returns a summary and a rendered preview image. Starts a new project (with its own version history) unless newProject is false, which replaces the current build as a new version. Errors (unknown blocks for the version, bad fields) come back as a list to fix. BuildSpec: {name, minecraftVersion, palette?, components?, operations:[{type, id, \u2026}]}; operation types: box, line, cylinder, cone, sphere, dome, polygon, roof, arch, blocks, layers, terrain, tree, scatter, replace, group, place, script \u2014 see read_guide("spec").',
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true
+      },
+      description: 'Build a Minecraft structure in VibeSchem: compile a BuildSpec and show it in the live 3D viewer (opens the browser if needed). Returns a summary and a rendered preview image. Starts a new project (with its own version history) unless newProject is false, which replaces the current build as a new version. Errors (unknown blocks for the version, bad fields) come back as a list to fix. BuildSpec: {name, minecraftVersion, palette?, components?, operations:[{type, id, \u2026}]}; operation types: box, line, cylinder, cone, sphere, dome, polygon, roof, arch, blocks, layers, terrain, tree, scatter, replace, group, place, script \u2014 see read_guide("spec").',
       inputSchema: {
         spec: z2.record(z2.string(), z2.unknown()).describe("The BuildSpec object."),
         newProject: z2.boolean().optional().describe("Default true. false = new version of the current project."),
@@ -6448,7 +6549,13 @@ function buildMcpServer({ builds, config }) {
     "edit_build",
     {
       title: "Edit build",
-      description: 'Change the current build without resending it; saved as a new version. "edits" (preferred) target operations by id: {op:"add", operations, after?|before?|into?: id} \xB7 {op:"replace", id, with} \xB7 {op:"update", id, set:{field: value|null}} \xB7 {op:"remove", ids} \xB7 {op:"palette", set:{key: entry|null}} \xB7 {op:"component", name, set} \xB7 {op:"meta", set:{name?, minecraftVersion?, anchor?, \u2026}}. "patch" accepts RFC 6902 JSON Patch on the spec for anything else.',
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true
+      },
+      description: 'Change the current VibeSchem Minecraft build without resending it; saved as a new version. "edits" (preferred) target operations by id: {op:"add", operations, after?|before?|into?: id} \xB7 {op:"replace", id, with} \xB7 {op:"update", id, set:{field: value|null}} \xB7 {op:"remove", ids} \xB7 {op:"palette", set:{key: entry|null}} \xB7 {op:"component", name, set} \xB7 {op:"meta", set:{name?, minecraftVersion?, anchor?, \u2026}}. "patch" accepts RFC 6902 JSON Patch on the spec for anything else.',
       inputSchema: {
         edits: z2.array(z2.object({ op: z2.string() }).passthrough()).optional(),
         patch: z2.array(z2.object({ op: z2.string(), path: z2.string() }).passthrough()).optional(),
@@ -6473,7 +6580,7 @@ function buildMcpServer({ builds, config }) {
       title: "Get current build",
       description: "Summary of the current build (size, materials, warnings, open feedback) and, with spec: true, the full BuildSpec \u2014 use it to continue work started in another session.",
       inputSchema: { spec: z2.boolean().optional() },
-      annotations: { readOnlyHint: true }
+      annotations: { readOnlyHint: true, openWorldHint: false }
     },
     async ({ spec }) => guarded(async () => {
       const cur = builds.requireCurrent();
@@ -6493,7 +6600,7 @@ function buildMcpServer({ builds, config }) {
         cutY: z2.number().int().optional(),
         size: z2.number().int().min(256).max(1400).optional().describe("Pixel size of each view (default 640).")
       },
-      annotations: { readOnlyHint: true }
+      annotations: { readOnlyHint: true, openWorldHint: false }
     },
     async ({ views, focus, cutY, size }) => guarded(async () => {
       const r = await builds.render({
@@ -6520,7 +6627,7 @@ function buildMcpServer({ builds, config }) {
         all: z2.boolean().optional().describe("Include resolved notes."),
         image: z2.boolean().optional()
       },
-      annotations: { readOnlyHint: true }
+      annotations: { readOnlyHint: true, openWorldHint: false }
     },
     async ({ all, image }) => guarded(async () => {
       const open = builds.feedback().filter((f) => f.status === "open").sort((a, b) => a.createdAt - b.createdAt);
@@ -6571,7 +6678,13 @@ function buildMcpServer({ builds, config }) {
     "resolve_feedback",
     {
       title: "Resolve feedback",
-      description: "Mark feedback notes as done after addressing them; the reply is shown to the user next to the note.",
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false
+      },
+      description: "Mark notes the user pinned on blocks in the VibeSchem viewer as done after addressing them; the reply is shown to the user next to the note.",
       inputSchema: { ids: z2.array(z2.string()).min(1), reply: z2.string().optional() }
     },
     async ({ ids, reply }) => guarded(async () => {
@@ -6585,7 +6698,7 @@ function buildMcpServer({ builds, config }) {
       title: "Inspect blocks",
       description: 'Read exactly what is in the build. With only "from": the block at that spot and the operation that placed it. With "from" and "to": text slices of the region (one character per block + legend + which operations placed what), along axis y (floor plans, default), z (front elevations) or x (side elevations). Keep regions small (\u2264 ~40\xD740 per slice).',
       inputSchema: { from: vec32, to: vec32.optional(), axis: z2.enum(["y", "z", "x"]).optional() },
-      annotations: { readOnlyHint: true }
+      annotations: { readOnlyHint: true, openWorldHint: false }
     },
     async ({ from, to, axis: axis2 }) => guarded(async () => {
       if (!to) {
@@ -6613,7 +6726,7 @@ placed by: ${hit.source}` : ""}`
         version: z2.string().optional(),
         versions: z2.boolean().optional()
       },
-      annotations: { readOnlyHint: true }
+      annotations: { readOnlyHint: true, openWorldHint: false }
     },
     async ({ query, names, version, versions }) => guarded(async () => {
       if (versions) {
@@ -6657,7 +6770,13 @@ placed by: ${hit.source}` : ""}`
     "export_build",
     {
       title: "Export build",
-      description: "Export the current build. Formats: schem (Sponge v2, WorldEdit 7+/FAWE, 1.13+, default), schem3 (Sponge v3, WorldEdit 7.3+), schematic (MCEdit, WorldEdit 6 for 1.8\u20131.12), litematic (Litematica), nbt (vanilla structure block / /place template), materials (CSV shopping list). saveTo writes the file straight into the player's Minecraft folder: worldedit (config/worldedit/schematics, single player), litematica (schematics/) or downloads. Without saveTo returns a download link. The viewer has an Export button too.",
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false
+      },
+      description: "Export the current VibeSchem build as a Minecraft schematic. Formats: schem (Sponge v2, WorldEdit 7+/FAWE, 1.13+, default), schem3 (Sponge v3, WorldEdit 7.3+), schematic (MCEdit, WorldEdit 6 for 1.8\u20131.12), litematic (Litematica), nbt (vanilla structure block / /place template), materials (CSV shopping list). saveTo writes the file straight into the player's Minecraft folder: worldedit (config/worldedit/schematics, single player), litematica (schematics/) or downloads, under a new name if that file already exists (never overwrites). Without saveTo returns a download link. The viewer has an Export button too.",
       inputSchema: {
         format: z2.enum(["schem", "schem3", "schematic", "litematic", "nbt", "materials"]).optional(),
         saveTo: z2.enum(["worldedit", "litematica", "downloads"]).optional()
@@ -6694,7 +6813,13 @@ Can also save directly to: ${targets.join(", ")}` : "")
     "history",
     {
       title: "Version history",
-      description: "List the saved versions of the current project, or restore one (restoring adds a new version, nothing is lost).",
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false
+      },
+      description: "List the saved versions of the current VibeSchem Minecraft build, or restore one (restoring adds a new version, nothing is lost).",
       inputSchema: {
         action: z2.enum(["list", "restore"]),
         n: z2.number().int().positive().optional()
@@ -6715,7 +6840,13 @@ Can also save directly to: ${targets.join(", ")}` : "")
     "projects",
     {
       title: "Projects",
-      description: "List saved projects, open one in the viewer (it becomes the current build), or rename one.",
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false
+      },
+      description: "List the saved VibeSchem Minecraft build projects, open one in the 3D viewer (it becomes the current build), or rename one.",
       inputSchema: {
         action: z2.enum(["list", "open", "rename"]),
         id: z2.string().optional(),
@@ -6744,7 +6875,13 @@ Can also save directly to: ${targets.join(", ")}` : "")
     "focus_view",
     {
       title: "Point the viewer",
-      description: "Move the user's viewer camera to a region and highlight it, optionally with a short message \u2014 to show them what you mean or changed.",
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false
+      },
+      description: "Move the camera of the user's VibeSchem 3D viewer to a region of the Minecraft build and highlight it, optionally with a short message \u2014 to show them what you mean or changed.",
       inputSchema: { from: vec32, to: vec32.optional(), message: z2.string().max(200).optional() }
     },
     async ({ from, to, message }) => guarded(async () => {
@@ -6808,15 +6945,18 @@ async function main() {
   if (config.mcpMode) {
     await startMcpServer({ builds, config });
     const note = existsSync8(config.webDist) ? "" : ' (run "pnpm build" once to enable the browser viewer)';
-    process.stderr.write(
-      `minecraft-schematic-lab: MCP ready; viewer on ${config.baseUrl}${note}
-`
-    );
+    process.stderr.write(`vibeschem: MCP ready; viewer on ${config.baseUrl}${note}
+`);
   } else {
-    process.stdout.write(`minecraft-schematic-lab listening on ${config.baseUrl}
+    process.stdout.write(`vibeschem listening on ${config.baseUrl}
 `);
   }
 }
+process.on("unhandledRejection", (reason) => {
+  const detail = reason instanceof Error ? reason.stack ?? reason.message : "a non-Error value";
+  process.stderr.write(`vibeschem: unhandled promise rejection: ${detail}
+`);
+});
 main().catch((error) => {
   process.stderr.write(
     `Fatal: ${error instanceof Error ? error.stack ?? error.message : String(error)}

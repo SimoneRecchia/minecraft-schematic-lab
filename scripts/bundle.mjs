@@ -8,12 +8,16 @@
 //   - apps/web/dist/**                   ->  plugin/server/web/dist/**  (the browser viewer it serves)
 //   - apps/server/guides/*.md            ->  plugin/server/guides/*.md  (building guides for read_guide)
 //   - .claude/skills/minecraft-builder/  ->  plugin/skills/minecraft-builder/
+//   - LICENSE, mcpb/icon.png             ->  plugin/LICENSE, plugin/icon.png (plugin directory listing)
+//   - bundled third-party licenses       ->  plugin/THIRD_PARTY_NOTICES.md
 //   - runtime npm deps                   ->  plugin/package.json (+ package-lock.json when they change)
+//
+// plugin/README.md (the directory listing page), the manifests and the launcher are hand-written.
 //
 // The workspace packages (@minecraft-schematic-lab/{shared,catalog,build-spec,
 // block-compiler,formats}, including the block catalog JSON) are INLINED into server.mjs. The real npm deps stay
 // EXTERNAL: Claude Code installs them from plugin/package-lock.json when it caches the plugin, and
-// plugin/scripts/start-server.sh installs them itself when that didn't happen (this keeps the
+// plugin/scripts/launch.mjs installs them itself when that didn't happen (this keeps the
 // native @napi-rs/canvas binary out of the bundle, where esbuild can't put it anyway).
 //
 // Run AFTER the web viewer has been built (`pnpm build`, which produces
@@ -21,7 +25,7 @@
 
 import { build } from 'esbuild';
 import { execFileSync } from 'node:child_process';
-import { cp, mkdir, rm, chmod, access, readFile, writeFile } from 'node:fs/promises';
+import { cp, mkdir, rm, chmod, access, readFile, realpath, writeFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -112,16 +116,28 @@ async function writeRuntimePackage() {
     dependencies,
   };
   await writeFile(resolve(pluginDir, 'package.json'), `${JSON.stringify(pkg, null, 2)}\n`);
-  return dependencies;
+  return pkg;
 }
 
-/** Regenerate plugin/package-lock.json only when the pinned deps changed (needs npm + network). */
-async function syncLockfile(dependencies) {
+/**
+ * Regenerate plugin/package-lock.json only when the pinned deps changed (needs npm + network);
+ * otherwise just keep its version and license in step with package.json.
+ */
+async function syncLockfile({ version, license, dependencies }) {
   const lockFile = resolve(pluginDir, 'package-lock.json');
   if (await exists(lockFile)) {
     const lock = JSON.parse(await readFile(lockFile, 'utf8'));
     const locked = lock.packages?.['']?.dependencies ?? {};
-    if (JSON.stringify(locked) === JSON.stringify(dependencies)) return;
+    if (JSON.stringify(locked) === JSON.stringify(dependencies)) {
+      const self = lock.packages[''];
+      if (lock.version !== version || self.version !== version || self.license !== license) {
+        lock.version = version;
+        self.version = version;
+        self.license = license;
+        await writeFile(lockFile, `${JSON.stringify(lock, null, 2)}\n`);
+      }
+      return;
+    }
   }
   process.stdout.write('Updating plugin/package-lock.json (npm)...\n');
   execFileSync(
@@ -129,6 +145,41 @@ async function syncLockfile(dependencies) {
     ['install', '--package-lock-only', '--ignore-scripts', '--no-audit', '--no-fund'],
     { cwd: pluginDir, stdio: 'inherit', shell: process.platform === 'win32' },
   );
+}
+
+/**
+ * plugin/THIRD_PARTY_NOTICES.md: the licenses of the third-party code shipped inside the plugin, i.e.
+ * the viewer's libraries and the block data inlined into server.mjs. The server's npm dependencies
+ * are installed from npm together with their own license files.
+ */
+async function writeThirdPartyNotices() {
+  const webModules = resolve(repoRoot, 'apps/web/node_modules');
+  const reactDom = await realpath(resolve(webModules, 'react-dom'));
+  const bundled = [
+    resolve(webModules, 'react'),
+    reactDom,
+    resolve(dirname(reactDom), 'scheduler'), // react-dom's own dependency (pnpm sibling)
+    resolve(webModules, 'three'),
+    resolve(webModules, 'zustand'),
+  ];
+  let notices =
+    '# Third-party notices\n\n' +
+    'VibeSchem is free software under the GNU Affero General Public License v3 (see `LICENSE`). The\n' +
+    'plugin also ships the third-party code below, under its own licenses. The server’s npm\n' +
+    'dependencies (`package.json`) are installed from npm together with their license files.\n\n' +
+    'Minecraft textures and models are © Mojang. They are not part of the plugin: it reads them from\n' +
+    'your own copy of the game.\n\n';
+  for (const dir of bundled) {
+    const pkg = JSON.parse(await readFile(resolve(dir, 'package.json'), 'utf8'));
+    const text = (await readFile(resolve(dir, 'LICENSE'), 'utf8')).trim();
+    notices += `## ${pkg.name} ${pkg.version} (${pkg.license})\n\n\`\`\`text\n${text}\n\`\`\`\n\n`;
+  }
+  notices +=
+    '## minecraft-data (MIT)\n\n' +
+    'The block catalog inlined into `server/server.mjs` is generated from\n' +
+    '[PrismarineJS/minecraft-data](https://github.com/PrismarineJS/minecraft-data), © PrismarineJS\n' +
+    'contributors, released under the MIT License.\n';
+  await writeFile(resolve(pluginDir, 'THIRD_PARTY_NOTICES.md'), notices);
 }
 
 async function main() {
@@ -175,7 +226,13 @@ async function main() {
   // 4) The skill (edited in .claude/skills, where it also serves this checkout).
   await cp(skillSrc, skillOut, { recursive: true });
 
-  // 5) Runtime dependencies for the plugin.
+  // 5) The license and icon Anthropic's plugin directory reads from the plugin folder, and the
+  //    notices of the third-party code bundled above.
+  await cp(resolve(repoRoot, 'LICENSE'), resolve(pluginDir, 'LICENSE'));
+  await cp(resolve(repoRoot, 'mcpb/icon.png'), resolve(pluginDir, 'icon.png'));
+  await writeThirdPartyNotices();
+
+  // 6) Runtime dependencies for the plugin.
   await syncLockfile(await writeRuntimePackage());
 
   process.stdout.write(

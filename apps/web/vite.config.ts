@@ -8,7 +8,8 @@ export default defineConfig({
   server: {
     host: '127.0.0.1',
     port: 5173,
-    proxy: { '/api': { target: API_TARGET, changeOrigin: true } },
+    // The server only answers its own origin: present the dev viewer as the server's own page.
+    proxy: { '/api': { target: API_TARGET, changeOrigin: true, headers: { origin: API_TARGET } } },
   },
   worker: { format: 'es' },
   build: {

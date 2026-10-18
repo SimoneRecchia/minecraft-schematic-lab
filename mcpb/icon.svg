@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- VibeSchem icon. Source of mcpb/icon.png (and plugin/icon.png, copied by scripts/bundle.mjs). -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8B5CF6"/>
+      <stop offset="1" stop-color="#EC4899"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="116" fill="url(#bg)"/>
+  <!-- An isometric block: top, left and right faces. -->
+  <path d="M248 132 L374 205 L248 278 L122 205 Z" fill="#FFFFFF"/>
+  <path d="M122 205 L248 278 L248 424 L122 351 Z" fill="#FFFFFF" fill-opacity="0.78"/>
+  <path d="M248 278 L374 205 L374 351 L248 424 Z" fill="#FFFFFF" fill-opacity="0.56"/>
+  <!-- The sparkle: built by AI. -->
+  <path d="M404 64 C410 98 418 106 452 112 C418 118 410 126 404 160 C398 126 390 118 356 112 C390 106 398 98 404 64 Z" fill="#FFFFFF"/>
+</svg>

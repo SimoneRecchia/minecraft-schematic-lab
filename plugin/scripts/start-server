@@ -1,0 +1,146 @@
+#!/bin/sh
+# Starts the VibeSchem MCP server for the plugin on macOS and Linux (see ../.mcp.json, which names
+# this file without an extension: on Windows, start-server.cmd next to it runs instead).
+#
+# A Minecraft player may have no Node, or one that only their terminal can find (the Claude Code
+# desktop app doesn't always see nvm/Homebrew), so this script makes the server start anyway:
+#
+#   1. Find Node >= 22: PATH, then the usual install places (Homebrew, nvm, Volta, fnm, asdf, mise),
+#      then a private copy. None? Download the official Node LTS build pinned below from nodejs.org
+#      into ~/.minecraft-schematic-lab/runtime/node (checked against its SHA-256, no admin rights,
+#      nothing else on the system changes).
+#   2. Run launch.mjs with it: it installs the server's npm dependencies when Claude Code didn't,
+#      then starts the bundled server in MCP mode.
+#
+# stdout is the MCP channel: everything this script says goes to stderr.
+# `sh start-server --check` prepares everything and reports, without starting the server.
+#
+# POSIX sh on purpose: on Debian/Ubuntu /bin/sh is dash.
+
+set -u
+
+NEED_MAJOR=22
+# The Node LTS build downloaded when no suitable Node is installed, and its SHA-256 per platform
+# (from https://nodejs.org/dist/<version>/SHASUMS256.txt; start-server.cmd has the Windows ones).
+NODE_VERSION=v24.22.0
+node_sha256() {
+  case $1 in
+    darwin-arm64) echo 6a9724d9b50a5f22b4816cded441b5a8d9ddae546191a5e5b7efa5a5e2ee26d5 ;;
+    darwin-x64) echo 495e3f273c645f3c4677d438304cdfc701729ea5dec5728f5c8e76a2dece4b91 ;;
+    linux-arm64) echo b7e7991d5407815adfa74a2a9cd4db683552c8ce32ff4a295c22e972849c3f5d ;;
+    linux-x64) echo 28ea0a438de9a13bd7891fd758eee6c7819ee8af5442dfd8d45bd65e56d4228c ;;
+  esac
+}
+ROOT=$(cd "$(dirname "$0")/.." && pwd -P)
+RUNTIME="${MSL_HOME:-$HOME/.minecraft-schematic-lab}/runtime"
+
+log() { printf 'vibeschem: %s\n' "$*" >&2; }
+die() {
+  log "$*"
+  exit 1
+}
+
+# Run by Git Bash or MSYS on Windows: the Windows launcher knows that system.
+case $(uname -s 2>/dev/null) in
+  MINGW* | MSYS* | CYGWIN*) exec cmd //d //c "$(cygpath -w "$ROOT/scripts/start-server.cmd")" "$@" ;;
+esac
+
+# A copy that lost its executable bit (some unzip tools drop it) gets it back when run with sh.
+[ -x "$0" ] || chmod +x "$0" 2>/dev/null
+
+# --- 1) Node ---------------------------------------------------------------------------------
+
+NODE=
+NODE_BEST=0
+
+consider() { # $1 = path to a node binary; keeps the newest one >= NEED_MAJOR
+  [ -x "$1" ] || return 0
+  m=$("$1" -p 'process.versions.node.split(".")[0]' 2>/dev/null) || return 0
+  case $m in '' | *[!0-9]*) return 0 ;; esac
+  if [ "$m" -ge "$NEED_MAJOR" ] && [ "$m" -gt "$NODE_BEST" ]; then
+    NODE=$1
+    NODE_BEST=$m
+  fi
+}
+
+find_node() {
+  if p=$(command -v node 2>/dev/null); then consider "$p"; fi
+  [ -n "$NODE" ] && return 0
+  for c in \
+    /opt/homebrew/bin/node /usr/local/bin/node /usr/bin/node \
+    /opt/homebrew/opt/node@*/bin/node /usr/local/opt/node@*/bin/node \
+    "${NVM_DIR:-$HOME/.nvm}"/versions/node/*/bin/node \
+    "$HOME/.volta/bin/node" \
+    "$HOME/.local/share/fnm/node-versions/"*/installation/bin/node \
+    "$HOME/Library/Application Support/fnm/node-versions/"*/installation/bin/node \
+    "$HOME/.asdf/installs/nodejs/"*/bin/node \
+    "$HOME/.local/share/mise/installs/node/"*/bin/node \
+    "$RUNTIME/node/bin/node"; do
+    consider "$c"
+  done
+}
+
+sha256() {
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | cut -d ' ' -f 1
+  else
+    sha256sum "$1" | cut -d ' ' -f 1
+  fi
+}
+
+download_node() {
+  case $(uname -s) in
+    Darwin) os=darwin ;;
+    Linux) os=linux ;;
+    *) die "Node $NEED_MAJOR+ is needed: install it from https://nodejs.org and restart Claude Code." ;;
+  esac
+  case $(uname -m) in
+    arm64 | aarch64) arch=arm64 ;;
+    x86_64 | amd64) arch=x64 ;;
+    *) die "Node $NEED_MAJOR+ is needed: install it from https://nodejs.org and restart Claude Code." ;;
+  esac
+  # An x64 process under Rosetta still gets the native build.
+  if [ "$os" = darwin ] && [ "$(sysctl -in sysctl.proc_translated 2>/dev/null)" = 1 ]; then
+    arch=arm64
+  fi
+  command -v curl >/dev/null 2>&1 || die "curl is missing; install Node $NEED_MAJOR+ from https://nodejs.org."
+
+  file="node-$NODE_VERSION-$os-$arch.tar.gz"
+  expected=$(node_sha256 "$os-$arch")
+  mkdir -p "$RUNTIME" || die "Cannot create $RUNTIME."
+  tmp=$(mktemp -d "$RUNTIME/node-download.XXXXXX") || die "Cannot create a folder in $RUNTIME."
+  log "Node $NEED_MAJOR+ not found: downloading Node $NODE_VERSION from nodejs.org into $RUNTIME (one time)."
+  if ! curl -fsSL "https://nodejs.org/dist/$NODE_VERSION/$file" -o "$tmp/$file"; then
+    rm -rf "$tmp"
+    die "Node download failed. The first start needs internet."
+  fi
+  if [ "$(sha256 "$tmp/$file")" != "$expected" ]; then
+    rm -rf "$tmp"
+    die "The downloaded Node failed its checksum; try again."
+  fi
+  tar -xzf "$tmp/$file" -C "$tmp" || {
+    rm -rf "$tmp"
+    die "Could not unpack $file."
+  }
+  rm -rf "$RUNTIME/node"
+  mv "$tmp/${file%.tar.gz}" "$RUNTIME/node" || die "Could not install Node into $RUNTIME/node."
+  rm -rf "$tmp"
+  log "Node $("$RUNTIME/node/bin/node" -v) installed in $RUNTIME/node."
+}
+
+find_node
+if [ -z "$NODE" ]; then
+  download_node
+  find_node
+  [ -n "$NODE" ] || die "Node $NEED_MAJOR+ is still missing after the download."
+fi
+NODE_DIR=$(dirname "$NODE")
+# The server spawns `open`/`xdg-open`, and npm may run `node`: keep them findable.
+PATH="$NODE_DIR:$PATH:/usr/bin:/bin"
+export PATH
+
+# --- 2) Dependencies and start (the same on every OS) -------------------------------------------
+
+VIBESCHEM_NODE=$NODE
+export VIBESCHEM_NODE
+exec "$NODE" "$ROOT/scripts/launch.mjs" "$@"

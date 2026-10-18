@@ -1,8 +1,8 @@
 {
   "mcpServers": {
-    "minecraft-schematic-lab": {
-      "command": "/bin/sh",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/start-server.sh"]
+    "vibeschem": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/scripts/start-server",
+      "args": []
     }
   }
 }

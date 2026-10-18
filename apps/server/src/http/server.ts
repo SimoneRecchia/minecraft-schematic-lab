@@ -48,9 +48,28 @@ export async function createHttpServer({
     reply.status(status).send({ error: error instanceof Error ? error.message : String(error) });
   });
 
+  // Only this computer's own viewer (and local tools like curl) may talk to the server. A website
+  // that points its domain at 127.0.0.1 (DNS rebinding) arrives with a foreign Host, and a page in
+  // another tab with a foreign Origin or a cross-site Sec-Fetch-Site.
+  app.addHook('onRequest', async (req, reply) => {
+    const hosts = [`127.0.0.1:${config.port}`, `localhost:${config.port}`];
+    const { host, origin } = req.headers;
+    const site = req.headers['sec-fetch-site'];
+    const foreign =
+      !hosts.includes(host ?? '') ||
+      (origin !== undefined && !hosts.some((h) => origin === `http://${h}`)) ||
+      site === 'cross-site' ||
+      site === 'same-site';
+    if (foreign) {
+      return reply
+        .code(403)
+        .send({ error: 'VibeSchem only answers its own viewer on this computer.' });
+    }
+  });
+
   app.get('/api/health', async () => ({
     ok: true,
-    name: 'minecraft-schematic-lab',
+    name: 'vibeschem',
     version: APP_VERSION,
   }));
 
