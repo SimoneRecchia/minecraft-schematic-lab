@@ -113,7 +113,7 @@ export function buildMcpServer({ builds, config }: McpDeps): McpServer {
       title: 'Read building guide',
       description: `Expert building guides and the full BuildSpec reference. Topics: ${GUIDE_TOPICS.join(', ')}. Start with "workflow"; read "spec" before writing your first BuildSpec.`,
       inputSchema: { topic: z.enum(GUIDE_TOPICS) },
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, openWorldHint: false },
     },
     async ({ topic }) =>
       guarded(async () => {
@@ -132,8 +132,14 @@ export function buildMcpServer({ builds, config }: McpDeps): McpServer {
     'create_build',
     {
       title: 'Create build',
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
       description:
-        'Compile a BuildSpec and show it in the live viewer (opens the browser if needed). Returns a summary and a rendered preview image. Starts a new project (with its own version history) unless newProject is false, which replaces the current build as a new version. Errors (unknown blocks for the version, bad fields) come back as a list to fix. BuildSpec: {name, minecraftVersion, palette?, components?, operations:[{type, id, …}]}; operation types: box, line, cylinder, cone, sphere, dome, polygon, roof, arch, blocks, layers, terrain, tree, scatter, replace, group, place, script — see read_guide("spec").',
+        'Build a Minecraft structure in VibeSchem: compile a BuildSpec and show it in the live 3D viewer (opens the browser if needed). Returns a summary and a rendered preview image. Starts a new project (with its own version history) unless newProject is false, which replaces the current build as a new version. Errors (unknown blocks for the version, bad fields) come back as a list to fix. BuildSpec: {name, minecraftVersion, palette?, components?, operations:[{type, id, …}]}; operation types: box, line, cylinder, cone, sphere, dome, polygon, roof, arch, blocks, layers, terrain, tree, scatter, replace, group, place, script — see read_guide("spec").',
       inputSchema: {
         spec: z.record(z.string(), z.unknown()).describe('The BuildSpec object.'),
         newProject: z
@@ -160,8 +166,14 @@ export function buildMcpServer({ builds, config }: McpDeps): McpServer {
     'edit_build',
     {
       title: 'Edit build',
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
       description:
-        'Change the current build without resending it; saved as a new version. "edits" (preferred) target operations by id: {op:"add", operations, after?|before?|into?: id} · {op:"replace", id, with} · {op:"update", id, set:{field: value|null}} · {op:"remove", ids} · {op:"palette", set:{key: entry|null}} · {op:"component", name, set} · {op:"meta", set:{name?, minecraftVersion?, anchor?, …}}. "patch" accepts RFC 6902 JSON Patch on the spec for anything else.',
+        'Change the current VibeSchem Minecraft build without resending it; saved as a new version. "edits" (preferred) target operations by id: {op:"add", operations, after?|before?|into?: id} · {op:"replace", id, with} · {op:"update", id, set:{field: value|null}} · {op:"remove", ids} · {op:"palette", set:{key: entry|null}} · {op:"component", name, set} · {op:"meta", set:{name?, minecraftVersion?, anchor?, …}}. "patch" accepts RFC 6902 JSON Patch on the spec for anything else.',
       inputSchema: {
         edits: z.array(z.object({ op: z.string() }).passthrough()).optional(),
         patch: z.array(z.object({ op: z.string(), path: z.string() }).passthrough()).optional(),
@@ -189,7 +201,7 @@ export function buildMcpServer({ builds, config }: McpDeps): McpServer {
       description:
         'Summary of the current build (size, materials, warnings, open feedback) and, with spec: true, the full BuildSpec — use it to continue work started in another session.',
       inputSchema: { spec: z.boolean().optional() },
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, openWorldHint: false },
     },
     async ({ spec }) =>
       guarded(async () => {
@@ -218,7 +230,7 @@ export function buildMcpServer({ builds, config }: McpDeps): McpServer {
           .optional()
           .describe('Pixel size of each view (default 640).'),
       },
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, openWorldHint: false },
     },
     async ({ views, focus, cutY, size }) =>
       guarded(async () => {
@@ -248,7 +260,7 @@ export function buildMcpServer({ builds, config }: McpDeps): McpServer {
         all: z.boolean().optional().describe('Include resolved notes.'),
         image: z.boolean().optional(),
       },
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, openWorldHint: false },
     },
     async ({ all, image }) =>
       guarded(async () => {
@@ -309,8 +321,14 @@ export function buildMcpServer({ builds, config }: McpDeps): McpServer {
     'resolve_feedback',
     {
       title: 'Resolve feedback',
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
       description:
-        'Mark feedback notes as done after addressing them; the reply is shown to the user next to the note.',
+        'Mark notes the user pinned on blocks in the VibeSchem viewer as done after addressing them; the reply is shown to the user next to the note.',
       inputSchema: { ids: z.array(z.string()).min(1), reply: z.string().optional() },
     },
     async ({ ids, reply }) =>
@@ -327,7 +345,7 @@ export function buildMcpServer({ builds, config }: McpDeps): McpServer {
       description:
         'Read exactly what is in the build. With only "from": the block at that spot and the operation that placed it. With "from" and "to": text slices of the region (one character per block + legend + which operations placed what), along axis y (floor plans, default), z (front elevations) or x (side elevations). Keep regions small (≤ ~40×40 per slice).',
       inputSchema: { from: vec3, to: vec3.optional(), axis: z.enum(['y', 'z', 'x']).optional() },
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, openWorldHint: false },
     },
     async ({ from, to, axis }) =>
       guarded(async () => {
@@ -357,7 +375,7 @@ export function buildMcpServer({ builds, config }: McpDeps): McpServer {
         version: z.string().optional(),
         versions: z.boolean().optional(),
       },
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, openWorldHint: false },
     },
     async ({ query, names, version, versions }) =>
       guarded(async () => {
@@ -403,8 +421,14 @@ export function buildMcpServer({ builds, config }: McpDeps): McpServer {
     'export_build',
     {
       title: 'Export build',
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
       description:
-        "Export the current build. Formats: schem (Sponge v2, WorldEdit 7+/FAWE, 1.13+, default), schem3 (Sponge v3, WorldEdit 7.3+), schematic (MCEdit, WorldEdit 6 for 1.8–1.12), litematic (Litematica), nbt (vanilla structure block / /place template), materials (CSV shopping list). saveTo writes the file straight into the player's Minecraft folder: worldedit (config/worldedit/schematics, single player), litematica (schematics/) or downloads. Without saveTo returns a download link. The viewer has an Export button too.",
+        "Export the current VibeSchem build as a Minecraft schematic. Formats: schem (Sponge v2, WorldEdit 7+/FAWE, 1.13+, default), schem3 (Sponge v3, WorldEdit 7.3+), schematic (MCEdit, WorldEdit 6 for 1.8–1.12), litematic (Litematica), nbt (vanilla structure block / /place template), materials (CSV shopping list). saveTo writes the file straight into the player's Minecraft folder: worldedit (config/worldedit/schematics, single player), litematica (schematics/) or downloads, under a new name if that file already exists (never overwrites). Without saveTo returns a download link. The viewer has an Export button too.",
       inputSchema: {
         format: z
           .enum(['schem', 'schem3', 'schematic', 'litematic', 'nbt', 'materials'])
@@ -447,8 +471,14 @@ export function buildMcpServer({ builds, config }: McpDeps): McpServer {
     'history',
     {
       title: 'Version history',
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
       description:
-        'List the saved versions of the current project, or restore one (restoring adds a new version, nothing is lost).',
+        'List the saved versions of the current VibeSchem Minecraft build, or restore one (restoring adds a new version, nothing is lost).',
       inputSchema: {
         action: z.enum(['list', 'restore']),
         n: z.number().int().positive().optional(),
@@ -474,8 +504,14 @@ export function buildMcpServer({ builds, config }: McpDeps): McpServer {
     'projects',
     {
       title: 'Projects',
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
       description:
-        'List saved projects, open one in the viewer (it becomes the current build), or rename one.',
+        'List the saved VibeSchem Minecraft build projects, open one in the 3D viewer (it becomes the current build), or rename one.',
       inputSchema: {
         action: z.enum(['list', 'open', 'rename']),
         id: z.string().optional(),
@@ -509,8 +545,14 @@ export function buildMcpServer({ builds, config }: McpDeps): McpServer {
     'focus_view',
     {
       title: 'Point the viewer',
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
       description:
-        "Move the user's viewer camera to a region and highlight it, optionally with a short message — to show them what you mean or changed.",
+        "Move the camera of the user's VibeSchem 3D viewer to a region of the Minecraft build and highlight it, optionally with a short message — to show them what you mean or changed.",
       inputSchema: { from: vec3, to: vec3.optional(), message: z.string().max(200).optional() },
     },
     async ({ from, to, message }) =>

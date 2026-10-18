@@ -287,6 +287,67 @@ describe('compileBuildSpec', () => {
     expect(errors.join(' ')).toMatch(/nope_block|undefinedThing/);
   });
 
+  it('gives scripts args, get, pick and a catchable error for a bad operation', () => {
+    const r = compile(
+      spec([
+        {
+          type: 'script',
+          args: { block: 'stone' },
+          code: `set(0, 0, 0, args.block);
+            if (get(0, 0, 0) === 'minecraft:stone') set(1, 0, 0, pick(['oak_planks']));
+            try { op({ type: 'nope' }); } catch (e) { if (e instanceof Error) set(2, 0, 0, 'dirt'); }`,
+        },
+      ]),
+    );
+    expect(at(r, 1, 0, 0)).toBe('minecraft:oak_planks');
+    expect(at(r, 2, 0, 0)).toBe('minecraft:dirt');
+  });
+
+  it('keeps scripts away from Node', () => {
+    // Every way back to the host's Function would give the script `process` and `require`.
+    const escapes = [
+      "set.constructor('return typeof process')()",
+      "args.constructor.constructor('return typeof process')()",
+      "Object.constructor('return typeof process')()",
+      "(() => { try { op({ type: 'nope' }); } catch (e) { return e.constructor.constructor('return typeof process')(); } })()",
+      "(() => { try { set({ valueOf() { throw new Error('x'); } }, 0, 0, 'stone'); } catch (e) { return e.constructor.constructor('return typeof process')(); } })()",
+      'typeof globalThis.process + typeof require + typeof Atomics + typeof WebAssembly',
+    ];
+    for (const expression of escapes) {
+      const r = compile(
+        spec([
+          { type: 'blocks', block: 'stone', at: [[9, 9, 9]] },
+          {
+            type: 'script',
+            code: `if (!/^(undefined)+$/.test(${expression})) set(0, 0, 0, 'gold_block');`,
+          },
+        ]),
+      );
+      expect(at(r, 0, 0, 0), expression).toBe('minecraft:air');
+    }
+  });
+
+  it('reports a syntax error, even one that tries to close the wrapper', () => {
+    for (const code of ['set(0, 0, 0, "stone"', '})(); set(0, 0, 0, "stone"); (function () {']) {
+      expect(errorsOf(spec([{ type: 'script', code }])).join(' '), code).toMatch(/script failed/);
+    }
+  });
+
+  it('stops scripts that never end, also through promises', () => {
+    for (const code of ['while (true) {}', 'const f = () => Promise.resolve().then(f); f();']) {
+      let message = '';
+      try {
+        compileBuildSpec(spec([{ type: 'script', code }]), {
+          scriptRunner: nodeScriptRunner,
+          scriptTimeoutMs: 200,
+        });
+      } catch (e) {
+        message = e instanceof BuildSpecError ? e.errors.join(' ') : String(e);
+      }
+      expect(message, code).toMatch(/timed out/);
+    }
+  });
+
   it('weathers blocks with replace while keeping their orientation', () => {
     const r = compile(
       spec([

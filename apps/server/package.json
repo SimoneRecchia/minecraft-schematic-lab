@@ -14,16 +14,16 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@fastify/static": "^8.0.3",
+    "@fastify/static": "^10.1.6",
     "@minecraft-schematic-lab/block-compiler": "workspace:*",
     "@minecraft-schematic-lab/build-spec": "workspace:*",
     "@minecraft-schematic-lab/catalog": "workspace:*",
     "@minecraft-schematic-lab/formats": "workspace:*",
     "@minecraft-schematic-lab/shared": "workspace:*",
-    "@modelcontextprotocol/sdk": "^1.12.0",
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "@napi-rs/canvas": "^0.1.65",
     "fast-json-patch": "^3.1.1",
-    "fastify": "^5.2.0",
+    "fastify": "^5.12.7",
     "fflate": "^0.8.2",
     "zod": "^3.24.1"
   },

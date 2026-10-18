@@ -5,9 +5,10 @@ rem
 rem A Minecraft player may have no Node, so this script makes the server start anyway:
 rem
 rem   1. Find Node 22 or newer: PATH, then the usual install places (nodejs.org installer, nvm-windows,
-rem      Volta, fnm, Scoop), then a private copy. None? Download the official Node LTS build from
-rem      nodejs.org into the user folder, .minecraft-schematic-lab\runtime\node, with the curl and tar
-rem      of Windows 10/11 (checksum-verified, no admin rights, nothing else on the system changes).
+rem      Volta, fnm, Scoop), then a private copy. None? Download the official Node LTS build pinned
+rem      below from nodejs.org into the user folder, .minecraft-schematic-lab\runtime\node, with the
+rem      curl and tar of Windows 10/11 (checked against its SHA-256, no admin rights, nothing else on
+rem      the system changes).
 rem   2. Run launch.mjs with it: it installs the server's npm dependencies when Claude Code didn't,
 rem      then starts the bundled server in MCP mode.
 rem
@@ -20,8 +21,11 @@ rem Keep the CRLF line endings: cmd.exe misreads labels in a file without them.
 setlocal EnableExtensions DisableDelayedExpansion
 
 set "NEED_MAJOR=22"
-rem The LTS line downloaded when no suitable Node is installed.
-set "NODE_LINE=24"
+rem The Node LTS build downloaded when no suitable Node is installed, and its SHA-256 per CPU
+rem (from https://nodejs.org/dist/VERSION/SHASUMS256.txt; start-server has the macOS and Linux ones).
+set "NODE_VERSION=v24.22.0"
+set "NODE_SHA256_x64=f9683a19877e12a9b167305c8db71040d812876359de21f0d2e97c3f321f80c3"
+set "NODE_SHA256_arm64=3a5c209a5bc59e65b3bc0fa13ed5e166a26bd3d55332847f498b76b037408d61"
 for %%r in ("%~dp0..") do set "ROOT=%%~fr"
 set "RUNTIME=%USERPROFILE%\.minecraft-schematic-lab\runtime"
 if defined MSL_HOME set "RUNTIME=%MSL_HOME%\runtime"
@@ -76,21 +80,14 @@ if /i "%PROCESSOR_ARCHITEW6432%"=="ARM64" set "ARCH=arm64"
 if /i "%PROCESSOR_ARCHITECTURE%"=="x86" if not defined PROCESSOR_ARCHITEW6432 call :need_node & exit /b 1
 where curl.exe >nul 2>nul || call :need_node || exit /b 1
 where tar.exe >nul 2>nul || call :need_node || exit /b 1
-set "BASE=https://nodejs.org/dist/latest-v%NODE_LINE%.x"
+set "FILE=node-%NODE_VERSION%-win-%ARCH%.zip"
+set "SUM=%NODE_SHA256_x64%"
+if /i "%ARCH%"=="arm64" set "SUM=%NODE_SHA256_arm64%"
 set "DL=%RUNTIME%\node-download-%RANDOM%%RANDOM%"
 mkdir "%DL%" 2>nul
 if not exist "%DL%" call :log "Cannot create a folder in %RUNTIME%." & exit /b 1
-call :log "Node %NEED_MAJOR%+ not found: downloading Node %NODE_LINE% from nodejs.org into %RUNTIME% (one time)."
-curl.exe -fsSL "%BASE%/SHASUMS256.txt" -o "%DL%\SHASUMS256.txt"
-if errorlevel 1 call :fail "Could not reach nodejs.org. The first start needs internet." & exit /b 1
-set "FILE="
-set "SUM="
-for /f "tokens=1,2" %%a in ('findstr /l /c:"-win-%ARCH%.zip" "%DL%\SHASUMS256.txt"') do (
-  set "SUM=%%a"
-  set "FILE=%%b"
-)
-if not defined FILE call :fail "No Node %NODE_LINE% build for win-%ARCH%." & exit /b 1
-curl.exe -fsSL "%BASE%/%FILE%" -o "%DL%\%FILE%"
+call :log "Node %NEED_MAJOR%+ not found: downloading Node %NODE_VERSION% from nodejs.org into %RUNTIME% (one time)."
+curl.exe -fsSL "https://nodejs.org/dist/%NODE_VERSION%/%FILE%" -o "%DL%\%FILE%"
 if errorlevel 1 call :fail "Node download failed. The first start needs internet." & exit /b 1
 set "GOT="
 for /f "skip=1 delims=" %%h in ('certutil -hashfile "%DL%\%FILE%" SHA256') do (

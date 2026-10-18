@@ -50,7 +50,8 @@ function resolveWebDist(): string {
 }
 
 export function loadConfig(argv: string[] = process.argv.slice(2)): AppConfig {
-  const host = process.env.HOST || '127.0.0.1';
+  // Loopback only, whatever the environment says: the viewer and its API are for this computer.
+  const host = '127.0.0.1';
   const port = Number.parseInt(process.env.PORT ?? '', 10) || 8765;
   const mcpMode = argv.includes('--mcp') || process.env.MCP === '1';
   const baseUrl = `http://${host}:${port}`;

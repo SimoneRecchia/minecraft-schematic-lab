@@ -2,6 +2,8 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { medievalCottage } from '@minecraft-schematic-lab/build-spec';
@@ -12,6 +14,7 @@ import { CaptureBroker } from './core/CaptureBroker';
 import { EventHub } from './core/EventHub';
 import { ProjectStore } from './core/ProjectStore';
 import { createHttpServer } from './http/server';
+import { buildMcpServer } from './mcp/server';
 
 process.env.MSL_HOME = mkdtempSync(join(tmpdir(), 'msl-test-'));
 process.env.MSL_NO_BROWSER = '1';
@@ -24,10 +27,11 @@ const offlineAssets = {
   bake: () => Promise.reject(new Error('offline')),
 } as unknown as AssetStore;
 
+// Port 80 matches the Host header app.inject sends by default (localhost:80).
 const config: AppConfig = {
   host: '127.0.0.1',
-  port: 0,
-  baseUrl: 'http://127.0.0.1:0',
+  port: 80,
+  baseUrl: 'http://127.0.0.1:80',
   mcpMode: false,
   webDist: '/nonexistent',
   guidesDir: join(import.meta.dirname, '..', 'guides'),
@@ -50,6 +54,28 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await app.close();
+});
+
+describe('who may call the server', () => {
+  const post = (headers: Record<string, string>) =>
+    app.inject({ method: 'POST', url: '/api/build', headers, payload: { spec: medievalCottage } });
+
+  it('answers this computer: the viewer, curl and Claude', async () => {
+    expect(
+      (await app.inject({ url: '/api/health', headers: { host: '127.0.0.1:80' } })).statusCode,
+    ).toBe(200);
+    expect(
+      (await post({ origin: 'http://localhost:80', 'sec-fetch-site': 'same-origin' })).statusCode,
+    ).toBe(200);
+  });
+
+  it('refuses other websites, also through DNS rebinding', async () => {
+    expect(
+      (await app.inject({ url: '/api/health', headers: { host: 'evil.example:80' } })).statusCode,
+    ).toBe(403);
+    expect((await post({ origin: 'https://evil.example' })).statusCode).toBe(403);
+    expect((await post({ 'sec-fetch-site': 'cross-site' })).statusCode).toBe(403);
+  });
 });
 
 describe('build API', () => {
@@ -156,5 +182,34 @@ describe('build API', () => {
       url: `/api/projects/${list.projects[0].id}/open`,
     });
     expect(res.statusCode).toBe(200);
+  });
+});
+
+describe('MCP tools', () => {
+  it('give every tool a title and the annotations the plugin directory asks for', async () => {
+    const server = buildMcpServer({ builds, config });
+    const [serverSide, clientSide] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: 'test', version: '0' });
+    await Promise.all([server.connect(serverSide), client.connect(clientSide)]);
+    const { tools } = await client.listTools();
+    expect(tools.length).toBe(13);
+    for (const tool of tools) {
+      expect(tool.title, tool.name).toBeTruthy();
+      expect(typeof tool.annotations?.readOnlyHint, tool.name).toBe('boolean');
+      if (!tool.annotations?.readOnlyHint) {
+        expect(typeof tool.annotations?.destructiveHint, tool.name).toBe('boolean');
+      }
+    }
+    await client.close();
+  });
+});
+
+describe('saving an export into a Minecraft folder', () => {
+  it('never overwrites a file that is already there', () => {
+    process.env.MINECRAFT_DIR = mkdtempSync(join(tmpdir(), 'msl-minecraft-'));
+    const first = builds.saveExport('schem', 'worldedit').path;
+    const second = builds.saveExport('schem', 'worldedit').path;
+    expect(second).not.toBe(first);
+    expect(second.endsWith(' (2).schem')).toBe(true);
   });
 });

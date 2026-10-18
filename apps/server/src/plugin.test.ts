@@ -62,6 +62,11 @@ describe('plugin', () => {
       'start-server.cmd needs CRLF',
     ).toBe(true);
     expect(cmd).toContain('"%ROOT%\\scripts\\launch.mjs" %*');
+    // Both download the same pinned Node, checked against SHA-256 sums written in the scripts.
+    const pinned = /NODE_VERSION=(v\d+\.\d+\.\d+)/;
+    expect(cmd.match(pinned)?.[1]).toBe(read(sh).match(pinned)?.[1]);
+    expect(read(sh).match(/[0-9a-f]{64}/g)).toHaveLength(4);
+    expect(cmd.match(/[0-9a-f]{64}/g)).toHaveLength(2);
     expect(existsSync(join(plugin, 'scripts', 'launch.mjs'))).toBe(true);
   });
 });

@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { extname, join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import jsonpatch from 'fast-json-patch';
 import type { Operation } from 'fast-json-patch';
@@ -457,8 +457,12 @@ export class BuildService {
     if (!target) throw new UserError(`Unknown destination "${targetId}".`);
     const out = this.export(format);
     mkdirSync(target.path, { recursive: true });
-    const path = join(target.path, out.filename);
-    writeFileSync(path, out.buffer);
+    // Never overwrite a file already in the player's folder: "castle.schem" becomes "castle (2).schem".
+    const ext = extname(out.filename);
+    const stem = out.filename.slice(0, out.filename.length - ext.length);
+    let path = join(target.path, out.filename);
+    for (let n = 2; existsSync(path); n++) path = join(target.path, `${stem} (${n})${ext}`);
+    writeFileSync(path, out.buffer, { flag: 'wx' });
     return { path, warnings: out.warnings };
   }
 
