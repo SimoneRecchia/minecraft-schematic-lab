@@ -7,7 +7,7 @@
 //   plugin/server/**                   ->  dist/mcpb/server/**         (server.mjs, viewer, guides)
 //   plugin/package{,-lock}.json        ->  dist/mcpb/node_modules      (npm ci --omit=dev)
 //   + the @napi-rs/canvas binary of every platform in CANVAS_PLATFORMS (from the lockfile, checked)
-//   dist/mcpb                          ->  dist/minecraft-schematic-lab.mcpb   (mcpb pack)
+//   dist/mcpb                          ->  dist/vibeschem.mcpb                 (mcpb pack)
 //   plugin/skills/minecraft-builder    ->  dist/minecraft-builder-skill.zip    (Customize > Skills)
 //
 // Claude Desktop runs `node server.mjs` with its own built-in Node (24.x), so players need nothing
@@ -39,7 +39,7 @@ const pluginDir = resolve(repoRoot, 'plugin');
 const srcDir = resolve(repoRoot, 'mcpb');
 const distDir = resolve(repoRoot, 'dist');
 const stageDir = resolve(distDir, 'mcpb');
-const mcpbFile = resolve(distDir, 'minecraft-schematic-lab.mcpb');
+const mcpbFile = resolve(distDir, 'vibeschem.mcpb');
 const skillDir = resolve(pluginDir, 'skills/minecraft-builder');
 const skillZip = resolve(distDir, 'minecraft-builder-skill.zip');
 const mcpbCli = resolve(repoRoot, 'node_modules/@anthropic-ai/mcpb/dist/cli/cli.js');

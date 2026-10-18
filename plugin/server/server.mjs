@@ -709,7 +709,7 @@ function colorFor(state) {
 }
 
 // packages/shared/src/version.ts
-var APP_VERSION = "0.2.0";
+var APP_VERSION = "0.3.0";
 
 // apps/server/src/assets/ModelBaker.ts
 var DIRS = ["down", "up", "north", "south", "west", "east"];
@@ -4778,7 +4778,7 @@ function jsonToTag(value) {
 }
 
 // packages/formats/src/writers.ts
-var AUTHOR = "minecraft-schematic-lab";
+var AUTHOR = "VibeSchem";
 function dataVersionOf(v) {
   return v.dataVersion ?? 1343;
 }
@@ -6139,7 +6139,7 @@ async function createHttpServer({
   });
   app.get("/api/health", async () => ({
     ok: true,
-    name: "minecraft-schematic-lab",
+    name: "vibeschem",
     version: APP_VERSION
   }));
   app.get("/api/events", (req, reply) => {
@@ -6331,7 +6331,7 @@ import { join as join6 } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z as z2 } from "zod";
-var INSTRUCTIONS = `minecraft-schematic-lab builds Minecraft structures from a BuildSpec (JSON) and shows them in a live 3D viewer in the user's browser, textured with the real game's blocks. The user looks at the viewer; you look at renders returned by the tools.
+var INSTRUCTIONS = `VibeSchem builds Minecraft structures from a BuildSpec (JSON) and shows them in a live 3D viewer in the user's browser, textured with the real game's blocks. The user looks at the viewer; you look at renders returned by the tools.
 
 New build:
 1. Once per session, before your first build, call read_guide("workflow") \u2014 it is short and sets the bar for quality. Read read_guide("spec") for the BuildSpec language, and the topic guides you need (roofs, styles, palettes, details, landscape, scripts).
@@ -6383,7 +6383,7 @@ async function guarded(fn) {
 }
 function buildMcpServer({ builds, config }) {
   const server = new McpServer(
-    { name: "minecraft-schematic-lab", version: APP_VERSION },
+    { name: "vibeschem", version: APP_VERSION },
     { instructions: INSTRUCTIONS }
   );
   const outcome = async (out, preview) => {
@@ -6809,11 +6809,11 @@ async function main() {
     await startMcpServer({ builds, config });
     const note = existsSync8(config.webDist) ? "" : ' (run "pnpm build" once to enable the browser viewer)';
     process.stderr.write(
-      `minecraft-schematic-lab: MCP ready; viewer on ${config.baseUrl}${note}
+      `vibeschem: MCP ready; viewer on ${config.baseUrl}${note}
 `
     );
   } else {
-    process.stdout.write(`minecraft-schematic-lab listening on ${config.baseUrl}
+    process.stdout.write(`vibeschem listening on ${config.baseUrl}
 `);
   }
 }

@@ -35,7 +35,7 @@ export interface ExportOutput {
   warnings: string[];
 }
 
-const AUTHOR = 'minecraft-schematic-lab';
+const AUTHOR = 'VibeSchem';
 
 function dataVersionOf(v: VersionInfo): number {
   return v.dataVersion ?? 1343;

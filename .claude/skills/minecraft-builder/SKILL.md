@@ -1,19 +1,19 @@
 ---
 name: minecraft-builder
-description: Build Minecraft structures (houses, castles, cathedrals, cities, islands, statues, landscapes…) as WorldEdit/Litematica schematics with the minecraft-schematic-lab tools, at expert-builder quality. Use whenever the user asks to build, design, create, modify, re-texture, resize, convert to another Minecraft version, or export something for Minecraft — in any language ("costruiscimi un castello", "fai il tetto più scuro", "esporta per la 1.12") — even if they don't mention schematics or tools.
+description: Build Minecraft structures (houses, castles, cathedrals, cities, islands, statues, landscapes…) as WorldEdit/Litematica schematics with the VibeSchem tools, at expert-builder quality. Use whenever the user asks to build, design, create, modify, re-texture, resize, convert to another Minecraft version, or export something for Minecraft — in any language ("costruiscimi un castello", "fai il tetto più scuro", "esporta per la 1.12") — even if they don't mention schematics or tools.
 ---
 
 # Minecraft builder
 
 You turn a description into a build an experienced Minecraft builder would be proud of. The user watches a live 3D viewer (real game textures) in their browser; you see renders returned by the tools. Talk to the user in their language, briefly, without technical jargon.
 
-## Tools (MCP server `minecraft-schematic-lab`)
+## Tools (VibeSchem's MCP server)
 `read_guide` · `create_build` · `edit_build` · `get_build` · `render_views` · `get_feedback` · `resolve_feedback` · `inspect` · `list_blocks` · `export_build` · `history` · `projects` · `focus_view`.
 If they are not available, the server isn't loaded:
 - **Inside the minecraft-schematic-lab repository** (its CLAUDE.md is loaded): follow CLAUDE.md (one-time setup, first build over HTTP).
 - **Installed as the plugin**: the first start prepares Node and the server's parts once (internet, about a minute) and may have outlasted Claude Code's wait. Tell the user it's a one-time preparation, run `sh "${CLAUDE_SKILL_DIR}/../../scripts/start-server.sh" --check` (it finishes the job, or says in its last lines what is missing), then ask them to open a new session or restart Claude Code so the tools load.
-- **A chat in the Claude app (not Claude Code)**: the tools come from the desktop extension. Ask them to download `minecraft-schematic-lab.mcpb` from https://github.com/SimoneRecchia/minecraft-schematic-lab/releases/latest and double-click it (or, if it's installed, turn it on in Settings → Extensions), then start a new chat. It needs the Claude desktop app on macOS or Windows; claude.ai in a browser or on a phone can't run it.
-- **Neither**: ask them to install the plugin — `/plugin marketplace add SimoneRecchia/minecraft-schematic-lab`, then `/plugin install minecraft-schematic-lab@minecraft-schematic-lab` — and restart Claude Code once.
+- **A chat in the Claude app (not Claude Code)**: the tools come from the desktop extension. Ask them to download `vibeschem.mcpb` from https://github.com/SimoneRecchia/minecraft-schematic-lab/releases/latest and double-click it (or, if it's installed, turn it on in Settings → Extensions), then start a new chat. It needs the Claude desktop app on macOS or Windows; claude.ai in a browser or on a phone can't run it.
+- **Neither**: ask them to install the VibeSchem plugin — `/plugin marketplace add SimoneRecchia/minecraft-schematic-lab`, then `/plugin install vibeschem@vibeschem` — and restart Claude Code once.
 
 ## Every new build
 1. **Read `read_guide("workflow")` once per session** before the first build, and `read_guide("spec")` unless you already know the BuildSpec language well. Then read only the topic guides you need: `roofs` (almost always), `styles`, `palettes`, `details`, `landscape`, `scripts`, `versions` (old targets), `examples`.

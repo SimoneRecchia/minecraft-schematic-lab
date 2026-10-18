@@ -1,6 +1,7 @@
 # minecraft-schematic-lab — operating protocol for Claude Code
 
-You are operating inside **minecraft-schematic-lab**. The end user is a **Minecraft player, not a
+You are operating inside **minecraft-schematic-lab**, the repository of **VibeSchem** (the product
+name players see: plugin, desktop extension, viewer). The end user is a **Minecraft player, not a
 programmer**: they say things like "costruiscimi un castello fantasy" or "fai il tetto più scuro".
 Your job is to make that work — including the one-time technical setup, explained in plain language
 (match their language; they often write Italian).
@@ -22,14 +23,15 @@ version for textures (skipped when the player's launcher already has that versio
 **How to build well**: the skill `.claude/skills/minecraft-builder/SKILL.md` and the guides served by
 the `read_guide` tool (`apps/server/guides/*.md`). Always follow them for build requests.
 
-Players normally don't clone this repo: they install the **Claude Code plugin** in `plugin/` (marketplace
-`.claude-plugin/marketplace.json` at the repo root), which brings the server, the guides and the skill.
+Players normally don't clone this repo: they install the **VibeSchem plugin** in `plugin/` (from
+Anthropic's plugin directory, or the marketplace `.claude-plugin/marketplace.json` at the repo root),
+which brings the server, the guides and the skill.
 
 `<REPO>` = the directory containing this file.
 
 ## The golden rule: check setup state FIRST on any build/modify request
 
-If the plugin's tools are loaded (names start with `mcp__plugin_minecraft-schematic-lab_`), nothing
+If the plugin's tools are loaded (names start with `mcp__plugin_vibeschem_`), nothing
 needs setting up: build with them. Otherwise "set up" means all of:
 
 1. `node` ≥ 22 (`node -p 'process.versions.node.split(".")[0]'`).
@@ -119,8 +121,14 @@ When the tools **are** loaded, use them and never start a second server.
   viewer, guides or skill (`apps/server/src/plugin.test.ts` fails on a stale copy). Installed plugins
   only update when `version` changes: bump it in the root `package.json` (and
   `packages/shared/src/version.ts`), then `pnpm bundle`. Check with `claude plugin validate .`.
+- `plugin/` is also what Anthropic's plugin directory scans and lists (developer portal, plugin path
+  `plugin`; https://claude.com/docs/plugins/pre-submission-checklist). Its hand-written `README.md`
+  is the listing page and must disclose everything the plugin runs, downloads and writes; the
+  listing's name, description, keywords, icon and links come from `plugin.json`. `pnpm bundle` copies
+  `LICENSE` and `mcpb/icon.png` (drawn from `mcpb/icon.svg`) into it. The plugin `name` (`vibeschem`)
+  is permanent; `plugin.test.ts` checks the directory's blocking rules.
 - The Chat tab of the Claude desktop app can't run a plugin's local server: it gets the tools from a
-  Desktop Extension, `pnpm mcpb` → `dist/minecraft-schematic-lab.mcpb` (+ `dist/minecraft-builder-skill.zip`
+  Desktop Extension, `pnpm mcpb` → `dist/vibeschem.mcpb` (+ `dist/minecraft-builder-skill.zip`
   for Customize → Skills), built from `plugin/server` and `mcpb/manifest.json` by `scripts/mcpb.mjs`,
   which also smoke-tests the packed file. It runs on Claude Desktop's built-in Node (Electron's, no
   `/bin/sh` launcher) and bundles the `@napi-rs/canvas` binaries for macOS and Windows. The manifest's

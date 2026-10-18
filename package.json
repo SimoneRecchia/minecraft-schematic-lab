@@ -1,6 +1,6 @@
 {
   "name": "minecraft-schematic-lab",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "packageManager": "pnpm@11.6.0",
   "engines": {

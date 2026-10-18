@@ -50,7 +50,7 @@ export async function createHttpServer({
 
   app.get('/api/health', async () => ({
     ok: true,
-    name: 'minecraft-schematic-lab',
+    name: 'vibeschem',
     version: APP_VERSION,
   }));
 

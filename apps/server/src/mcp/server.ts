@@ -25,7 +25,7 @@ export interface McpDeps {
 
 type Content = CallToolResult['content'];
 
-const INSTRUCTIONS = `minecraft-schematic-lab builds Minecraft structures from a BuildSpec (JSON) and shows them in a live 3D viewer in the user's browser, textured with the real game's blocks. The user looks at the viewer; you look at renders returned by the tools.
+const INSTRUCTIONS = `VibeSchem builds Minecraft structures from a BuildSpec (JSON) and shows them in a live 3D viewer in the user's browser, textured with the real game's blocks. The user looks at the viewer; you look at renders returned by the tools.
 
 New build:
 1. Once per session, before your first build, call read_guide("workflow") — it is short and sets the bar for quality. Read read_guide("spec") for the BuildSpec language, and the topic guides you need (roofs, styles, palettes, details, landscape, scripts).
@@ -83,7 +83,7 @@ async function guarded(fn: () => Promise<CallToolResult>): Promise<CallToolResul
 
 export function buildMcpServer({ builds, config }: McpDeps): McpServer {
   const server = new McpServer(
-    { name: 'minecraft-schematic-lab', version: APP_VERSION },
+    { name: 'vibeschem', version: APP_VERSION },
     { instructions: INSTRUCTIONS },
   );
 

@@ -72,10 +72,10 @@ async function main(): Promise<void> {
       ? ''
       : ' (run "pnpm build" once to enable the browser viewer)';
     process.stderr.write(
-      `minecraft-schematic-lab: MCP ready; viewer on ${config.baseUrl}${note}\n`,
+      `vibeschem: MCP ready; viewer on ${config.baseUrl}${note}\n`,
     );
   } else {
-    process.stdout.write(`minecraft-schematic-lab listening on ${config.baseUrl}\n`);
+    process.stdout.write(`vibeschem listening on ${config.baseUrl}\n`);
   }
 }
 

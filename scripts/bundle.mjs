@@ -8,7 +8,10 @@
 //   - apps/web/dist/**                   ->  plugin/server/web/dist/**  (the browser viewer it serves)
 //   - apps/server/guides/*.md            ->  plugin/server/guides/*.md  (building guides for read_guide)
 //   - .claude/skills/minecraft-builder/  ->  plugin/skills/minecraft-builder/
+//   - LICENSE, mcpb/icon.png             ->  plugin/LICENSE, plugin/icon.png (plugin directory listing)
 //   - runtime npm deps                   ->  plugin/package.json (+ package-lock.json when they change)
+//
+// plugin/README.md (the directory listing page), the manifests and the launcher are hand-written.
 //
 // The workspace packages (@minecraft-schematic-lab/{shared,catalog,build-spec,
 // block-compiler,formats}, including the block catalog JSON) are INLINED into server.mjs. The real npm deps stay
@@ -112,16 +115,26 @@ async function writeRuntimePackage() {
     dependencies,
   };
   await writeFile(resolve(pluginDir, 'package.json'), `${JSON.stringify(pkg, null, 2)}\n`);
-  return dependencies;
+  return pkg;
 }
 
-/** Regenerate plugin/package-lock.json only when the pinned deps changed (needs npm + network). */
-async function syncLockfile(dependencies) {
+/**
+ * Regenerate plugin/package-lock.json only when the pinned deps changed (needs npm + network);
+ * otherwise just keep its version in step with package.json.
+ */
+async function syncLockfile({ version, dependencies }) {
   const lockFile = resolve(pluginDir, 'package-lock.json');
   if (await exists(lockFile)) {
     const lock = JSON.parse(await readFile(lockFile, 'utf8'));
     const locked = lock.packages?.['']?.dependencies ?? {};
-    if (JSON.stringify(locked) === JSON.stringify(dependencies)) return;
+    if (JSON.stringify(locked) === JSON.stringify(dependencies)) {
+      if (lock.version !== version) {
+        lock.version = version;
+        lock.packages[''].version = version;
+        await writeFile(lockFile, `${JSON.stringify(lock, null, 2)}\n`);
+      }
+      return;
+    }
   }
   process.stdout.write('Updating plugin/package-lock.json (npm)...\n');
   execFileSync(
@@ -175,7 +188,11 @@ async function main() {
   // 4) The skill (edited in .claude/skills, where it also serves this checkout).
   await cp(skillSrc, skillOut, { recursive: true });
 
-  // 5) Runtime dependencies for the plugin.
+  // 5) The license and icon Anthropic's plugin directory reads from the plugin folder.
+  await cp(resolve(repoRoot, 'LICENSE'), resolve(pluginDir, 'LICENSE'));
+  await cp(resolve(repoRoot, 'mcpb/icon.png'), resolve(pluginDir, 'icon.png'));
+
+  // 6) Runtime dependencies for the plugin.
   await syncLockfile(await writeRuntimePackage());
 
   process.stdout.write(

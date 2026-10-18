@@ -1,5 +1,5 @@
 const it = {
-  appName: 'Schematic Lab',
+  appName: 'VibeSchem',
   emptyTitle: 'Descrivi a Claude cosa costruire',
   emptyBody:
     'La build comparirà qui in 3D, con le texture vere di Minecraft. Puoi girarla, sezionarla, annotarla ed esportarla.',

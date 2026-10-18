@@ -1,18 +1,18 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "name": "minecraft-schematic-lab",
-  "description": "Minecraft building tools for Claude Code.",
+  "name": "vibeschem",
+  "description": "VibeSchem: an AI builder for Minecraft schematics, for Claude.",
   "owner": {
     "name": "SimoneRecchia",
     "url": "https://github.com/SimoneRecchia"
   },
   "plugins": [
     {
-      "name": "minecraft-schematic-lab",
+      "name": "vibeschem",
       "source": "./plugin",
-      "description": "Describe a Minecraft build and get an expert-quality schematic with a live 3D preview using the real game textures, for any Java version from 1.8 to the latest.",
+      "description": "AI builder for Minecraft: describe a build in your own words and Claude designs it automatically, shows it in a live 3D preview with the real game textures, and exports the schematic for WorldEdit, Litematica or structure blocks. Java Edition 1.8 to the latest.",
       "category": "productivity",
-      "tags": ["minecraft", "schematic", "worldedit", "litematica"]
+      "tags": ["minecraft", "schematic", "ai-builder", "worldedit", "litematica"]
     }
   ]
 }

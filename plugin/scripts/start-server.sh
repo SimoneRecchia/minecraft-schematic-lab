@@ -1,5 +1,5 @@
 #!/bin/sh
-# Starts the minecraft-schematic-lab MCP server for the Claude Code plugin (see ../.mcp.json).
+# Starts the VibeSchem MCP server for the Claude Code plugin (see ../.mcp.json).
 #
 # A Minecraft player may have no Node, or one that only their terminal can find (the Claude Code
 # desktop app doesn't always see nvm/Homebrew), so this script makes the server start anyway:
@@ -26,7 +26,7 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd -P)
 RUNTIME="${MSL_HOME:-$HOME/.minecraft-schematic-lab}/runtime"
 MODE=${1:-start}
 
-log() { printf 'minecraft-schematic-lab: %s\n' "$*" >&2; }
+log() { printf 'vibeschem: %s\n' "$*" >&2; }
 die() {
   log "$*"
   exit 1
