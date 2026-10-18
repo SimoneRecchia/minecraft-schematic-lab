@@ -1,14 +1,16 @@
-# Publishes the GitHub release of a version tag (v0.3.0, …) with the Claude Desktop extension and
-# the building skill attached, built and smoke-tested by `pnpm mcpb`. The plugin itself needs no
+# Publishes the GitHub release of a version (v0.3.0, …) with the Claude Desktop extension and the
+# building skill attached, built and smoke-tested by `pnpm mcpb`. The plugin itself needs no
 # release: Claude Code and Anthropic's directory read it from the repository.
 #
 # Release: bump `version` (package.json, packages/shared/src/version.ts), `pnpm bundle`, add the
-# CHANGELOG.md section, merge into main, then push the tag `v<version>`.
+# CHANGELOG.md section, merge into main, then either push the tag `v<version>` or run this workflow
+# on main (Actions → Release → Run workflow), which creates that tag on the commit it builds.
 name: Release
 
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -26,29 +28,33 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
-      - name: Check that the tag matches the version
+      - name: Version and tag
         run: |
           version=$(node -p 'require("./package.json").version')
-          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
             echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $version"
             exit 1
           fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "TAG=v$version" >> "$GITHUB_ENV"
 
       - name: Build and smoke-test the extension
         run: pnpm mcpb
 
       - name: Release notes from CHANGELOG.md
         run: |
-          awk -v v="${GITHUB_REF_NAME#v}" '$0 == "## " v { on = 1; next } /^## / { on = 0 } on' \
+          awk -v v="$VERSION" '$0 == "## " v { on = 1; next } /^## / { on = 0 } on' \
             CHANGELOG.md > "$RUNNER_TEMP/notes.md"
-          test -s "$RUNNER_TEMP/notes.md" || { echo "::error::No '## ${GITHUB_REF_NAME#v}' in CHANGELOG.md"; exit 1; }
+          test -s "$RUNNER_TEMP/notes.md" || { echo "::error::No '## $VERSION' in CHANGELOG.md"; exit 1; }
 
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
+          # --target only matters when the tag doesn't exist yet (a manual run): it is created on
+          # the commit this run built.
+          gh release create "$TAG" \
             dist/vibeschem.mcpb dist/minecraft-builder-skill.zip \
-            --title "VibeSchem $GITHUB_REF_NAME" \
+            --title "VibeSchem $TAG" \
             --notes-file "$RUNNER_TEMP/notes.md" \
-            --verify-tag
+            --target "$GITHUB_SHA"
