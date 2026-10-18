@@ -165,7 +165,7 @@ async function build() {
   await rm(stageDir, { recursive: true, force: true });
   await mkdir(stageDir, { recursive: true });
   await cp(resolve(pluginDir, 'server'), resolve(stageDir, 'server'), { recursive: true });
-  for (const f of ['package.json', 'package-lock.json']) {
+  for (const f of ['package.json', 'package-lock.json', 'THIRD_PARTY_NOTICES.md']) {
     await cp(resolve(pluginDir, f), resolve(stageDir, f));
   }
   for (const f of ['manifest.json', 'icon.png', '.mcpbignore']) {

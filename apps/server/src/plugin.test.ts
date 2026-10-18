@@ -87,8 +87,14 @@ describe('plugin directory listing', () => {
     expect(prose.split(/\s+/).filter(Boolean).length).toBeGreaterThanOrEqual(40);
   });
 
-  it('ships the license and the icon', () => {
+  it('ships the license, the third-party notices and the icon', () => {
     expect(read(plugin, 'LICENSE'), STALE).toBe(read(repo, 'LICENSE'));
+    const license = json(repo, 'package.json').license;
+    expect(license).toBe('AGPL-3.0-only');
+    expect(manifest.license).toBe(license);
+    expect(json(plugin, 'package.json').license, STALE).toBe(license);
+    expect(json(repo, 'mcpb', 'manifest.json').license).toBe(license);
+    expect(read(plugin, 'THIRD_PARTY_NOTICES.md'), STALE).toContain('## three ');
     expect(manifest.icon).toBe('./icon.png');
     expect(readFileSync(join(plugin, 'icon.png')), STALE).toEqual(
       readFileSync(join(repo, 'mcpb', 'icon.png')),

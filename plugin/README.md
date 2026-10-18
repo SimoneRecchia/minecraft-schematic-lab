@@ -90,7 +90,13 @@ Questions and bug reports:
 code, including the server bundled here, is at
 [SimoneRecchia/minecraft-schematic-lab](https://github.com/SimoneRecchia/minecraft-schematic-lab).
 
-MIT license. Block data from
+## License
+
+Copyright © 2026 SimoneRecchia. VibeSchem is free software: you can use, change and share it under
+the GNU Affero General Public License v3 (`LICENSE`), as long as changed versions stay under the same
+license with their source code. The name VibeSchem and its logo are not covered by the license
+([TRADEMARKS.md](https://github.com/SimoneRecchia/minecraft-schematic-lab/blob/main/TRADEMARKS.md)).
+Third-party code shipped in the plugin is listed in `THIRD_PARTY_NOTICES.md`; block data from
 [PrismarineJS/minecraft-data](https://github.com/PrismarineJS/minecraft-data) (MIT). Minecraft
 textures and models are © Mojang and are read from your own copy of the game at run time.
 

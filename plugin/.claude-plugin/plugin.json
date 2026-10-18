@@ -9,7 +9,7 @@
   },
   "homepage": "https://github.com/SimoneRecchia/minecraft-schematic-lab",
   "repository": "https://github.com/SimoneRecchia/minecraft-schematic-lab",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "keywords": [
     "minecraft",
     "schematic",

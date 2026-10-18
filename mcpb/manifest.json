@@ -90,7 +90,7 @@
     "building",
     "3d-viewer"
   ],
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "compatibility": {
     "platforms": [
       "darwin",

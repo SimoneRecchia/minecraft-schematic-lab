@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "description": "Runtime dependencies of the bundled server (plugin/server/server.mjs).",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "engines": {
     "node": ">=22"
   },

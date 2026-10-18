@@ -188,7 +188,25 @@ See [CLAUDE.md](CLAUDE.md) for the architecture, API and the protocol Claude fol
 
 ## License
 
-MIT. Block data from [PrismarineJS/minecraft-data](https://github.com/PrismarineJS/minecraft-data)
-(MIT). Minecraft textures and models are © Mojang and are read from your own game files at runtime.
+Copyright © 2026 SimoneRecchia.
+
+VibeSchem is free software: you can redistribute it and/or modify it under the terms of the
+[GNU Affero General Public License](LICENSE) as published by the Free Software Foundation, version 3
+(`AGPL-3.0-only`). It is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+license for details.
+
+In short: everyone can install, use, study and change it, and share it, as long as every copy and
+every changed version stays under the AGPL with its source code available, also when it is offered
+as an online service. Versions up to 0.2.0 were released under the MIT license and stay available
+under it.
+
+Additional term under section 7(e) of the AGPL: the license grants no rights to the name VibeSchem
+or its logo; see [TRADEMARKS.md](TRADEMARKS.md). Contributions are accepted under the same license
+([CONTRIBUTING.md](CONTRIBUTING.md)).
+
+Third-party code shipped in the plugin: `plugin/THIRD_PARTY_NOTICES.md`. Block data from
+[PrismarineJS/minecraft-data](https://github.com/PrismarineJS/minecraft-data) (MIT). Minecraft
+textures and models are © Mojang and are read from your own game files at runtime.
 
 Not an official Minecraft product. Not approved by or associated with Mojang or Microsoft.
