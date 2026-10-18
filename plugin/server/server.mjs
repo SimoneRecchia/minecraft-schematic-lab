@@ -709,7 +709,7 @@ function colorFor(state) {
 }
 
 // packages/shared/src/version.ts
-var APP_VERSION = "0.3.0";
+var APP_VERSION = "0.3.1";
 
 // apps/server/src/assets/ModelBaker.ts
 var DIRS = ["down", "up", "north", "south", "west", "east"];
@@ -6450,7 +6450,7 @@ var GUIDE_TOPICS = [
   "versions",
   "examples"
 ];
-var vec32 = z2.tuple([z2.number().int(), z2.number().int(), z2.number().int()]);
+var vec32 = z2.array(z2.number().int()).length(3).describe("[x, y, z]");
 var VIEW_NAMES = [
   "iso",
   "iso_nw",

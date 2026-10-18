@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import Ajv2020 from 'ajv/dist/2020.js';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { medievalCottage } from '@minecraft-schematic-lab/build-spec';
@@ -186,14 +187,19 @@ describe('build API', () => {
 });
 
 describe('MCP tools', () => {
-  it('give every tool a title and the annotations the plugin directory asks for', async () => {
+  it('give every tool a valid schema, a title and the annotations the directory asks for', async () => {
     const server = buildMcpServer({ builds, config });
     const [serverSide, clientSide] = InMemoryTransport.createLinkedPair();
     const client = new Client({ name: 'test', version: '0' });
     await Promise.all([server.connect(serverSide), client.connect(clientSide)]);
     const { tools } = await client.listTools();
     expect(tools.length).toBe(13);
+    // The Claude API checks each schema as JSON Schema 2020-12 and drops a tool whose schema fails
+    // (e.g. a draft-07 tuple, `items: [...]`), whatever `$schema` the SDK writes.
+    const ajv = new Ajv2020({ strict: false });
     for (const tool of tools) {
+      const { $schema: _draft, ...schema } = tool.inputSchema as Record<string, unknown>;
+      expect(ajv.validateSchema(schema), `${tool.name}: ${ajv.errorsText()}`).toBe(true);
       expect(tool.title, tool.name).toBeTruthy();
       expect(typeof tool.annotations?.readOnlyHint, tool.name).toBe('boolean');
       if (!tool.annotations?.readOnlyHint) {

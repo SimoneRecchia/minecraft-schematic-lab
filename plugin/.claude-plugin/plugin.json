@@ -1,7 +1,7 @@
 {
   "name": "vibeschem",
   "displayName": "VibeSchem",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "AI builder for Minecraft: describe a build and Claude designs it, shows it in 3D with the real textures, and exports a schematic for WorldEdit, Litematica or structure blocks. Java 1.8 to latest.",
   "author": {
     "name": "SimoneRecchia",

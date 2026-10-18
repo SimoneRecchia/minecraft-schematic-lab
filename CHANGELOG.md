@@ -3,6 +3,12 @@
 Installed plugins update when `version` changes (root `package.json`, synced into the plugin and the
 desktop extension by `pnpm bundle`).
 
+## 0.3.1
+
+- Fix: Claude dropped the `focus_view`, `inspect` and `render_views` tools, because their `[x, y, z]`
+  coordinates were described as a JSON Schema draft-07 tuple, which the Claude API (JSON Schema
+  2020-12) rejects. A test now checks every tool's schema against 2020-12.
+
 ## 0.3.0
 
 - **New name: VibeSchem**, "AI builder for Minecraft". Plugin `vibeschem@vibeschem`, desktop
