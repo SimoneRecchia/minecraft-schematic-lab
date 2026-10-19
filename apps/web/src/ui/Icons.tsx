@@ -194,3 +194,24 @@ export const IconBolt = (p: P) => (
     <path d="M13.2 3 5.5 13.4h5.6L10.3 21l8.2-10.6h-5.6z" />
   </svg>
 );
+
+export const IconImport = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M12 4v10m0 0-4-4m4 4 4-4" />
+    <path d="M4.5 15.5v2A2.5 2.5 0 0 0 7 20h10a2.5 2.5 0 0 0 2.5-2.5v-2" />
+  </svg>
+);
+
+export const IconTerrain = (p: P) => (
+  <svg {...base(p)}>
+    <path d="m3 18 5.5-8 4 5.5L15 12l6 6z" />
+    <circle cx="16.5" cy="6.5" r="1.8" />
+  </svg>
+);
+
+export const IconWorld = (p: P) => (
+  <svg {...base(p)}>
+    <circle cx="12" cy="12" r="8.5" />
+    <path d="M3.5 12h17M12 3.5c2.4 2.4 3.5 5.2 3.5 8.5s-1.1 6.1-3.5 8.5c-2.4-2.4-3.5-5.2-3.5-8.5s1.1-6.1 3.5-8.5z" />
+  </svg>
+);

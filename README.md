@@ -5,6 +5,14 @@ island, a gothic cathedral, a whole village, a piston door or a redstone compute
 designs it automatically, shows it in 3D with the real game textures, and exports an expert-quality
 schematic for WorldEdit, Litematica or structure blocks that you can paste into your world.
 
+- **Builds on your own world.** Point Claude at a world and a spot ("build a village here, I'm at
+  120 70 -340"), or give it a schematic to start from. It reads that area straight from the save
+  (Java 1.8 → newest, including the 26.1 folder layout), shows it in the viewer and builds on the
+  real ground: plots levelled with slopes that blend into the hills, foundations down to the
+  ground, paths that follow it, trees and props standing on it. It gives the result back in place:
+  a **copy of your world** with the build in it (the original is only read), a **vanilla data
+  pack** (`/function …/build`, `…/undo` puts back what was there, no mods), or schematics that
+  paste at the same coordinates (`//paste -o`).
 - **Builds like an experienced builder.** Claude follows a building guide distilled from expert
   practice (massing, depth, palettes and gradients, roofs, styles, landscaping) and writes a compact
   BuildSpec with real roof generators, arches, procedural trees, terrain, reusable components,
@@ -28,8 +36,9 @@ schematic for WorldEdit, Litematica or structure blocks that you can paste into 
 - **Strict Minecraft versions** from 1.8 to the newest release: only blocks that exist in the chosen
   version are accepted (experimental ones excluded), with suggestions for substitutes.
 - **Export**: WorldEdit `.schem` (Sponge v2/v3), MCEdit `.schematic` for 1.8–1.12, Litematica
-  `.litematic`, vanilla structure `.nbt`, and a material list with stacks and shulker boxes. Files can
-  be saved straight into your WorldEdit or Litematica folder.
+  `.litematic`, vanilla structure `.nbt`, a vanilla data pack (1.13+: `/function` builds it where you
+  stand, `…/undo` removes it) and a material list with stacks and shulker boxes. Files can be saved
+  straight into your WorldEdit or Litematica folder, data packs into a world.
 
 Everything runs locally. The textures come from the official Minecraft client: from your launcher if
 that version is installed, otherwise downloaded once from Mojang's servers into
@@ -144,6 +153,9 @@ sources directly, and the skill in `.claude/skills` loads from the project.
 
 ## Privacy and security
 
+- **Your worlds are only read.** Building on a world reads its save; the result goes into a new
+  copy of the world or a data pack folder, only when you ask. Existing world files are never
+  changed.
 - **Nothing leaves your computer** except downloads: the Minecraft client from Mojang (only for game
   versions your launcher doesn't have), Node.js from nodejs.org and the server's npm packages (only
   on the first start, if missing). No account, analytics or telemetry. Details in
@@ -171,6 +183,7 @@ Found a vulnerability? Report it privately, as [SECURITY.md](SECURITY.md) explai
 | `V` / `N` | navigate / pin a note (Shift-click a second block for an area) |
 | `U` | use: flip levers, press buttons, change repeaters and comparators (redstone builds) |
 | `Space` · `T` | run/pause the redstone simulation · advance one game tick |
+| `C` | builds on your world: show only what the build changes |
 | `G` · `S` · `Esc` | grid · sidebar · clear |
 
 ## Development

@@ -47,6 +47,51 @@ export interface BuildHeader {
   warnings: string[];
   compileMs: number;
   createdAt: number;
+  /** Builds on a site: where it is and how much the build changes. */
+  site?: BuildSiteInfo;
+}
+
+/** A piece of a world (or a schematic) imported to build on. */
+export interface SiteInfo {
+  id: string;
+  name: string;
+  kind: 'world' | 'schematic';
+  /** Minecraft version the site was saved with. */
+  version: string;
+  size: Vec3;
+  /** World position of the site's first corner. */
+  worldMin: Vec3;
+  /** World position of BuildSpec (0,0,0). */
+  origin: Vec3;
+  /** The world can take the build back (copy of the world with it). */
+  writable: boolean;
+  blocks: number;
+  createdAt: number;
+  world?: string;
+  dimension?: string;
+  file?: string;
+}
+
+export interface BuildSiteInfo extends SiteInfo {
+  /** Blocks the build changes on the site. */
+  changes: number;
+}
+
+/** A world found in the player's saves folders. */
+export interface WorldInfo {
+  id: string;
+  name: string;
+  folder: string;
+  launcher: string;
+  version: string | null;
+  lastPlayed: number | null;
+  gameMode: string | null;
+  player: { pos: Vec3; dimension: string } | null;
+  spawn: Vec3 | null;
+  dimensions: string[];
+  hasIcon: boolean;
+  /** Reading needs a version VibeSchem knows; writing a copy needs 1.14+. */
+  supported: boolean;
 }
 
 export interface FeedbackItem {

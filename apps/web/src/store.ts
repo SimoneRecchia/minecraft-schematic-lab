@@ -53,6 +53,9 @@ interface AppState {
   grid: boolean;
   ortho: boolean;
   exportOpen: boolean;
+  importOpen: boolean;
+  /** Builds on a site: show only the blocks the build changes. */
+  onlyChanges: boolean;
   versionOpen: boolean;
   projectsOpen: boolean;
   noteDraft: { from: Vec3; to: Vec3 } | null;
@@ -88,6 +91,8 @@ export const useApp = create<AppState>((set, get) => ({
   grid: true,
   ortho: false,
   exportOpen: false,
+  importOpen: false,
+  onlyChanges: false,
   versionOpen: false,
   projectsOpen: false,
   noteDraft: null,

@@ -32,6 +32,7 @@ describe('guides', () => {
       'palettes',
       'details',
       'landscape',
+      'terrain',
       'scripts',
       'versions',
       'redstone',

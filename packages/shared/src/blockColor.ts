@@ -150,8 +150,9 @@ export function colorFor(state: string): string {
     const dye = dyeColorFor(name);
     if (dye) return dye;
   }
+  // Match the block name, not its properties ("waterlogged=false" is not water).
   for (const { re, hex } of KEYWORD_COLORS) {
-    if (re.test(s)) return hex;
+    if (re.test(name)) return hex;
   }
   return `hsl(${hashHue(s)}, 42%, 55%)`;
 }

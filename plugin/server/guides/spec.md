@@ -26,6 +26,7 @@ A BuildSpec is JSON. The compiler turns it into blocks, validates every block ag
 | `seed` | Changes every random choice (mixes, trees, terrain) deterministically. Same spec = same build. |
 | `anchor` | The spec point that lands at the player's feet on `//paste`. Default: horizontal centre at y=0. |
 | `size` | Optional hard bounds (0..size-1). Usually omit it: bounds are computed from the content and may be negative. |
+| `site` | `{ "id": "site_…" }`: build on a piece of the player's world or of a schematic, imported with `import_site`. Coordinates become relative to the chosen point, the site's blocks are the starting volume and exports go back to the same world position. See read_guide("terrain"). |
 
 ## Coordinates
 
@@ -123,7 +124,7 @@ The single most important operation for good houses.
 `{type:"arch", from, to, block, style?, rise?, width?, cut?, fill?}` — an arch in a vertical plane. The longer horizontal side of from/to is the span, the shorter the depth (wall thickness); `from[1]` is where the curve starts (springing line). `style`: `round` (default, semicircle/ellipse), `pointed` (gothic), `segmental` (flat bridge arch), `flat` (lintel). `rise` = curve height (default: half the span for round). `width` = ring thickness. `cut:true` carves the opening below the ring; `fill` fills the spandrels above the ring up to `to[1]`.
 
 ### blocks
-`{type:"blocks", block, at:[[x,y,z],…], nbt?}` — individual blocks (details, lamps, flowers). `nbt` = block entity data for every placed block (chest items, sign text, banner patterns). Numbers become int, decimals double, booleans byte; strings like `"1b"`, `"5s"`, `"12L"`, `"0.5f"` keep that exact NBT type.
+`{type:"blocks", block, at:[[x,y,z],…], nbt?, ground?}` — individual blocks (details, lamps, flowers). `ground:true` counts each y from the ground at its x/z (0 = on it). `nbt` = block entity data for every placed block (chest items, sign text, banner patterns). Numbers become int, decimals double, booleans byte; strings like `"1b"`, `"5s"`, `"12L"`, `"0.5f"` keep that exact NBT type.
 
 ### layers
 Draw small detailed parts as ASCII — the most precise way to place a facade, a statue, furniture, a pixel-art emblem.
@@ -143,7 +144,7 @@ Draw small detailed parts as ASCII — the most precise way to place a facade, a
 `{type:"terrain", from, to, shape?, height?, amplitude?, scale?, surface?, subsurface?, depth?, core?, waterLevel?, water?, edgeFalloff?, seed?}` — ground under/around a build. x,z = extent; `from[1]` = base level; columns are filled from the base up to `base + height ± amplitude·noise`. Shapes: `hills` (default), `flat`, `mountain` (peak in the middle), `plateau` (terraced), `island` (floating island with a rocky underside). Steep spots automatically show `core` (rock) instead of grass. `waterLevel` floods everything below it with `water`. Defaults: grass_block / dirt (depth 3) / stone.
 
 ### tree
-`{type:"tree", at, kind, height?, radius?, log?, leaves?, seed?}` — procedural trees with branches, logs along their branch direction and ragged leaf canopies (persistent). Kinds: `oak`, `big_oak`, `birch`, `spruce`, `pine`, `dark_oak` (2×2), `jungle` (2×2, tall), `acacia`, `cherry`, `willow` (hanging strands), `palm`, `dead`, `bush`, `fantasy` (huge, twisted, mixed azalea leaves). `at` = the block above the ground. Change `seed` for a different tree.
+`{type:"tree", at, kind, height?, radius?, log?, leaves?, seed?}` — procedural trees with branches, logs along their branch direction and ragged leaf canopies (persistent). Kinds: `oak`, `big_oak`, `birch`, `spruce`, `pine`, `dark_oak` (2×2), `jungle` (2×2, tall), `acacia`, `cherry`, `willow` (hanging strands), `palm`, `dead`, `bush`, `fantasy` (huge, twisted, mixed azalea leaves). `at` = the block above the ground; `ground:true` puts it on the ground under `at` (at.y = height above it). Change `seed` for a different tree.
 
 ### scatter
 `{type:"scatter", from, to, density, block | component | tree, on?, spacing?, seed?}` — finds the top surface of every column in the box and places on it with probability `density`: flowers and grass (use a palette mix), bushes, rocks (a component), or trees (`tree:"oak"`). `on` limits the surfaces (e.g. `["grass_block"]`); `spacing` keeps placements apart. Components are rotated randomly.
@@ -151,14 +152,20 @@ Draw small detailed parts as ASCII — the most precise way to place a facade, a
 ### replace
 `{type:"replace", target, block, from?, to?, chance?, seed?}` — swap blocks, keeping orientation (stairs stay stairs facing the same way). With `chance` it weathers: `{target:"stone_bricks", block:"mossy_stone_bricks", chance:0.15, from:[0,0,0], to:[30,3,30]}`. No region = the whole build so far.
 
+### flatten / foundation / path (ground shaping)
+For builds on real terrain (a `site`) or on `terrain`; see read_guide("terrain").
+- `{type:"flatten", from, to, level?, blend?, shape?, clear?, surface?, subsurface?, depth?, core?}` — levels the x/z plot so its ground ends at `level − 1` (default: the plot's median), easing the ground around it over `blend` blocks (default 4) and clearing what stands on the plot.
+- `{type:"foundation", from, to, block, style?, spacing?, depth?, shape?}` — fills under a footprint (top layer at the higher y) down `depth` blocks into the ground; `style:"pillars"` only at corners and every `spacing` blocks on the edges.
+- `{type:"path", points:[[x,z],…], width?, block?, edge?, clear?}` — a path that follows the ground, replacing its top block (dirt_path; gravel before 1.17) and the plants on it.
+
 ### group
 `{type:"group", operations:[…], offset?, rotate?, mirror?, repeat?, symmetry?}` — operations in a local frame. Transform order: `mirror` (`x` flips east↔west, `z` flips north↔south, around local 0) → `rotate` (0/90/180/270, clockwise seen from above: east→south) → `offset`. Then `repeat:{count, offset:[dx,dy,dz]}` makes copies shifted in the parent frame, and `symmetry:{x?:c, z?:c}` adds a mirrored copy across the plane x=c and/or z=c (c may be `.5`). Block states (facing, axis, sign rotation, connections, stair shapes, hinges) rotate and mirror with the copies.
 
 ### place
-`{type:"place", component, at, rotate?, mirror?, repeat?, symmetry?}` — places `components[component]` with its local origin at `at`. Build components around their local origin (e.g. a window frame from [0,0,0]), then place them many times. Components can place other components.
+`{type:"place", component, at, ground?, rotate?, mirror?, repeat?, symmetry?}` — places `components[component]` with its local origin at `at`; `ground:true` stands every copy on the ground under it (at.y = height above it). Build components around their local origin (e.g. a window frame from [0,0,0]), then place them many times. Components can place other components.
 
 ### script
-`{type:"script", code, args?}` — JavaScript for procedural work: spiral stairs, ring walls with crenels, rose windows, organic shapes, city blocks, anything repetitive. Runs inside the current group transform. See read_guide("scripts").
+`{type:"script", code, args?}` — JavaScript for procedural work: spiral stairs, ring walls with crenels, rose windows, organic shapes, city blocks, anything repetitive. Runs inside the current group transform. On ground: `ground(x,z)`, `surface(x,z)`, `water(x,z)`, `SITE`. See read_guide("scripts").
 
 ## circuit (redstone)
 Optional top-level `"circuit": {inputs, outputs, tests, settleTicks?}`. It names a circuit's inputs and outputs and holds tests that the redstone simulator runs on every build. Read read_guide("redstone").

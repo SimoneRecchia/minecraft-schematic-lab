@@ -84,3 +84,18 @@ export function blockDataIsOlder(version: VersionInfo): boolean {
 export function isAtLeast(version: VersionInfo, other: string): boolean {
   return compareVersions(version.id, other) >= 0;
 }
+
+/**
+ * The release that writes `dataVersion` (a world or schematic's DataVersion): the exact match, or
+ * the newest release before it (snapshots), or the newest we know for anything newer. Files
+ * without a DataVersion come from 1.8.
+ */
+export function versionForDataVersion(dataVersion: number | null | undefined): VersionInfo {
+  if (!dataVersion) return BY_ID.get('1.8.9') ?? (VERSIONS[VERSIONS.length - 1] as VersionInfo);
+  const exact = VERSIONS.find((v) => v.dataVersion === dataVersion);
+  if (exact) return exact;
+  return (
+    VERSIONS.find((v) => v.dataVersion !== null && v.dataVersion <= dataVersion) ??
+    (VERSIONS[VERSIONS.length - 1] as VersionInfo)
+  );
+}

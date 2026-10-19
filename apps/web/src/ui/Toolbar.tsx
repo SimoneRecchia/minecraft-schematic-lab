@@ -14,6 +14,7 @@ import {
   IconOrtho,
   IconPin,
   IconSidebar,
+  IconTerrain,
 } from './Icons';
 
 type Preset = 'iso' | 'front' | 'right' | 'top';
@@ -88,6 +89,15 @@ export function Toolbar() {
       >
         <IconLayers />
       </button>
+      {s.header?.site && (
+        <button
+          className={`icon-btn ${s.onlyChanges ? 'on' : ''}`}
+          title={t.tools.changes}
+          onClick={() => void controller.setOnlyChanges(!s.onlyChanges)}
+        >
+          <IconTerrain />
+        </button>
+      )}
       <button
         className={`icon-btn ${s.grid ? 'on' : ''}`}
         title={t.tools.grid}

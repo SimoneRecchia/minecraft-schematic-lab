@@ -8,7 +8,9 @@
 | `set(x, y, z, block)` | place one block (palette keys and `[props]` work) |
 | `get(x, y, z)` | the block state there (`"minecraft:stone_bricks"`) or `null` for air |
 | `box(from, to, block, opts?)`, `line(from, to, block, opts?)` | shortcuts for those operations (`opts` = extra fields like `{walls:true}` or `{radius:1}`) |
-| `cylinder({…})`, `cone`, `sphere`, `dome`, `polygon`, `roof`, `arch`, `tree`, `layers`, `terrain`, `scatter`, `replace` | run that operation with the same fields as in the spec (without `type`) |
+| `cylinder({…})`, `cone`, `sphere`, `dome`, `polygon`, `roof`, `arch`, `tree`, `layers`, `terrain`, `scatter`, `replace`, `flatten`, `foundation`, `path` | run that operation with the same fields as in the spec (without `type`) |
+| `ground(x, z)`, `surface(x, z)`, `water(x, z)` | y of the top ground block / top block of any kind / water surface at that column, or `null` (the site's ground and what terrain, flatten and path made — read_guide("terrain")) |
+| `SITE` | `{min, max}` spec bounds of the site, or `null` without one |
 | `place(component, at, opts?)` | place a component (`opts`: `rotate`, `mirror`, `repeat`…) |
 | `op({type, …})` | any operation |
 | `rand()`, `randInt(a, b)`, `pick(list)`, `chance(p)` | seeded randomness (same spec → same result) |

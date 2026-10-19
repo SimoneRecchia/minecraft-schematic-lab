@@ -1,11 +1,13 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { controller } from '../controller';
 import { useSim } from '../sim/simStore';
 import { useApp } from '../store';
 import { Empty, FocusMessage, Gizmo, Inspector, LayerSlider, Status, Toasts } from './Overlays';
 import { SimBar } from './Redstone';
 import { Scene } from './Scene';
+import { ImportSheet, importSchematicFile } from './ImportSheet';
 import { ExportSheet, ProjectsPopover, VersionPopover } from './Sheets';
+import { t } from '../i18n';
 import { Sidebar } from './Sidebar';
 import { Toolbar } from './Toolbar';
 
@@ -25,7 +27,13 @@ function useShortcuts(): void {
       const opposite = e.ctrlKey;
       switch (key) {
         case 'escape':
-          s.set({ exportOpen: false, versionOpen: false, projectsOpen: false, noteDraft: null });
+          s.set({
+            exportOpen: false,
+            importOpen: false,
+            versionOpen: false,
+            projectsOpen: false,
+            noteDraft: null,
+          });
           controller.clearSelection();
           return;
         case 'v':
@@ -45,6 +53,9 @@ function useShortcuts(): void {
           return;
         case 'n':
           s.set({ tool: 'note' });
+          return;
+        case 'c':
+          if (s.header?.site) void controller.setOnlyChanges(!s.onlyChanges);
           return;
         case 's':
           s.set({ sidebarOpen: !s.sidebarOpen });
@@ -118,8 +129,49 @@ function useShortcuts(): void {
   }, []);
 }
 
+/** Drop a schematic anywhere on the viewer to build on it. */
+function useFileDrop(): boolean {
+  const [over, setOver] = useState(false);
+  useEffect(() => {
+    let depth = 0;
+    const hasFiles = (e: DragEvent) => e.dataTransfer?.types.includes('Files') ?? false;
+    const enter = (e: DragEvent) => {
+      if (!hasFiles(e) || useApp.getState().importOpen) return;
+      depth++;
+      setOver(true);
+    };
+    const leave = () => {
+      depth = Math.max(0, depth - 1);
+      if (depth === 0) setOver(false);
+    };
+    const overFn = (e: DragEvent) => {
+      if (hasFiles(e)) e.preventDefault();
+    };
+    const drop = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      depth = 0;
+      setOver(false);
+      const file = e.dataTransfer?.files[0];
+      if (file && !useApp.getState().importOpen) void importSchematicFile(file);
+    };
+    window.addEventListener('dragenter', enter);
+    window.addEventListener('dragleave', leave);
+    window.addEventListener('dragover', overFn);
+    window.addEventListener('drop', drop);
+    return () => {
+      window.removeEventListener('dragenter', enter);
+      window.removeEventListener('dragleave', leave);
+      window.removeEventListener('dragover', overFn);
+      window.removeEventListener('drop', drop);
+    };
+  }, []);
+  return over;
+}
+
 export function App() {
   useShortcuts();
+  const dropping = useFileDrop();
   useEffect(() => {
     controller.start();
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
@@ -146,6 +198,8 @@ export function App() {
       <VersionPopover />
       <ProjectsPopover />
       <ExportSheet />
+      <ImportSheet />
+      {dropping && <div className="drop-overlay">{t.importDrop}</div>}
     </>
   );
 }

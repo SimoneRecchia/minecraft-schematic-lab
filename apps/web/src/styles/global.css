@@ -1507,3 +1507,229 @@ kbd {
     display: none;
   }
 }
+
+/* ---------------------------------------------------------------- import & site */
+
+.world-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.world-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: 14px;
+  border: 1.5px solid transparent;
+  background: var(--fill);
+  text-align: left;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+
+.world-card:hover {
+  background: var(--fill-2);
+}
+
+.world-card.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.world-card:disabled {
+  opacity: 0.45;
+}
+
+.world-card img,
+.world-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 9px;
+  flex: none;
+  image-rendering: pixelated;
+  object-fit: cover;
+}
+
+.world-icon {
+  display: grid;
+  place-items: center;
+  background: var(--fill-2);
+  color: var(--text-2);
+}
+
+.world-card .grow {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.world-card .title {
+  font-weight: 600;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.world-card .sub {
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.import-form {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.import-form .field label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+  margin-bottom: 6px;
+}
+
+.import-form input[type='range'] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.row-fields {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.row-fields .input {
+  width: 92px;
+  font-variant-numeric: tabular-nums;
+}
+
+.drop-zone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 34px 16px;
+  border-radius: 18px;
+  border: 1.5px dashed var(--fill-2);
+  background: var(--fill);
+  color: var(--text-2);
+  text-align: center;
+  font-size: 13px;
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+
+.drop-zone.over {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.drop-overlay {
+  position: fixed;
+  inset: 12px;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  border-radius: 26px;
+  border: 2px dashed var(--accent);
+  background: var(--accent-soft);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  font-size: 16px;
+  font-weight: 600;
+  pointer-events: none;
+  animation: fade 0.15s ease-out;
+}
+
+.site-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: var(--fill);
+}
+
+.site-card .title {
+  font-weight: 600;
+  font-size: 13.5px;
+}
+
+.site-card .sub {
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.switch-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.switch-row input {
+  accent-color: var(--accent);
+  width: 16px;
+  height: 16px;
+}
+
+.export-extra {
+  margin-top: 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: var(--fill);
+}
+
+.export-extra .grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.export-extra .t {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.export-extra .d {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.empty .actions {
+  margin-top: 16px;
+  display: flex;
+  justify-content: center;
+}
+
+.import-form .chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.import-form .chip {
+  cursor: pointer;
+}
+
+.import-form .chip.on {
+  background: var(--accent);
+  color: #fff;
+}

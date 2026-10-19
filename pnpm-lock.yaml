@@ -96,6 +96,9 @@ importers:
       '@minecraft-schematic-lab/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@minecraft-schematic-lab/world':
+        specifier: workspace:*
+        version: link:../../packages/world
       '@modelcontextprotocol/sdk':
         specifier: ^1.32.1
         version: 1.32.1(zod@3.25.76)
@@ -209,6 +212,19 @@ importers:
         version: link:../catalog
 
   packages/shared:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.2
+        version: 22.19.21
+
+  packages/world:
+    dependencies:
+      '@minecraft-schematic-lab/catalog':
+        specifier: workspace:*
+        version: link:../catalog
+      '@minecraft-schematic-lab/formats':
+        specifier: workspace:*
+        version: link:../formats
     devDependencies:
       '@types/node':
         specifier: ^22.10.2

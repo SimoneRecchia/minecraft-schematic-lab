@@ -8,6 +8,11 @@ world.
 
 ## What you get
 
+- **Builds on your own world.** Give Claude a world and a spot (or a starting schematic): it reads
+  that area, builds on the real terrain (levelled plots that blend into the slopes, foundations,
+  paths that follow the ground) and gives it back in place: as a copy of your world with the build
+  already in it, as a vanilla data pack (no mods: `/function` builds it, another undoes it), or as a
+  schematic that pastes at the same coordinates. Your original world is only read.
 - **Working redstone, tested before you build it.** Ask for a piston door, a clock, a calculator or
   a whole redstone computer. VibeSchem simulates Minecraft Java redstone for your version: game
   ticks, update order, pistons and quasi-connectivity. Claude writes tests for the circuit (truth
@@ -22,9 +27,10 @@ world.
   Pin a note on a block ("make this roof steeper") and Claude knows exactly which part to change.
 - **Every Java Edition version from 1.8 to the newest.** Only blocks that exist in the version you
   choose are used, with suggestions for substitutes.
-- **Schematic export**: WorldEdit `.schem` (Sponge v2/v3), MCEdit `.schematic` (1.8 to 1.12),
-  Litematica `.litematic`, structure block `.nbt`, and a material list with stacks and shulker
-  boxes. Files can be saved straight into your WorldEdit or Litematica folder.
+- **Export**: WorldEdit `.schem` (Sponge v2/v3), MCEdit `.schematic` (1.8 to 1.12), Litematica
+  `.litematic`, structure block `.nbt`, a vanilla data pack (1.13+, works without any mod), and a
+  material list with stacks and shulker boxes. Files can be saved straight into your WorldEdit or
+  Litematica folder, and data packs into a world.
 
 ## How to use it
 
@@ -93,7 +99,9 @@ place and read blocks of the build, with no access to your files, the network or
 
 **Files it reads**: your Minecraft launcher folder (`%APPDATA%\.minecraft` on Windows,
 `~/Library/Application Support/minecraft` on macOS, `~/.minecraft` on Linux), to reuse a game
-version you already installed and to find your WorldEdit and Litematica folders.
+version you already installed and to find your WorldEdit and Litematica folders; and your saved
+worlds (in that folder and in the Prism, MultiMC, CurseForge and Modrinth instances), only to list
+them and to read the area you ask to build on, or a schematic file you choose.
 
 **Files it writes**:
 
@@ -103,11 +111,15 @@ version you already installed and to find your WorldEdit and Litematica folders.
   `.install.log` and a temporary `.install-lock`;
 - exported schematics, only where you ask: a download from the viewer, your `Downloads` folder, or
   your WorldEdit or Litematica folder. An existing file is never overwritten: the new one gets a
-  number, like `castle (2).schem`.
+  number, like `castle (2).schem`;
+- when you ask for them: a **copy** of a world with the build in it, as a new world next to the
+  original (`World (VibeSchem v3)`), and data pack folders in a world's `datapacks` folder. The
+  files of an existing world are never changed.
 
 **Switches**, as environment variables: `MSL_OFFLINE=1` never downloads the Minecraft client (the
 preview then needs that version installed in your launcher), `MSL_NO_BROWSER=1` doesn't open the
-browser, `MSL_HOME` moves the `.minecraft-schematic-lab` folder.
+browser, `MSL_HOME` moves the `.minecraft-schematic-lab` folder, `MSL_SAVES` adds saves folders to
+look for worlds in (separated like `PATH`).
 
 To remove everything, uninstall the plugin and delete the `.minecraft-schematic-lab` folder in your
 user folder.

@@ -193,7 +193,7 @@ describe('MCP tools', () => {
     const client = new Client({ name: 'test', version: '0' });
     await Promise.all([server.connect(serverSide), client.connect(clientSide)]);
     const { tools } = await client.listTools();
-    expect(tools.length).toBe(14);
+    expect(tools.length).toBe(17);
     // The Claude API checks each schema as JSON Schema 2020-12 and drops a tool whose schema fails
     // (e.g. a draft-07 tuple, `items: [...]`), whatever `$schema` the SDK writes.
     const ajv = new Ajv2020({ strict: false });

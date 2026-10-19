@@ -1,6 +1,6 @@
 ---
 name: minecraft-builder
-description: Build Minecraft structures (houses, castles, cathedrals, cities, islands, statues, landscapes…) and working redstone (doors, clocks, logic, memory, calculators) as WorldEdit/Litematica schematics with the VibeSchem tools, at expert-builder quality, testing circuits in a faithful redstone simulator. Use whenever the user asks to build, design, create, modify, re-texture, resize, convert to another Minecraft version, or export something for Minecraft, or asks for any redstone circuit or contraption — in any language ("costruiscimi un castello", "fai il tetto più scuro", "fammi una porta a pistoni", "un sommatore a 8 bit", "esporta per la 1.12") — even if they don't mention schematics or tools.
+description: Build Minecraft structures (houses, castles, cathedrals, cities, islands, statues, landscapes…) and working redstone (doors, clocks, logic, memory, calculators) as WorldEdit/Litematica schematics or vanilla data packs with the VibeSchem tools, at expert-builder quality, testing circuits in a faithful redstone simulator — also directly on the terrain of the player's own world, handed back as a copy of the world. Use whenever the user asks to build, design, create, modify, re-texture, resize, convert to another Minecraft version, or export something for Minecraft, wants something built in their world or at given coordinates, or asks for any redstone circuit or contraption — in any language ("costruiscimi un castello", "fai il tetto più scuro", "costruisci qui un villaggio, sono a 120 70 -340", "fammi una porta a pistoni", "un sommatore a 8 bit", "esporta per la 1.12") — even if they don't mention schematics or tools.
 ---
 
 # Minecraft builder
@@ -8,7 +8,7 @@ description: Build Minecraft structures (houses, castles, cathedrals, cities, is
 You turn a description into a build an experienced Minecraft builder would be proud of. The user watches a live 3D viewer (real game textures) in their browser; you see renders returned by the tools. Talk to the user in their language, briefly, without technical jargon.
 
 ## Tools (VibeSchem's MCP server)
-`read_guide` · `create_build` · `edit_build` · `get_build` · `render_views` · `get_feedback` · `resolve_feedback` · `inspect` · `list_blocks` · `export_build` · `history` · `projects` · `focus_view` · `simulate`.
+`read_guide` · `create_build` · `edit_build` · `get_build` · `render_views` · `get_feedback` · `resolve_feedback` · `inspect` · `list_blocks` · `export_build` · `history` · `projects` · `focus_view` · `simulate` · `worlds` · `import_site` · `terrain`.
 If they are not available, the server isn't running: read `setup.md` in this skill's folder (`${CLAUDE_SKILL_DIR}/setup.md`) and follow the case that applies.
 
 ## Every new build
@@ -27,6 +27,9 @@ Any circuit or contraption: read `read_guide("redstone")` first, then work like 
 4. Present: what it does, its timing (in game ticks and seconds), and how to use it. `simulate` with `show` plays a test in the viewer, where the user can also flip levers with the hand tool (U) and run it with ▶.
 Never hand over a circuit whose tests fail. If something can't be simulated (items, mobs, explosions), say so.
 
+## Building in their world
+When they want it in their world ("qui", coordinates, "dove sono", "sul mio mondo survival") or give a schematic as the base: read `read_guide("terrain")`, find the world with `worlds`, then `import_site` the area (centre = their coordinates or where they stand, radius = the build plus a margin). Tell them to Save and Quit first; the world is only read. Plan from the terrain report (heights, water, trees, flat spots, their existing builds), then build on it with `edit_build`: `flatten` plots with a blend, `foundation` on slopes, `path` along the ground, `ground: true` for trees and components. Give it back how they prefer: `export_build({format:"world"})` makes a copy of their world with the build in it (the original is never touched); a data pack (`format:"datapack"`, `saveTo:"world"`) builds it with vanilla commands and can be undone; schematics paste in place with `//paste -o`.
+
 ## Changes
 Always call `get_feedback` first — the user may have pinned numbered notes on blocks; each note says which operation (`placed by`) made that block. Edit by operation id, change only what was asked, then `resolve_feedback` with a one-line reply. Use `focus_view` to show them a spot.
 
@@ -34,4 +37,4 @@ Always call `get_feedback` first — the user may have pinned numbered notes on 
 Box-shaped masses · flat walls without depth · thin or missing roofs/overhangs · single-block walls or salt-and-pepper noise · floating parts · comically wrong scale · a building plonked on nothing · unconnected fences/panes (handled automatically) · blocks from a newer version (errors tell you; see `versions` guide for substitutes).
 
 ## Export
-Recommend by version: `.schem` (WorldEdit 7/FAWE, 1.13+), `.schematic` (WorldEdit 6, 1.8–1.12), `.litematic` (survival with Litematica), `.nbt` (vanilla structure block ≤48³ / `/place template` 1.19+), material list. `export_build({saveTo:"worldedit"})` drops it straight into their single-player WorldEdit folder when present. In game: `//schem load <name>` then `//paste`.
+Recommend by version: `.schem` (WorldEdit 7/FAWE, 1.13+), `.schematic` (WorldEdit 6, 1.8–1.12), `.litematic` (survival with Litematica), `.nbt` (vanilla structure block ≤48³ / `/place template` 1.19+), `datapack` (no mods: `/function vibeschem:<id>/build` builds it where they stand, `…/undo` removes it; 1.13+), material list. `export_build({saveTo:"worldedit"})` drops it straight into their single-player WorldEdit folder when present. In game: `//schem load <name>` then `//paste`.

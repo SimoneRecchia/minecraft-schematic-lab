@@ -4,6 +4,7 @@ import type {
   TreeKind,
   TreeOperation,
 } from '@minecraft-schematic-lab/build-spec';
+import { isReplaceablePlant } from '@minecraft-schematic-lab/catalog';
 import { sortPair } from '../BlockVolume';
 import type { CompileContext } from '../context';
 import { hash3, makeRng, Perlin } from '../noise';
@@ -504,8 +505,11 @@ export function scatter(
       for (let y = y1; y >= y0; y--) {
         const id = ctx.get(x, y, z);
         if (id === 0) continue;
-        if (ctx.get(x, y + 1, z) !== 0) break;
         const name = ctx.palette.get(id).name;
+        // Look through grass and flowers: what grows there is replaced.
+        if (isReplaceablePlant(name)) continue;
+        const above = ctx.get(x, y + 1, z);
+        if (above !== 0 && !isReplaceablePlant(ctx.palette.get(above).name)) break;
         if (on ? on.has(name) : !/leaves|water|lava|glass/.test(name)) targets.push([x, y + 1, z]);
         break;
       }

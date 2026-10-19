@@ -86,3 +86,21 @@ test('runs the redstone live: a switch in the panel lights the lamp', async ({ p
   await page.getByRole('button', { name: /Run all|Esegui tutti/ }).click();
   await expect(page.locator('.status-dot.pass')).toHaveCount(1);
 });
+
+test('imports a schematic as a site to build on', async ({ page, request }) => {
+  const schem = await request.get('/api/export/schem');
+  expect(schem.ok()).toBe(true);
+  await page.goto('/');
+  await page.locator('.sidebar-head button[title]').first().click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await page.getByRole('button', { name: /From a schematic|Da una schematica/ }).click();
+  await page.locator('input[type=file]').setInputFiles({
+    name: 'cottage.schem',
+    mimeType: 'application/octet-stream',
+    buffer: Buffer.from(await schem.body()),
+  });
+  await expect(page.locator('.build-name')).toHaveText('cottage');
+  await expect(page.locator('.site-card')).toContainText('cottage.schem');
+  const header = await (await request.get('/api/build')).json();
+  expect(header.build.site).toMatchObject({ kind: 'schematic', changes: 0 });
+});

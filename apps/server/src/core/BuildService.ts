@@ -1,10 +1,11 @@
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { extname, join } from 'node:path';
+import { dirname, extname, isAbsolute, join, resolve } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import jsonpatch from 'fast-json-patch';
 import type { Operation } from 'fast-json-patch';
 import {
+  BlockVolume,
   BuildSpecError,
   compileBuildSpec,
   nodeScriptRunner,
@@ -36,6 +37,9 @@ import {
 import {
   exportBuild,
   formatsFor,
+  readSchematic,
+  writeDatapack,
+  type DatapackOutput,
   type ExportFormat,
   type ExportResult,
 } from '@minecraft-schematic-lab/formats';
@@ -45,10 +49,23 @@ import type {
   InspectResult,
   ProjectInfo,
   SimInfo,
+  SiteInfo,
   Vec3,
   ViewName,
   ExportTarget,
+  WorldInfo,
 } from '@minecraft-schematic-lab/shared';
+import {
+  copyWorld,
+  listWorlds,
+  MAX_SITE_RADIUS,
+  OVERWORLD,
+  readWorld,
+  readWorldSite,
+  siteFromSchematic,
+  writeBlocks,
+  type WorldSummary,
+} from '@minecraft-schematic-lab/world';
 import { augmentCatalog } from '../assets/augment';
 import type { AssetStore } from '../assets/AssetStore';
 import type { AppConfig } from '../config';
@@ -59,6 +76,8 @@ import type { CaptureBroker, CapturedImage } from './CaptureBroker';
 import { applyEdits, type Edit } from './edits';
 import type { EventHub } from './EventHub';
 import type { ProjectStore, VersionRecord } from './ProjectStore';
+import { SiteStore, type StoredSite } from './SiteStore';
+import { changedBounds, siteChanges, terrainReport, toCompileSite } from './sites';
 
 export interface CurrentBuild {
   project: ProjectInfo;
@@ -87,7 +106,9 @@ const VIEWER_RECONNECT_MS = 4000;
 export class BuildService {
   current: CurrentBuild | null = null;
   private volumeCache: { buildId: string; gz: Buffer } | null = null;
+  private changesCache: { buildId: string; gz: Buffer } | null = null;
   private feedbackSeq = 0;
+  private worldPaths = new Map<string, string>();
 
   constructor(
     private readonly store: ProjectStore,
@@ -95,6 +116,7 @@ export class BuildService {
     private readonly hub: EventHub,
     private readonly capture: CaptureBroker,
     private readonly config: AppConfig,
+    private readonly sites: SiteStore = new SiteStore(),
   ) {}
 
   /** Reopen the last project so the viewer shows it right away. */
@@ -121,8 +143,16 @@ export class BuildService {
         // Offline: fall back to the bundled data (blocks new in this release will be rejected).
       }
     }
+    const siteId = (spec as { site?: { id?: unknown } } | null)?.site?.id;
+    const site = typeof siteId === 'string' ? this.sites.get(siteId) : null;
     try {
-      return { ok: true, result: compileBuildSpec(spec, { scriptRunner: nodeScriptRunner }) };
+      return {
+        ok: true,
+        result: compileBuildSpec(spec, {
+          scriptRunner: nodeScriptRunner,
+          ...(site ? { site: toCompileSite(site) } : {}),
+        }),
+      };
     } catch (error) {
       if (error instanceof BuildSpecError) return { ok: false, errors: error.errors };
       throw error;
@@ -143,6 +173,7 @@ export class BuildService {
     };
     this.current = build;
     this.volumeCache = null;
+    this.changesCache = null;
     this.store.currentId = project.id;
     this.hub.broadcast({
       type: 'build',
@@ -256,7 +287,29 @@ export class BuildService {
       warnings: b.result.warnings,
       compileMs: b.result.compileMs,
       createdAt: b.record.createdAt,
+      ...(() => {
+        const site = this.currentSite();
+        return site && b.result.site
+          ? { site: { ...site.info, changes: b.result.site.changes } }
+          : {};
+      })(),
     };
+  }
+
+  /** The site the current build stands on, if any. */
+  currentSite(): StoredSite | null {
+    const id = this.current?.record.spec.site?.id;
+    return id ? this.sites.get(id) : null;
+  }
+
+  /** Gzipped Uint8 mask (YZX) of the cells the build changes on its site. */
+  changesGz(): Buffer {
+    const b = this.requireCurrent();
+    const changed = b.result.site?.changed;
+    if (!changed) throw new UserError('This build is not on a site.', 404);
+    if (this.changesCache?.buildId !== b.buildId)
+      this.changesCache = { buildId: b.buildId, gz: gzipSync(Buffer.from(changed), { level: 4 }) };
+    return this.changesCache.gz;
   }
 
   /** Gzipped Uint16 palette indices (YZX), cached per build. */
@@ -435,13 +488,319 @@ export class BuildService {
 
   export(format: ExportFormat): ExportResult {
     const b = this.requireCurrent();
-    return exportBuild(format, {
+    const base = {
       name: b.record.spec.name,
-      volume: b.result.volume,
       version: b.result.version,
-      anchor: b.result.anchor,
       ...(b.record.spec.description ? { description: b.record.spec.description } : {}),
+    };
+    const site = this.currentSite();
+    if (format === 'datapack') return this.datapackExport(this.datapack());
+    if (!site || !b.result.site)
+      return exportBuild(format, { ...base, volume: b.result.volume, anchor: b.result.anchor });
+    // On a site: only the part the build changes, placed back where it came from.
+    const bounds = changedBounds(b.result);
+    if (!bounds)
+      throw new UserError('Nothing on the site has changed yet: there is nothing to export.');
+    let volume = b.result.volume.crop(bounds.lo, bounds.hi);
+    const mask = cropMask(b.result, bounds);
+    if (format === 'materials') {
+      // What the player needs to place: changed cells only.
+      const data = volume.data.map((id, i) => (mask[i] ? id : 0));
+      volume = new BlockVolume(
+        volume.sizeX,
+        volume.sizeY,
+        volume.sizeZ,
+        volume.origin,
+        volume.palette,
+        data,
+        volume.prov,
+        volume.blockEntities,
+      );
+    }
+    const anchor: Vec3 = [-volume.origin[0], -volume.origin[1], -volume.origin[2]];
+    const worldMin: Vec3 = [
+      site.origin[0] + volume.origin[0],
+      site.origin[1] + volume.origin[1],
+      site.origin[2] + volume.origin[2],
+    ];
+    const out = exportBuild(format, {
+      ...base,
+      volume,
+      anchor,
+      worldMin,
+      ...(format === 'nbt' ? { mask } : {}),
     });
+    const where = `world ${worldMin.join(' ')}`;
+    const hint: Record<string, string> = {
+      schem: `WorldEdit: //schem load ${out.filename.replace(/\.schem$/, '')} then //paste -o puts it back at ${where} (its first corner).`,
+      schem3: `WorldEdit: //schem load ${out.filename.replace(/\.schem$/, '')} then //paste -o puts it back at ${where} (its first corner).`,
+      schematic: `WorldEdit: //schematic load ${out.filename.replace(/\.schematic$/, '')} then //paste -o puts it back at ${where}.`,
+      litematic: `Litematica: place the schematic with its origin at ${where}, paste with "Replace: All".`,
+      nbt: `Only the changed blocks are in the file. /place template <its id> ${worldMin.join(' ')} (1.19+) or a structure block at ${where}.`,
+    };
+    return {
+      ...out,
+      warnings: [...(hint[format] ? [hint[format] as string] : []), ...out.warnings],
+    };
+  }
+
+  /** The current build as a vanilla data pack: on a site at its world position, else where you stand. */
+  datapack(): DatapackOutput {
+    const b = this.requireCurrent();
+    return this.datapackWithId(`${b.record.spec.name}_v${b.record.n}`);
+  }
+
+  private datapackExport(pack: DatapackOutput): ExportResult {
+    return {
+      buffer: pack.zip,
+      filename: `${pack.folder}.zip`,
+      mime: 'application/zip',
+      warnings: [
+        `In the game: put the .zip in the world's datapacks folder, /reload, then /function ${pack.functionId}/build (undo: /function ${pack.functionId}/undo).`,
+        ...pack.warnings,
+      ],
+    };
+  }
+
+  /**
+   * Write the data pack into a world's datapacks folder (the site's world, or `worldId`). Only
+   * adds a new folder: nothing in the world changes until the player runs the function.
+   */
+  installDatapack(worldId?: string): {
+    path: string;
+    world: string;
+    functionId: string;
+    warnings: string[];
+  } {
+    const site = this.currentSite();
+    let worldPath: string | undefined;
+    if (worldId) worldPath = this.worldPath(worldId);
+    else if (site?.source.kind === 'world') worldPath = site.source.worldPath;
+    if (!worldPath)
+      throw new UserError(
+        'Which world? Pass a world id from the worlds list (or build on a site).',
+      );
+    if (!existsSync(join(worldPath, 'level.dat')))
+      throw new UserError(`The world folder ${worldPath} is gone.`, 404);
+    let pack = this.datapack();
+    const base = pack.folder;
+    let folder = base;
+    for (let n = 2; existsSync(join(worldPath, 'datapacks', folder)); n++) {
+      folder = `${base}_${n}`;
+      const b = this.requireCurrent();
+      pack = this.datapackWithId(`${b.record.spec.name}_v${b.record.n}_${n}`);
+    }
+    const dest = join(worldPath, 'datapacks', folder);
+    for (const [path, data] of pack.files) {
+      const file = join(dest, ...path.split('/'));
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, data, { flag: 'wx' });
+    }
+    const world = readWorld(worldPath)?.name ?? worldPath;
+    return { path: dest, world, functionId: pack.functionId, warnings: pack.warnings };
+  }
+
+  private datapackWithId(id: string): DatapackOutput {
+    const b = this.requireCurrent();
+    const site = this.currentSite();
+    if (site && b.result.site) {
+      if (!b.result.site.changes)
+        throw new UserError('Nothing on the site has changed yet: there is nothing to export.');
+      return writeDatapack({
+        name: b.record.spec.name,
+        version: b.result.version,
+        id,
+        place: {
+          kind: 'world',
+          dimension: site.source.kind === 'world' ? site.source.dimension : OVERWORLD,
+          center: site.origin,
+        },
+        changes: siteChanges(b.result, site),
+      });
+    }
+    return writeDatapack({
+      name: b.record.spec.name,
+      version: b.result.version,
+      id,
+      place: { kind: 'here' },
+      changes: datapackChanges(b.result),
+    });
+  }
+
+  /**
+   * A copy of the site's world with the build in it, next to the original in the saves folder.
+   * The original world is only read.
+   */
+  async exportWorldCopy(name?: string): Promise<{
+    path: string;
+    folder: string;
+    name: string;
+    chunks: number;
+    blocks: number;
+  }> {
+    const b = this.requireCurrent();
+    const site = this.currentSite();
+    if (!site || !b.result.site || site.source.kind !== 'world')
+      throw new UserError(
+        'Only a build on a site imported from a world can be written into a world copy.',
+      );
+    if (!site.writable)
+      throw new UserError(
+        "This part of the world can't be written back (not fully generated, or saved before Minecraft 1.14): use a schematic or the data pack instead.",
+      );
+    const source = site.source;
+    if (!existsSync(join(source.worldPath, 'level.dat')))
+      throw new UserError(`The world folder ${source.worldPath} is gone.`, 404);
+    const changes = siteChanges(b.result, site);
+    if (!changes.length) throw new UserError('Nothing on the site has changed yet.');
+    const spec = b.record.spec.name;
+    const fallback = spec.startsWith(source.worldName)
+      ? `${source.worldName} (VibeSchem v${b.record.n})`
+      : `${source.worldName} + ${spec}`;
+    const copy = await copyWorld(source.worldPath, (name ?? fallback).slice(0, 80));
+    const report = writeBlocks(
+      copy.path,
+      source.dimension,
+      changes.map((c) => ({
+        x: c.pos[0],
+        y: c.pos[1],
+        z: c.pos[2],
+        state: c.state,
+        ...(c.nbt ? { nbt: c.nbt } : {}),
+      })),
+    );
+    return { ...copy, chunks: report.chunks, blocks: report.blocks };
+  }
+
+  // ---------------------------------------------------------------- sites
+
+  /** Worlds in the player's saves folders (official launcher, Prism, MultiMC, CurseForge, Modrinth). */
+  worlds(): WorldInfo[] {
+    const list = listWorlds(minecraftDir());
+    this.worldPaths = new Map(list.map((w) => [w.id, w.path]));
+    return list.map(worldInfo);
+  }
+
+  worldIcon(id: string): Buffer | null {
+    const path = this.worldPath(id);
+    const icon = join(path, 'icon.png');
+    return existsSync(icon) ? readFileSync(icon) : null;
+  }
+
+  /** A world id from worlds(), a world name, or (for the MCP tool) a world folder path. */
+  private worldPath(ref: string, allowPath = false): string {
+    if (!this.worldPaths.has(ref)) this.worlds();
+    const byId = this.worldPaths.get(ref);
+    if (byId) return byId;
+    const all = listWorlds(minecraftDir());
+    const byName = all.filter(
+      (w) => w.name.toLowerCase() === ref.toLowerCase() || w.folder === ref,
+    );
+    if (byName.length === 1) return (byName[0] as WorldSummary).path;
+    if (byName.length > 1)
+      throw new UserError(
+        `Several worlds are called "${ref}": ${byName.map((w) => `${w.id} (${w.launcher})`).join(', ')}. Use the id.`,
+      );
+    if (allowPath && isAbsolute(ref) && existsSync(join(ref, 'level.dat'))) return resolve(ref);
+    throw new UserError(`No world "${ref}" in the saves folders. Call worlds to list them.`, 404);
+  }
+
+  /** Read part of a world and start a new project on it. */
+  async importWorldSite(opts: {
+    world: string;
+    center?: number[];
+    radius?: number;
+    dimension?: string;
+    name?: string;
+    below?: number;
+    above?: number;
+    allowPath?: boolean;
+  }): Promise<{ site: StoredSite; outcome: BuildOutcome }> {
+    const path = this.worldPath(opts.world, opts.allowPath ?? false);
+    const world = readWorld(path);
+    if (!world) throw new UserError(`${path} is not a Minecraft world (no level.dat).`);
+    const dimension =
+      opts.dimension ??
+      (opts.center ? undefined : world.player?.dimension) ??
+      (world.dimensions.includes(OVERWORLD) ? OVERWORLD : world.dimensions[0]) ??
+      OVERWORLD;
+    const fromPlayer =
+      world.player && world.player.dimension === dimension ? world.player.pos : null;
+    const c = opts.center ?? fromPlayer ?? world.spawn ?? [0, 0];
+    const center = (c.length >= 3 ? [c[0], c[1], c[2]] : [c[0] ?? 0, c[c.length - 1] ?? 0]) as
+      | Vec3
+      | [number, number];
+    // The player's own position: y of their feet is a good y=0, unless they're flying high.
+    const radius = Math.min(MAX_SITE_RADIUS, Math.max(4, Math.round(opts.radius ?? 48)));
+    let site;
+    try {
+      site = readWorldSite(path, {
+        center: opts.center ? center : [center[0], center[center.length - 1] as number],
+        radius,
+        dimension,
+        ...(opts.below !== undefined ? { below: opts.below } : {}),
+        ...(opts.above !== undefined ? { above: opts.above } : {}),
+      });
+    } catch (error) {
+      throw new UserError(error instanceof Error ? error.message : String(error));
+    }
+    const name = opts.name ?? `${world.name} @ ${site.origin[0]}, ${site.origin[2]}`;
+    const stored = this.sites.save(
+      site,
+      { kind: 'world', worldPath: path, worldName: world.name, dimension, center, radius },
+      name,
+    );
+    const outcome = await this.commit(
+      { name, minecraftVersion: site.version, site: { id: stored.info.id }, operations: [] },
+      'Imported site',
+      true,
+    );
+    return { site: stored, outcome };
+  }
+
+  /** A schematic file as the site, in a new project. */
+  async importSchematicSite(
+    buffer: Buffer,
+    filename: string,
+    name?: string,
+  ): Promise<{ site: StoredSite; outcome: BuildOutcome }> {
+    let site;
+    try {
+      site = siteFromSchematic(readSchematic(buffer, filename));
+    } catch (error) {
+      throw new UserError(error instanceof Error ? error.message : String(error));
+    }
+    const title = name ?? filename.replace(/^.*[\\/]/, '').replace(/\.[^.]+$/, '');
+    const stored = this.sites.save(site, { kind: 'schematic', filename }, title);
+    const outcome = await this.commit(
+      { name: title, minecraftVersion: site.version, site: { id: stored.info.id }, operations: [] },
+      'Imported schematic',
+      true,
+    );
+    return { site: stored, outcome };
+  }
+
+  importSchematicFile(
+    path: string,
+    name?: string,
+  ): Promise<{ site: StoredSite; outcome: BuildOutcome }> {
+    if (!existsSync(path)) throw new UserError(`No file at ${path}.`, 404);
+    return this.importSchematicSite(readFileSync(path), path, name);
+  }
+
+  siteList(): SiteInfo[] {
+    return this.sites.list();
+  }
+
+  /** The terrain report of the current build's site (as it is now, after the build's changes). */
+  terrain(opts: { step?: number; from?: Vec3; to?: Vec3 } = {}): string {
+    const b = this.requireCurrent();
+    const site = this.currentSite();
+    if (!site || !b.result.site)
+      throw new UserError(
+        'The current build is not on a site. Import one first: import_site (a world area) or import a schematic.',
+      );
+    return terrainReport(site, b.result.volume, opts);
   }
 
   exportTargets(): ExportTarget[] {
@@ -730,7 +1089,9 @@ export class BuildService {
   /** Compact text summary used in tool results. */
   summary(build: CurrentBuild): string {
     const v = build.result.volume;
-    const counts = [...v.counts().entries()];
+    const changed = build.result.site?.changed;
+    // On a site, list what the build places rather than the terrain it stands on.
+    const counts = changed ? [...changedCounts(v, changed).entries()] : [...v.counts().entries()];
     const byName = new Map<string, number>();
     for (const [s, n] of counts) byName.set(blockNameOf(s), (byName.get(blockNameOf(s)) ?? 0) + n);
     const top = [...byName.entries()]
@@ -740,15 +1101,91 @@ export class BuildService {
       .join(', ');
     const lines = [
       `Build "${build.record.spec.name}" v${build.record.n} (project ${build.project.id}) · Minecraft ${build.result.version.id} · ${v.sizeX}×${v.sizeY}×${v.sizeZ} (origin ${v.origin.join(',')}) · ${build.result.blockCount.toLocaleString('en-US')} blocks · ${byName.size} block types · compiled in ${build.result.compileMs} ms`,
-      `Top materials: ${top || '—'}`,
+      `${changed ? 'Blocks the build places' : 'Top materials'}: ${top || '—'}`,
     ];
     if (build.result.warnings.length)
       lines.push(`Warnings:\n- ${build.result.warnings.join('\n- ')}`);
     if (build.result.circuit) lines.push(`Redstone — ${formatReport(build.result.circuit)}`);
+    const siteId = build.record.spec.site?.id;
+    const site = siteId ? this.sites.get(siteId) : null;
+    if (site && build.result.site) {
+      const where =
+        site.source.kind === 'world'
+          ? `world "${site.source.worldName}" (${site.source.dimension})`
+          : `schematic ${site.source.filename}`;
+      lines.push(
+        `Site ${site.info.id}: ${where}, spec (0,0,0) = world (${site.origin.join(', ')}). ${build.result.site.changes.toLocaleString('en-US')} blocks differ from the site. The terrain tool maps the ground.`,
+      );
+    }
     const open = this.feedback().filter((f) => f.status === 'open').length;
     if (open)
       lines.push(`${open} open feedback note(s) from the user in the viewer: call get_feedback.`);
     lines.push(`Viewer: ${this.config.baseUrl}/ (${this.hub.count} open)`);
     return lines.join('\n');
   }
+}
+
+function worldInfo(w: WorldSummary): WorldInfo {
+  return {
+    id: w.id,
+    name: w.name,
+    folder: w.folder,
+    launcher: w.launcher,
+    version: w.version,
+    lastPlayed: w.lastPlayed,
+    gameMode: w.gameMode,
+    player: w.player,
+    spawn: w.spawn,
+    dimensions: w.dimensions,
+    hasIcon: w.hasIcon,
+    supported: w.dimensions.length > 0,
+  };
+}
+
+/** Every block of a build as offsets from its paste anchor (data pack placed where you stand). */
+function datapackChanges(result: CompileResult) {
+  const v = result.volume;
+  const nbt = new Map(v.blockEntities.map((be) => [v.index(...be.pos), be.data]));
+  const out: { pos: Vec3; state: string; nbt?: Record<string, unknown>; before: string }[] = [];
+  let i = 0;
+  for (let y = 0; y < v.sizeY; y++)
+    for (let z = 0; z < v.sizeZ; z++)
+      for (let x = 0; x < v.sizeX; x++, i++) {
+        const id = v.data[i] as number;
+        if (id === 0) continue;
+        const data = nbt.get(i);
+        out.push({
+          pos: [x - result.anchor[0], y - result.anchor[1], z - result.anchor[2]],
+          state: v.palette[id] as string,
+          ...(data ? { nbt: data } : {}),
+          before: 'minecraft:air',
+        });
+      }
+  return out;
+}
+
+function cropMask(result: CompileResult, bounds: { lo: Vec3; hi: Vec3 }): Uint8Array {
+  const v = result.volume;
+  const changed = result.site?.changed as Uint8Array;
+  const [x0, y0, z0] = bounds.lo;
+  const [x1, y1, z1] = bounds.hi;
+  const sx = x1 - x0 + 1;
+  const out = new Uint8Array(sx * (y1 - y0 + 1) * (z1 - z0 + 1));
+  let i = 0;
+  for (let y = y0; y <= y1; y++)
+    for (let z = z0; z <= z1; z++) {
+      const from = v.index(x0, y, z);
+      out.set(changed.subarray(from, from + sx), i);
+      i += sx;
+    }
+  return out;
+}
+
+function changedCounts(v: BlockVolume, changed: Uint8Array): Map<string, number> {
+  const byId = new Uint32Array(v.palette.length);
+  for (let i = 0; i < v.data.length; i++) if (changed[i]) (byId[v.data[i] as number] as number)++;
+  const out = new Map<string, number>();
+  for (let id = 1; id < byId.length; id++)
+    if (byId[id]) out.set(v.palette[id] as string, byId[id] as number);
+  return out;
 }

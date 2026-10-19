@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { controller } from '../controller';
 import { blockLabel, fmt, t } from '../i18n';
 import { useApp } from '../store';
-import { IconCheck, IconClose, IconInfo, IconPin, IconSparkle, IconWarn } from './Icons';
+import { IconCheck, IconClose, IconInfo, IconPin, IconSparkle, IconWarn, IconWorld } from './Icons';
 
 export function Inspector() {
   const sel = useApp((s) => s.selection);
@@ -155,6 +155,12 @@ export function Empty() {
         {t.emptyExamples.map((e) => (
           <div key={e}>{e}</div>
         ))}
+      </div>
+      <div className="actions">
+        <button className="btn" onClick={() => useApp.getState().set({ importOpen: true })}>
+          <IconWorld width={15} height={15} />
+          {t.importTitle}
+        </button>
       </div>
     </div>
   );

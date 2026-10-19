@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { ExportFormatInfo, ExportTarget } from '@minecraft-schematic-lab/shared';
+import type { ExportFormatInfo, ExportTarget, WorldInfo } from '@minecraft-schematic-lab/shared';
 import { api, ApiError } from '../api';
 import { fmt, t } from '../i18n';
 import { useApp } from '../store';
-import { IconClose, IconTrash } from './Icons';
+import { IconClose, IconTrash, IconWorld } from './Icons';
 
 export function ExportSheet() {
   const open = useApp((s) => s.exportOpen);
@@ -15,6 +15,15 @@ export function ExportSheet() {
   );
   const [format, setFormat] = useState<string>('schem');
   const [busy, setBusy] = useState(false);
+  const [worlds, setWorlds] = useState<WorldInfo[] | null>(null);
+
+  useEffect(() => {
+    if (open && format === 'datapack' && header?.site?.kind !== 'world' && worlds === null)
+      void api
+        .worlds()
+        .then(setWorlds)
+        .catch(() => setWorlds([]));
+  }, [open, format, header?.site?.kind, worlds]);
 
   useEffect(() => {
     if (!open) return;
@@ -49,6 +58,22 @@ export function ExportSheet() {
       setBusy(false);
     }
   };
+  const run = async (task: () => Promise<string>) => {
+    setBusy(true);
+    try {
+      toast(await task(), 'success');
+    } catch (e) {
+      toast(e instanceof ApiError ? e.message : String(e), 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const install = (world?: string) =>
+    run(async () => {
+      const r = await api.installDatapack(world);
+      return fmt(t.installDone, { f: r.functionId });
+    });
+  const site = header.site;
   return (
     <div className="backdrop" onPointerDown={(e) => e.target === e.currentTarget && close()}>
       <div className="sheet" role="dialog" aria-label={t.exportTitle}>
@@ -83,8 +108,49 @@ export function ExportSheet() {
             })}
           </div>
           {meta && <div className="howto">{meta.how}</div>}
+          {site?.kind === 'world' && site.writable && (
+            <div className="export-extra">
+              <IconWorld width={22} height={22} style={{ color: 'var(--accent)', flex: 'none' }} />
+              <div className="grow">
+                <div className="t">{t.worldCopy}</div>
+                <div className="d">{t.worldCopyDesc}</div>
+              </div>
+              <button
+                className="btn"
+                disabled={busy || site.changes === 0}
+                onClick={() =>
+                  void run(async () => fmt(t.worldCopyDone, { n: (await api.exportWorld()).name }))
+                }
+              >
+                {t.worldCopyGo}
+              </button>
+            </div>
+          )}
         </div>
         <div className="sheet-foot">
+          {format === 'datapack' &&
+            (site?.kind === 'world' ? (
+              <button className="btn large" disabled={busy} onClick={() => void install()}>
+                {fmt(t.installIn, { w: site.world ?? '' })}
+              </button>
+            ) : (
+              (worlds?.length ?? 0) > 0 && (
+                <select
+                  className="input"
+                  style={{ width: 'auto' }}
+                  disabled={busy}
+                  value=""
+                  onChange={(e) => e.target.value && void install(e.target.value)}
+                >
+                  <option value="">{t.pickWorld}</option>
+                  {(worlds ?? []).map((w) => (
+                    <option key={w.id} value={w.id}>
+                      {w.name} ({w.version ?? '?'})
+                    </option>
+                  ))}
+                </select>
+              )
+            ))}
           {targets.map((x) => (
             <button
               key={x.id}

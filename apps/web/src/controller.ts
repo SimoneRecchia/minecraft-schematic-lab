@@ -101,7 +101,10 @@ class Controller {
     const h = useApp.getState().header;
     if (!vol || !h) return [];
     const perId = new Uint32Array(h.palette.length);
-    for (let i = 0; i < vol.data.length; i++) (perId[vol.data[i] as number] as number)++;
+    // On a site, what you need is what the build places, not the terrain.
+    const mask = this.siteView?.mask;
+    for (let i = 0; i < vol.data.length; i++)
+      if (!mask || mask[i]) (perId[vol.data[i] as number] as number)++;
     const totals = new Map<string, { state: string; count: number }>();
     h.palette.forEach((state, id) => {
       const n = perId[id] as number;
@@ -317,6 +320,25 @@ class Controller {
     return this.cachedModels(h.assetVersion, states);
   }
 
+  /** A site build's blocks and which of them the build changes. */
+  private siteView: { data: Uint16Array; mask: Uint8Array } | null = null;
+
+  private masked(v: { data: Uint16Array; mask: Uint8Array }): Uint16Array {
+    const out = new Uint16Array(v.data.length);
+    for (let i = 0; i < out.length; i++) if (v.mask[i]) out[i] = v.data[i] as number;
+    return out;
+  }
+
+  /** On a site: show only what the build changes, or everything. */
+  async setOnlyChanges(on: boolean): Promise<void> {
+    const s = useApp.getState();
+    s.set({ onlyChanges: on });
+    const v = this.viewer?.loadedVolume;
+    if (!this.viewer || !v || !this.siteView) return;
+    const data = on ? this.masked(this.siteView) : this.siteView.data.slice();
+    await this.viewer.load({ ...v, data }, true);
+  }
+
   loadBuild(header: BuildHeader, keepCamera: boolean): Promise<void> {
     if (this.loadingBuildId === header.buildId && this.loadPromise) return this.loadPromise;
     this.loadingBuildId = header.buildId;
@@ -347,8 +369,17 @@ class Controller {
       });
       // The simulation starts from the build as sent; the viewer's copy changes as it runs.
       const original = data.slice();
+      this.siteView = null;
+      if (header.site) {
+        const mask = await api.changes(header.buildId).catch(() => null);
+        if (this.loadingBuildId !== header.buildId) return;
+        if (mask && mask.length === data.length) this.siteView = { data: original, mask };
+      }
+      viewer.setGridVisible(useApp.getState().grid && !header.site);
+      const shown =
+        this.siteView && useApp.getState().onlyChanges ? this.masked(this.siteView) : data;
       const load = viewer.load(
-        { size: header.size, data, models, nameIds },
+        { size: header.size, data: shown, models, nameIds },
         keepCamera || sameProject,
       );
       const st = useApp.getState();

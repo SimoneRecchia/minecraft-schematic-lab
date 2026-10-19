@@ -6,7 +6,16 @@ import { blockLabel, t } from '../i18n';
 import { useSim } from '../sim/simStore';
 import { useApp, type Panel } from '../store';
 import { blockIcon } from './blockIcons';
-import { IconBolt, IconCheck, IconChevron, IconFolder, IconTrash, IconWarn } from './Icons';
+import {
+  IconBolt,
+  IconCheck,
+  IconChevron,
+  IconFolder,
+  IconImport,
+  IconTerrain,
+  IconTrash,
+  IconWarn,
+} from './Icons';
 import { RedstonePane } from './Redstone';
 
 function timeAgo(ms: number): string {
@@ -61,6 +70,13 @@ export function Sidebar() {
           <div className="logo" />
           {t.appName}
           <span style={{ flex: 1 }} />
+          <button
+            className="icon-btn"
+            title={t.tools.import}
+            onClick={() => s.set({ importOpen: true, projectsOpen: false, versionOpen: false })}
+          >
+            <IconImport />
+          </button>
           <button
             className="icon-btn"
             title={t.projects}
@@ -168,13 +184,67 @@ function BuildPane() {
           </ul>
         </div>
       )}
-      <div className="section-title">{t.anchor}</div>
-      <div className="muted mono">
-        {h.anchor.map((v, i) => v + (h.origin[i] as number)).join(' ')}
-      </div>
+      {h.site ? (
+        <SitePane />
+      ) : (
+        <>
+          <div className="section-title">{t.anchor}</div>
+          <div className="muted mono">
+            {h.anchor.map((v, i) => v + (h.origin[i] as number)).join(' ')}
+          </div>
+        </>
+      )}
       <p className="faint" style={{ fontSize: 11.5, marginTop: 16 }}>
         {t.shortcuts}
       </p>
+    </>
+  );
+}
+
+function SitePane() {
+  const h = useApp((s) => s.header);
+  const onlyChanges = useApp((s) => s.onlyChanges);
+  const site = h?.site;
+  if (!site) return null;
+  const where = site.kind === 'world' ? site.world : site.file;
+  const dim = site.dimension ? (t.dimensionNames[site.dimension] ?? site.dimension) : null;
+  return (
+    <>
+      <div className="section-title">{t.site}</div>
+      <div className="site-card">
+        <IconTerrain width={20} height={20} style={{ color: 'var(--accent)', flex: 'none' }} />
+        <div style={{ minWidth: 0 }}>
+          <div className="title">{where}</div>
+          <div className="sub">
+            {[dim, `Minecraft ${site.version}`, site.size.join('×')].filter(Boolean).join(' · ')}
+          </div>
+        </div>
+      </div>
+      <div className="stat-grid" style={{ marginTop: 8 }}>
+        <div className="stat">
+          <div className="v">{site.changes.toLocaleString()}</div>
+          <div className="l">{t.siteChanges}</div>
+        </div>
+        <div className="stat">
+          <div className="v mono" style={{ fontSize: 13 }}>
+            {site.origin.join(' ')}
+          </div>
+          <div className="l">{t.siteOrigin}</div>
+        </div>
+      </div>
+      <label className="switch-row">
+        <input
+          type="checkbox"
+          checked={onlyChanges}
+          onChange={(e) => void controller.setOnlyChanges(e.target.checked)}
+        />
+        {t.onlyChanges}
+      </label>
+      {site.changes === 0 && (
+        <p className="faint" style={{ fontSize: 12, marginTop: 10 }}>
+          {t.siteHint}
+        </p>
+      )}
     </>
   );
 }

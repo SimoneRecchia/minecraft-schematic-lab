@@ -28,6 +28,13 @@ export interface ExportInput {
   anchor: [number, number, number];
   author?: string;
   description?: string;
+  /**
+   * World position of the volume's (0,0,0) when it comes from a world: WorldEdit's
+   * `//paste -o` then puts it back exactly there.
+   */
+  worldMin?: [number, number, number];
+  /** Structure files: only cells marked 1 are written (the others keep what the world has). */
+  mask?: Uint8Array;
 }
 
 export interface ExportOutput {
@@ -99,7 +106,7 @@ export function writeSpongeV2(input: ExportInput): ExportOutput {
     Width: short((volume.sizeX << 16) >> 16),
     Height: short((volume.sizeY << 16) >> 16),
     Length: short((volume.sizeZ << 16) >> 16),
-    Offset: intArray([0, 0, 0]),
+    Offset: intArray(input.worldMin ?? [0, 0, 0]),
     PaletteMax: int(volume.palette.length),
     Palette: compound(spongePalette(volume)),
     BlockData: byteArray(varintBlockData(volume.data)),
@@ -122,7 +129,17 @@ export function writeSpongeV3(input: ExportInput): ExportOutput {
       Name: str(input.name),
       Author: str(input.author ?? AUTHOR),
       Date: long(Date.now()),
-      WorldEdit: compound({ Origin: intArray([0, 0, 0]) }),
+      WorldEdit: compound({
+        Origin: intArray(
+          input.worldMin
+            ? [
+                input.worldMin[0] + anchor[0],
+                input.worldMin[1] + anchor[1],
+                input.worldMin[2] + anchor[2],
+              ]
+            : [0, 0, 0],
+        ),
+      }),
     }),
     Width: short((volume.sizeX << 16) >> 16),
     Height: short((volume.sizeY << 16) >> 16),
@@ -213,9 +230,9 @@ export function writeMcEdit(input: ExportInput): ExportOutput {
     ...(add ? { AddBlocks: byteArray(add) } : {}),
     TileEntities: list('compound', tiles),
     Entities: list('compound', []),
-    WEOriginX: int(0),
-    WEOriginY: int(0),
-    WEOriginZ: int(0),
+    WEOriginX: int(input.worldMin?.[0] ?? 0),
+    WEOriginY: int(input.worldMin?.[1] ?? 0),
+    WEOriginZ: int(input.worldMin?.[2] ?? 0),
     WEOffsetX: int(-anchor[0]),
     WEOffsetY: int(-anchor[1]),
     WEOffsetZ: int(-anchor[2]),
@@ -311,16 +328,25 @@ export const STRUCTURE_BLOCK_LIMIT = 48;
 
 /** Vanilla structure file (.nbt): structure blocks (≤48³) or /place template (1.19+). */
 export function writeStructure(input: ExportInput): ExportOutput {
-  const { volume } = input;
+  const { volume, mask } = input;
   const blocks: Tag[] = [];
   const beByIndex = new Map(volume.blockEntities.map((be) => [volume.index(...be.pos), be]));
+  // With a mask, only the states it uses go in the palette.
+  const remap = new Int32Array(volume.palette.length).fill(-1);
+  const palette: string[] = [];
+  const idOf = (p: number): number => {
+    if (remap[p] === -1) remap[p] = palette.push(volume.palette[p] as string) - 1;
+    return remap[p] as number;
+  };
+  if (!mask) volume.palette.forEach((_, p) => idOf(p));
   let i = 0;
   for (let y = 0; y < volume.sizeY; y++) {
     for (let z = 0; z < volume.sizeZ; z++) {
       for (let x = 0; x < volume.sizeX; x++, i++) {
+        if (mask && !mask[i]) continue;
         const be = beByIndex.get(i);
         const entry: Record<string, Tag> = {
-          state: int(volume.data[i] as number),
+          state: int(idOf(volume.data[i] as number)),
           pos: list('int', [int(x), int(y), int(z)]),
         };
         if (be) {
@@ -334,7 +360,7 @@ export function writeStructure(input: ExportInput): ExportOutput {
   const root: Record<string, Tag> = {
     DataVersion: int(dataVersionOf(input.version)),
     size: list('int', [int(volume.sizeX), int(volume.sizeY), int(volume.sizeZ)]),
-    palette: list('compound', volume.palette.map(stateCompound)),
+    palette: list('compound', palette.map(stateCompound)),
     blocks: list('compound', blocks),
     entities: list('compound', []),
   };

@@ -3,6 +3,36 @@
 Installed plugins update when `version` changes (root `package.json`, synced into the plugin and the
 desktop extension by `pnpm bundle`).
 
+## 0.5.0
+
+- **Build on your own world.** Claude can read an area of your Minecraft Java world and build on
+  its real terrain instead of a flat, empty schematic:
+  - `worlds` finds your worlds (official launcher, Prism, MultiMC, CurseForge, Modrinth) with
+    their version and where you stand; `import_site` reads the area around a point (radius up to
+    128) into a new project, or uses a schematic (`.schem`, `.schematic`, `.litematic`, `.nbt`) as
+    the starting point;
+  - every save format from 1.8 to 26.x, including LZ4-compressed regions and the new 26.1
+    `dimensions/` folder layout. The world is only read;
+  - a `terrain` report for Claude: height map, water, trees, flattest spots and existing builds.
+- **Terrain-aware operations**: `flatten` levels a plot and blends it into the slopes around it,
+  `foundation` fills down to the ground (solid or pillars), `path` follows the ground; `ground: true`
+  stands trees, components and blocks on it, and scripts get `ground()`, `surface()` and `water()`.
+- **Back into the game, in place**:
+  - a **copy of your world** with the build in it, next to the original (needs 1.14+);
+  - a **vanilla data pack**: `/function vibeschem:<name>/build` places it with `/fill` and
+    `/setblock` over a few ticks, `…/undo` puts back exactly what was there, `…/tp` takes you
+    there. It can be installed straight into the world;
+  - schematics hold only the changed area and keep its world position (WorldEdit `//paste -o`); the
+    structure `.nbt` holds only the changed blocks; the material list counts only what you place.
+- **Data packs for every build** (1.13+), without WorldEdit: `/function …/build` builds it where you
+  stand, `…/undo` removes it.
+- **Viewer**: an Import sheet (pick a world, the centre and the radius, or drop a schematic file
+  anywhere on the viewer), a Site panel with the number of changed blocks, and **C** to show only
+  what the build changes. The export sheet installs data packs and creates world copies.
+- NBT strings are written in Java's modified UTF-8, so text with emoji survives a round trip
+  through the game.
+- Fallback colours no longer paint waterlogged blocks (leaves, stairs) as water.
+
 ## 0.4.0
 
 - **Redstone simulator.** A new engine (`packages/redstone`) runs Minecraft Java redstone the way

@@ -201,6 +201,8 @@ export const blocksOp = z
     at: z.array(vec3).min(1),
     /** Block entity data (chest items, sign text, …) for every placed block. */
     nbt: z.record(z.string(), z.unknown()).optional(),
+    /** Each y counts from the ground at its x/z: 0 sits on the ground, -1 replaces its top. */
+    ground: z.boolean().optional(),
   })
   .strict();
 
@@ -276,6 +278,8 @@ export const treeOp = z
     log: blockRef.optional(),
     leaves: blockRef.optional(),
     seed: z.number().int().optional(),
+    /** at.y counts from the ground below at.x/at.z (0 = the trunk stands on the ground). */
+    ground: z.boolean().optional(),
   })
   .strict();
 
@@ -313,6 +317,68 @@ export const replaceOp = z
     /** Probability per matching block (0–1), for weathering. */
     chance: z.number().min(0).max(1).optional(),
     seed: z.number().int().optional(),
+  })
+  .strict();
+
+/** A natural ground surface: grass on dirt on stone, or what the site already has there. */
+const groundBlocks = {
+  /** Top block (default: the most common top block of the area, else grass_block). */
+  surface: blockRef.optional(),
+  /** Below the top, `depth` blocks deep (default: what the area has, else dirt). */
+  subsurface: blockRef.optional(),
+  depth: z.number().int().min(0).max(16).optional(),
+  /** Deeper fill (default: what the area has, else stone). */
+  core: blockRef.optional(),
+};
+
+export const flattenOp = z
+  .object({
+    type: z.literal('flatten'),
+    ...common,
+    /** x/z extent of the plot (y is ignored). */
+    from: vec3,
+    to: vec3,
+    shape: z.enum(['box', 'circle']).optional(),
+    /** Where you build on top: the ground's top block ends at level - 1 (default: the area's median). */
+    level: z.number().int().optional(),
+    /** Width of the slope that blends the plot into the surrounding ground (default 4). */
+    blend: z.number().int().min(0).max(32).optional(),
+    /** Remove trees, plants and anything else above the new ground inside the plot (default true). */
+    clear: z.boolean().optional(),
+    ...groundBlocks,
+  })
+  .strict();
+
+export const foundationOp = z
+  .object({
+    type: z.literal('foundation'),
+    ...common,
+    /** x/z footprint; the higher y is the foundation's top layer (usually -1, under a floor at 0). */
+    from: vec3,
+    to: vec3,
+    block: blockRef,
+    shape: z.enum(['box', 'circle']).optional(),
+    /** solid fills the footprint down to the ground; pillars only corners, edges every `spacing`. */
+    style: z.enum(['solid', 'pillars']).optional(),
+    spacing: z.number().int().min(2).max(32).optional(),
+    /** Blocks sunk into the ground below its surface (default 1). */
+    depth: z.number().int().min(0).max(16).optional(),
+  })
+  .strict();
+
+export const pathOp = z
+  .object({
+    type: z.literal('path'),
+    ...common,
+    /** [x, z] points; the path follows the ground between them. */
+    points: z.array(vec2).min(2),
+    width: z.number().int().min(1).max(15).optional(),
+    /** Replaces the ground's top block (default dirt_path, gravel before 1.17). */
+    block: blockRef.optional(),
+    /** Edge blocks mixed in at the sides (optional). */
+    edge: blockRef.optional(),
+    /** Remove plants on the path (default true). */
+    clear: z.boolean().optional(),
   })
   .strict();
 
@@ -358,6 +424,7 @@ export interface PlaceOperationInput {
   mask?: z.infer<typeof mask>;
   component: string;
   at: [number, number, number];
+  ground?: boolean;
   rotate?: 0 | 90 | 180 | 270;
   mirror?: 'x' | 'z';
   repeat?: { count: number; offset: [number, number, number] };
@@ -380,6 +447,9 @@ type LeafOperationInput =
   | z.infer<typeof treeOp>
   | z.infer<typeof scatterOp>
   | z.infer<typeof replaceOp>
+  | z.infer<typeof flattenOp>
+  | z.infer<typeof foundationOp>
+  | z.infer<typeof pathOp>
   | z.infer<typeof scriptOp>;
 
 export type OperationInput = LeafOperationInput | GroupOperationInput | PlaceOperationInput;
@@ -402,6 +472,8 @@ export const placeOp = z
     ...common,
     component: z.string().min(1),
     at: vec3,
+    /** Each copy stands on the ground below it: at.y counts from the ground (0 = on it). */
+    ground: z.boolean().optional(),
     ...transformFields,
   })
   .strict();
@@ -422,6 +494,9 @@ const LEAF_SCHEMAS = {
   tree: treeOp,
   scatter: scatterOp,
   replace: replaceOp,
+  flatten: flattenOp,
+  foundation: foundationOp,
+  path: pathOp,
   script: scriptOp,
   place: placeOp,
 } as const;
@@ -609,6 +684,15 @@ export const buildSpecSchema = z
     operations: z.array(operationSchema),
     /** A redstone circuit: named inputs/outputs and tests the simulator runs on every build. */
     circuit: circuitSchema.optional(),
+    /**
+     * Build on a piece of the player's world or of a schematic, imported with import_site (or the
+     * viewer's Import). Coordinates are relative to the site's origin: (0, 0, 0) is the block
+     * above the ground at the point the player chose.
+     */
+    site: z
+      .object({ id: z.string().min(1) })
+      .strict()
+      .optional(),
     metadata: z
       .object({
         prompt: z.string().optional(),
