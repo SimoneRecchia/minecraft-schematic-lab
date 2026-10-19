@@ -1,8 +1,8 @@
 {
   "name": "vibeschem",
   "displayName": "VibeSchem",
-  "version": "0.3.1",
-  "description": "AI builder for Minecraft: describe a build and Claude designs it, shows it in 3D with the real textures, and exports a schematic for WorldEdit, Litematica or structure blocks. Java 1.8 to latest.",
+  "version": "0.5.0",
+  "description": "AI builder for Minecraft: Claude designs builds and working redstone (tested in a faithful simulator), builds on the terrain of your own world, shows it in 3D and exports schematics, vanilla data packs or a copy of your world. Java 1.8 to latest.",
   "author": {
     "name": "SimoneRecchia",
     "url": "https://github.com/SimoneRecchia"
@@ -14,9 +14,12 @@
     "minecraft",
     "schematic",
     "ai-builder",
+    "redstone",
     "worldedit",
     "litematica",
     "structure-block",
+    "datapack",
+    "terrain",
     "building",
     "3d-viewer"
   ],

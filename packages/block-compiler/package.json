@@ -16,7 +16,8 @@
   },
   "dependencies": {
     "@minecraft-schematic-lab/build-spec": "workspace:*",
-    "@minecraft-schematic-lab/catalog": "workspace:*"
+    "@minecraft-schematic-lab/catalog": "workspace:*",
+    "@minecraft-schematic-lab/redstone": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.10.2"

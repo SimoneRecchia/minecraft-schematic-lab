@@ -1,5 +1,8 @@
 import type { z } from 'zod';
 import type {
+  circuitIoSchema,
+  circuitSchema,
+  circuitTestSchema,
   archOp,
   blocksOp,
   boxOp,
@@ -8,6 +11,9 @@ import type {
   coneOp,
   cylinderOp,
   domeOp,
+  flattenOp,
+  foundationOp,
+  pathOp,
   GroupOperationInput,
   layersOp,
   lineOp,
@@ -47,8 +53,15 @@ export type TreeOperation = z.infer<typeof treeOp>;
 export type ScatterOperation = z.infer<typeof scatterOp>;
 export type ReplaceOperation = z.infer<typeof replaceOp>;
 export type ScriptOperation = z.infer<typeof scriptOp>;
+export type FlattenOperation = z.infer<typeof flattenOp>;
+export type FoundationOperation = z.infer<typeof foundationOp>;
+export type PathOperation = z.infer<typeof pathOp>;
 export type GroupOperation = GroupOperationInput;
 export type PlaceOperation = PlaceOperationInput;
+
+export type CircuitDefinition = z.infer<typeof circuitSchema>;
+export type CircuitTest = z.infer<typeof circuitTestSchema>;
+export type CircuitIo = z.infer<typeof circuitIoSchema>;
 
 export type OperationType = BuildOperation['type'];
 export type OperationOfType<T extends OperationType> = Extract<BuildOperation, { type: T }>;

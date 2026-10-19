@@ -9,7 +9,10 @@ import type {
   InspectResult,
   ProjectInfo,
   ServerEvent,
+  SimInfo,
+  SiteInfo,
   Vec3,
+  WorldInfo,
   VersionOption,
   VersionSummary,
 } from '@minecraft-schematic-lab/shared';
@@ -50,6 +53,7 @@ export const api = {
     if (!res.ok) throw new ApiError('Could not load the build data.', res.status);
     return new Uint16Array(await res.arrayBuffer());
   },
+  sim: () => json<SimInfo>('/api/build/sim'),
   inspect: (pos: Vec3) =>
     json<InspectResult>(`/api/build/inspect?x=${pos[0]}&y=${pos[1]}&z=${pos[2]}`),
   changeVersion: (version: string, apply: boolean) =>
@@ -74,6 +78,30 @@ export const api = {
   exportUrl: (format: string) => `/api/export/${format}`,
   saveExport: (format: string, target: string) =>
     post<{ path: string; warnings: string[] }>(`/api/export/${format}/save`, { target }),
+  async changes(buildId: string): Promise<Uint8Array> {
+    const res = await fetch(`/api/build/changes?buildId=${encodeURIComponent(buildId)}`);
+    if (!res.ok) throw new ApiError('Could not load the changes.', res.status);
+    return new Uint8Array(await res.arrayBuffer());
+  },
+  worlds: () => json<WorldInfo[]>('/api/worlds'),
+  worldIconUrl: (id: string) => `/api/worlds/${encodeURIComponent(id)}/icon.png`,
+  importWorld: (body: { world: string; center?: number[]; radius?: number; dimension?: string }) =>
+    post<{ ok: boolean; site: SiteInfo; warnings: string[] }>('/api/sites/import', body),
+  importFile: (filename: string, data: string) =>
+    post<{ ok: boolean; site: SiteInfo; warnings: string[] }>('/api/sites/import-file', {
+      filename,
+      data,
+    }),
+  exportWorld: (name?: string) =>
+    post<{ path: string; folder: string; name: string; chunks: number; blocks: number }>(
+      '/api/export/world',
+      name ? { name } : {},
+    ),
+  installDatapack: (world?: string) =>
+    post<{ path: string; world: string; functionId: string; warnings: string[] }>(
+      '/api/export/datapack/install',
+      world ? { world } : {},
+    ),
   assetStatus: (version: string) => json<AssetStatus>(`/api/assets/${version}/status`),
   manifest: (version: string) => json<AssetManifest>(`/api/assets/${version}/manifest`),
   atlasUrl: (version: string) => `/api/assets/${version}/atlas.png`,
@@ -107,8 +135,10 @@ export function connectEvents(
     };
     es.onerror = () => {
       onStatus(false);
-      es?.close();
-      if (!closed) setTimeout(open, Math.min(5000, 500 * 2 ** retry++));
+      // The browser reconnects by itself (every second, as the server asks, also in background
+      // tabs); only a stream it gave up on needs a new one.
+      if (es?.readyState !== EventSource.CLOSED || closed) return;
+      setTimeout(open, Math.min(5000, 500 * 2 ** retry++));
     };
   };
   open();

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 // apps/server/src/index.ts
-import { existsSync as existsSync8 } from "node:fs";
+import { existsSync as existsSync12 } from "node:fs";
 import { createServer } from "node:net";
 
 // apps/server/src/assets/AssetStore.ts
@@ -17,8 +17,8 @@ function appHome() {
   mkdirSync(dir, { recursive: true });
   return dir;
 }
-function appDir(...parts) {
-  const dir = join(appHome(), ...parts);
+function appDir(...parts2) {
+  const dir = join(appHome(), ...parts2);
   mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -72,8 +72,8 @@ async function buildPack(version, jar, progress) {
   const blockstates = {};
   const models = {};
   const textureFiles = [];
-  for (const [path, bytes] of Object.entries(files)) {
-    const rest = path.slice(PREFIX.length);
+  for (const [path2, bytes] of Object.entries(files)) {
+    const rest = path2.slice(PREFIX.length);
     if (rest.startsWith("blockstates/")) {
       blockstates[rest.slice(12, -5)] = JSON.parse(strFromU8(bytes));
     } else if (rest.startsWith("models/")) {
@@ -244,6 +244,12 @@ function assetVersionFor(version) {
 var LATEST_DATA_RELEASE = LATEST_VERSION.dataset.replace(/^pc\//, "").replace(/~.*$/, "");
 function blockDataIsOlder(version) {
   return compareVersions(version.id, LATEST_DATA_RELEASE) > 0;
+}
+function versionForDataVersion(dataVersion) {
+  if (!dataVersion) return BY_ID.get("1.8.9") ?? VERSIONS[VERSIONS.length - 1];
+  const exact = VERSIONS.find((v) => v.dataVersion === dataVersion);
+  if (exact) return exact;
+  return VERSIONS.find((v) => v.dataVersion !== null && v.dataVersion <= dataVersion) ?? VERSIONS[VERSIONS.length - 1];
 }
 
 // packages/catalog/src/blockState.ts
@@ -593,6 +599,32 @@ function toLegacyIdMeta(state) {
   return result;
 }
 
+// packages/catalog/src/terrain.ts
+var FULL = new Set(catalogData.fullCubes);
+var AIR = /* @__PURE__ */ new Set(["air", "cave_air", "void_air", "structure_void", "light"]);
+var LIQUID = /* @__PURE__ */ new Set(["water", "lava", "bubble_column", "ice", "frosted_ice"]);
+var TREE = /(_log|_wood|_stem|_hyphae|_leaves|^mushroom_stem|_mushroom_block|^mangrove_roots|^bee_nest)$/;
+var LOW_GROUND = /* @__PURE__ */ new Set([
+  "dirt_path",
+  "grass_path",
+  "farmland",
+  "soul_sand",
+  "mud",
+  "powder_snow",
+  "honey_block"
+]);
+function terrainClass(name) {
+  if (AIR.has(name)) return "air";
+  if (LIQUID.has(name)) return "liquid";
+  if (TREE.test(name)) return "tree";
+  if (FULL.has(name) || LOW_GROUND.has(name)) return "ground";
+  return "detail";
+}
+var REPLACEABLE = /^(short_grass|grass|tall_grass|fern|large_fern|dead_bush|bush|firefly_bush|short_dry_grass|tall_dry_grass|snow|vine|glow_lichen|seagrass|tall_seagrass|dandelion|poppy|blue_orchid|allium|azure_bluet|oxeye_daisy|cornflower|lily_of_the_valley|torchflower|.*_tulip|sunflower|lilac|rose_bush|peony|pink_petals|wildflowers|leaf_litter|moss_carpet|.*_sapling|brown_mushroom|red_mushroom|sweet_berry_bush|nether_sprouts|crimson_roots|warped_roots|hanging_roots)$/;
+function isReplaceablePlant(name) {
+  return REPLACEABLE.test(name);
+}
+
 // packages/shared/src/assets.ts
 var QUAD_STRIDE = 26;
 
@@ -687,6 +719,9 @@ function hashHue(s) {
 }
 function blockShape(state) {
   const s = cleanName(state);
+  if (/^redstone_wire$|pressure_plate$|_carpet$|^tripwire$/.test(s)) return "flat";
+  if (/^(repeater|comparator|daylight_detector)$/.test(s)) return "low";
+  if (/_button$|^lever$|torch$|^tripwire_hook$/.test(s)) return "small";
   if (/stairs/.test(s)) return "stairs";
   if (/slab/.test(s)) return "slab";
   if (/_bars|^bars$|fence|_pane$|chain|end_rod|lightning_rod|_wall$|wall$|_rail|^rail$|ladder/.test(s)) {
@@ -698,18 +733,28 @@ function blockShape(state) {
 function colorFor(state) {
   const s = state.toLowerCase();
   const name = cleanName(state);
+  if (name === "redstone_wire") {
+    const p = Number(/power=(\d+)/.exec(s)?.[1] ?? 0) / 15;
+    const r = Math.round((p * 0.6 + (p > 0 ? 0.4 : 0.3)) * 255);
+    const g = Math.round(Math.max(0, p * p * 0.7 - 0.5) * 255);
+    return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}00`;
+  }
+  if (/lamp|torch|bulb/.test(name) && /lit=/.test(s))
+    return /lit=true/.test(s) ? "#ffd25a" : "#7a5a34";
+  if (/powered=true/.test(s) && /^(repeater|comparator|observer|lever)$|_button$/.test(name))
+    return "#ff5a36";
   if (COLORED_BLOCK.test(name)) {
     const dye = dyeColorFor(name);
     if (dye) return dye;
   }
   for (const { re, hex } of KEYWORD_COLORS) {
-    if (re.test(s)) return hex;
+    if (re.test(name)) return hex;
   }
   return `hsl(${hashHue(s)}, 42%, 55%)`;
 }
 
 // packages/shared/src/version.ts
-var APP_VERSION = "0.3.1";
+var APP_VERSION = "0.5.0";
 
 // apps/server/src/assets/ModelBaker.ts
 var DIRS = ["down", "up", "north", "south", "west", "east"];
@@ -747,6 +792,14 @@ var TINTS = [
   [/^(attached_)?(melon|pumpkin)_stem$/, 14731036],
   [/^redstone_wire$/, 11796480]
 ];
+function wireColor(power) {
+  const f = Math.max(0, Math.min(15, power)) / 15;
+  const r = f * 0.6 + (f > 0 ? 0.4 : 0.3);
+  const g = Math.min(1, Math.max(0, f * f * 0.7 - 0.5));
+  const b = Math.min(1, Math.max(0, f * f * 0.6 - 0.7));
+  const c = (v) => Math.round(v * 255);
+  return c(r) << 16 | c(g) << 8 | c(b);
+}
 var SELF_CULL = /(^|_)glass$|^ice$|^packed_ice$|^blue_ice$|^slime_block$|^honey_block$|^water$|^lava$|^tinted_glass$/;
 var INVISIBLE = /^(air|cave_air|void_air|barrier|light|structure_void|moving_piston)$/;
 function faceCorners(face, f, t) {
@@ -939,14 +992,16 @@ var ModelBaker = class {
     return out;
   }
   /** Biome/fixed colour the game applies to tinted faces; untinted blocks (cherry, azalea…) keep their texture colour. */
-  tintFor(name) {
+  tintFor(name, props) {
+    if (name === "redstone_wire" && props?.power !== void 0)
+      return wireColor(Number(props.power));
     for (const [re, color] of TINTS) if (re.test(name)) return color;
     return -1;
   }
   /** Quads of one model placed with a variant rotation. */
-  bakeModel(model, name, rx, ry, uvlock, out) {
+  bakeModel(model, name, rx, ry, uvlock, out, props) {
     const center = [8, 8, 8];
-    const tint = this.tintFor(name);
+    const tint = this.tintFor(name, props);
     for (const el of model.elements) {
       for (const face of DIRS) {
         const fd = el.faces[face];
@@ -1070,7 +1125,7 @@ var ModelBaker = class {
         if (!model) continue;
         if (model.elements.length === 0) continue;
         if (variants.length && out.length === 0 && this.isFullOpaque(model)) full = true;
-        this.bakeModel(model, name, ref.x ?? 0, ref.y ?? 0, ref.uvlock ?? false, q);
+        this.bakeModel(model, name, ref.x ?? 0, ref.y ?? 0, ref.uvlock ?? false, q, props);
       }
       out.push({ w: v.w, q });
     }
@@ -1313,14 +1368,14 @@ function loadConfig(argv = process.argv.slice(2)) {
 }
 
 // apps/server/src/core/BuildService.ts
-import { existsSync as existsSync4, mkdirSync as mkdirSync2, writeFileSync as writeFileSync3 } from "node:fs";
-import { homedir as homedir2 } from "node:os";
-import { extname, join as join4 } from "node:path";
-import { gzipSync as gzipSync2 } from "node:zlib";
+import { existsSync as existsSync8, mkdirSync as mkdirSync3, readFileSync as readFileSync7, writeFileSync as writeFileSync5 } from "node:fs";
+import { homedir as homedir3 } from "node:os";
+import { dirname as dirname2, extname, isAbsolute, join as join8, resolve as resolve2 } from "node:path";
+import { gzipSync as gzipSync4 } from "node:zlib";
 import jsonpatch from "fast-json-patch";
 
 // packages/block-compiler/src/BlockVolume.ts
-var AIR = "minecraft:air";
+var AIR2 = "minecraft:air";
 function sortPair(a, b) {
   return a <= b ? [a, b] : [b, a];
 }
@@ -1336,7 +1391,7 @@ var BlockVolume = class _BlockVolume {
   prov;
   blockEntities;
   paletteIndex;
-  constructor(sizeX, sizeY, sizeZ, origin = [0, 0, 0], palette = [AIR], data, prov, blockEntities = []) {
+  constructor(sizeX, sizeY, sizeZ, origin = [0, 0, 0], palette = [AIR2], data, prov, blockEntities = []) {
     this.sizeX = sizeX;
     this.sizeY = sizeY;
     this.sizeZ = sizeZ;
@@ -1369,7 +1424,7 @@ var BlockVolume = class _BlockVolume {
     return this.data[this.index(x, y, z3)];
   }
   getState(x, y, z3) {
-    return this.palette[this.getId(x, y, z3)] ?? AIR;
+    return this.palette[this.getId(x, y, z3)] ?? AIR2;
   }
   setState(x, y, z3, state) {
     if (!this.inBounds(x, y, z3)) return;
@@ -1396,7 +1451,7 @@ var BlockVolume = class _BlockVolume {
     const used = new Uint8Array(this.palette.length);
     for (let i = 0; i < this.data.length; i++) used[this.data[i]] = 1;
     const remap = new Uint16Array(this.palette.length);
-    const palette = [AIR];
+    const palette = [AIR2];
     for (let id = 1; id < this.palette.length; id++) {
       if (!used[id]) continue;
       remap[id] = palette.length;
@@ -1414,6 +1469,38 @@ var BlockVolume = class _BlockVolume {
       this.prov,
       this.blockEntities
     );
+  }
+  /** The cells from `lo` to `hi` (local, inclusive) as a new volume; same palette. */
+  crop(lo, hi) {
+    const sx = hi[0] - lo[0] + 1;
+    const sy = hi[1] - lo[1] + 1;
+    const sz = hi[2] - lo[2] + 1;
+    const data = new Uint16Array(sx * sy * sz);
+    const prov = new Uint16Array(sx * sy * sz);
+    let i = 0;
+    for (let y = 0; y < sy; y++)
+      for (let z3 = 0; z3 < sz; z3++) {
+        const from = this.index(lo[0], lo[1] + y, lo[2] + z3);
+        data.set(this.data.subarray(from, from + sx), i);
+        prov.set(this.prov.subarray(from, from + sx), i);
+        i += sx;
+      }
+    const blockEntities = this.blockEntities.filter(
+      (be) => be.pos[0] >= lo[0] && be.pos[0] <= hi[0] && be.pos[1] >= lo[1] && be.pos[1] <= hi[1] && be.pos[2] >= lo[2] && be.pos[2] <= hi[2]
+    ).map((be) => ({
+      ...be,
+      pos: [be.pos[0] - lo[0], be.pos[1] - lo[1], be.pos[2] - lo[2]]
+    }));
+    return new _BlockVolume(
+      sx,
+      sy,
+      sz,
+      [this.origin[0] + lo[0], this.origin[1] + lo[1], this.origin[2] + lo[2]],
+      this.palette,
+      data,
+      prov,
+      blockEntities
+    ).compact();
   }
   /** state -> positions, iterating in YZX order. */
   toInstanceGroups() {
@@ -1595,7 +1682,9 @@ var blocksOp = z.object({
   block: blockRef,
   at: z.array(vec3).min(1),
   /** Block entity data (chest items, sign text, …) for every placed block. */
-  nbt: z.record(z.string(), z.unknown()).optional()
+  nbt: z.record(z.string(), z.unknown()).optional(),
+  /** Each y counts from the ground at its x/z: 0 sits on the ground, -1 replaces its top. */
+  ground: z.boolean().optional()
 }).strict();
 var layersOp = z.object({
   type: z.literal("layers"),
@@ -1661,7 +1750,9 @@ var treeOp = z.object({
   radius: z.number().positive().optional(),
   log: blockRef.optional(),
   leaves: blockRef.optional(),
-  seed: z.number().int().optional()
+  seed: z.number().int().optional(),
+  /** at.y counts from the ground below at.x/at.z (0 = the trunk stands on the ground). */
+  ground: z.boolean().optional()
 }).strict();
 var scatterOp = z.object({
   type: z.literal("scatter"),
@@ -1694,6 +1785,57 @@ var replaceOp = z.object({
   chance: z.number().min(0).max(1).optional(),
   seed: z.number().int().optional()
 }).strict();
+var groundBlocks = {
+  /** Top block (default: the most common top block of the area, else grass_block). */
+  surface: blockRef.optional(),
+  /** Below the top, `depth` blocks deep (default: what the area has, else dirt). */
+  subsurface: blockRef.optional(),
+  depth: z.number().int().min(0).max(16).optional(),
+  /** Deeper fill (default: what the area has, else stone). */
+  core: blockRef.optional()
+};
+var flattenOp = z.object({
+  type: z.literal("flatten"),
+  ...common,
+  /** x/z extent of the plot (y is ignored). */
+  from: vec3,
+  to: vec3,
+  shape: z.enum(["box", "circle"]).optional(),
+  /** Where you build on top: the ground's top block ends at level - 1 (default: the area's median). */
+  level: z.number().int().optional(),
+  /** Width of the slope that blends the plot into the surrounding ground (default 4). */
+  blend: z.number().int().min(0).max(32).optional(),
+  /** Remove trees, plants and anything else above the new ground inside the plot (default true). */
+  clear: z.boolean().optional(),
+  ...groundBlocks
+}).strict();
+var foundationOp = z.object({
+  type: z.literal("foundation"),
+  ...common,
+  /** x/z footprint; the higher y is the foundation's top layer (usually -1, under a floor at 0). */
+  from: vec3,
+  to: vec3,
+  block: blockRef,
+  shape: z.enum(["box", "circle"]).optional(),
+  /** solid fills the footprint down to the ground; pillars only corners, edges every `spacing`. */
+  style: z.enum(["solid", "pillars"]).optional(),
+  spacing: z.number().int().min(2).max(32).optional(),
+  /** Blocks sunk into the ground below its surface (default 1). */
+  depth: z.number().int().min(0).max(16).optional()
+}).strict();
+var pathOp = z.object({
+  type: z.literal("path"),
+  ...common,
+  /** [x, z] points; the path follows the ground between them. */
+  points: z.array(vec2).min(2),
+  width: z.number().int().min(1).max(15).optional(),
+  /** Replaces the ground's top block (default dirt_path, gravel before 1.17). */
+  block: blockRef.optional(),
+  /** Edge blocks mixed in at the sides (optional). */
+  edge: blockRef.optional(),
+  /** Remove plants on the path (default true). */
+  clear: z.boolean().optional()
+}).strict();
 var scriptOp = z.object({
   type: z.literal("script"),
   ...common,
@@ -1723,6 +1865,8 @@ var placeOp = z.object({
   ...common,
   component: z.string().min(1),
   at: vec3,
+  /** Each copy stands on the ground below it: at.y counts from the ground (0 = on it). */
+  ground: z.boolean().optional(),
   ...transformFields
 }).strict();
 var LEAF_SCHEMAS = {
@@ -1741,6 +1885,9 @@ var LEAF_SCHEMAS = {
   tree: treeOp,
   scatter: scatterOp,
   replace: replaceOp,
+  flatten: flattenOp,
+  foundation: foundationOp,
+  path: pathOp,
   script: scriptOp,
   place: placeOp
 };
@@ -1787,6 +1934,73 @@ var componentSchema = z.object({
   description: z.string().optional(),
   operations: z.array(operationSchema)
 }).strict();
+var tickCount = z.union([z.number().int().nonnegative().max(1e6), z.string().min(1)]);
+var circuitIoSchema = z.object({
+  at: z.union([vec3, z.array(vec3).min(1).max(64)]),
+  /** Input: place this block for 1 and restore the original for 0 (e.g. "redstone_block"). */
+  as: blockRef.optional(),
+  /** Output: "bit" (0/1, default), "power" (0–15) or "block" (1 when a block stands there). */
+  read: z.enum(["bit", "power", "block"]).optional()
+}).strict();
+var ioValue = z.union([z.number(), z.boolean(), z.string().min(1)]);
+var ioName = z.string().regex(/^[A-Za-z_]\w*$/, "names are letters, digits and _");
+var STEP_SCHEMAS = {
+  set: z.object({ set: z.record(ioName, ioValue) }).strict(),
+  pulse: z.object({ pulse: z.record(ioName, tickCount) }).strict(),
+  press: z.object({ press: z.union([ioName, z.array(ioName).min(1)]) }).strict(),
+  wait: z.object({ wait: tickCount }).strict(),
+  settle: z.object({ settle: z.union([z.literal(true), tickCount]) }).strict(),
+  measure: z.object({
+    measure: ioName,
+    ticks: tickCount,
+    expect: z.object({ period: z.number(), high: z.number(), pulses: z.number().int() }).partial().strict().optional()
+  }).strict(),
+  expect: z.object({
+    expect: z.union([z.record(ioName, ioValue), z.string().min(1)]),
+    within: tickCount.optional(),
+    for: tickCount.optional()
+  }).strict(),
+  log: z.object({ log: z.union([ioName, z.array(ioName).min(1)]) }).strict(),
+  use: z.object({ use: vec3 }).strict(),
+  place: z.object({ place: z.object({ at: vec3, block: blockRef }).strict() }).strict(),
+  break: z.object({ break: vec3 }).strict()
+};
+var CIRCUIT_STEPS = Object.keys(STEP_SCHEMAS);
+var circuitStepSchema = z.record(z.string(), z.unknown()).superRefine((value, ctx) => {
+  const key = CIRCUIT_STEPS.find((k) => k in value);
+  const schema = key ? STEP_SCHEMAS[key] : void 0;
+  if (!schema) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `Unknown step. Use one of: ${CIRCUIT_STEPS.map((k) => `{"${k}": \u2026}`).join(", ")}.`
+    });
+    return;
+  }
+  const parsed = schema.safeParse(value);
+  if (!parsed.success) for (const issue of parsed.error.issues) ctx.addIssue(issue);
+});
+var circuitTestSchema = z.object({
+  name: z.string().min(1),
+  steps: z.array(circuitStepSchema).min(1),
+  /** Run once per combination: {"A": [0, 15]} is every A from 0 to 15. */
+  forAll: z.record(
+    ioName,
+    z.union([
+      z.tuple([z.number().int(), z.number().int()]),
+      z.object({ values: z.array(z.number().int()).min(1) }).strict()
+    ])
+  ).optional(),
+  samples: z.number().int().positive().max(1e5).optional(),
+  seed: z.number().int().optional(),
+  trace: z.array(ioName).optional()
+}).strict();
+var circuitSchema = z.object({
+  inputs: z.record(ioName, circuitIoSchema).optional(),
+  outputs: z.record(ioName, circuitIoSchema).optional(),
+  tests: z.array(circuitTestSchema).optional(),
+  /** Ticks power-on may take before the circuit counts as never resting (default 1200). */
+  settleTicks: z.number().int().positive().max(1e5).optional()
+}).strict();
 var buildSpecSchema = z.object({
   $schema: z.string().optional(),
   id: z.string().min(1).optional(),
@@ -1806,6 +2020,14 @@ var buildSpecSchema = z.object({
   palette: z.record(z.string().min(1), paletteEntrySchema).optional(),
   components: z.record(z.string().min(1), componentSchema).optional(),
   operations: z.array(operationSchema),
+  /** A redstone circuit: named inputs/outputs and tests the simulator runs on every build. */
+  circuit: circuitSchema.optional(),
+  /**
+   * Build on a piece of the player's world or of a schematic, imported with import_site (or the
+   * viewer's Import). Coordinates are relative to the site's origin: (0, 0, 0) is the block
+   * above the ground at the point the player chose.
+   */
+  site: z.object({ id: z.string().min(1) }).strict().optional(),
   metadata: z.object({
     prompt: z.string().optional(),
     style: z.string().optional(),
@@ -1815,9 +2037,9 @@ var buildSpecSchema = z.object({
 }).strict();
 
 // packages/build-spec/src/validateBuildSpec.ts
-function formatPath(path) {
+function formatPath(path2) {
   let out = "";
-  for (const p of path) out += typeof p === "number" ? `[${p}]` : out ? `.${p}` : p;
+  for (const p of path2) out += typeof p === "number" ? `[${p}]` : out ? `.${p}` : p;
   return out;
 }
 function validateBuildSpec(input) {
@@ -1828,14 +2050,14 @@ function validateBuildSpec(input) {
   const seen = /* @__PURE__ */ new Set();
   const errors = [];
   for (const issue of parsed.error.issues) {
-    const path = formatPath(issue.path);
+    const path2 = formatPath(issue.path);
     let message = issue.message;
     if (issue.code === "unrecognized_keys") {
       message = `unknown field(s) ${issue.keys.map((k) => `"${k}"`).join(", ")}`;
     } else if (issue.code === "invalid_type" && issue.expected === "array" && issue.received === "object") {
       message = "expected an array like [x, y, z], received an object";
     }
-    const line2 = path ? `${path}: ${message}` : message;
+    const line2 = path2 ? `${path2}: ${message}` : message;
     if (!seen.has(line2)) {
       seen.add(line2);
       errors.push(line2);
@@ -2137,8 +2359,8 @@ var SWAP_LR = {
 };
 function mapRailShape(t, shape) {
   if (shape.startsWith("ascending_")) return `ascending_${mapDir(t, shape.slice(10))}`;
-  const parts = shape.split("_").map((p) => mapDir(t, p));
-  const set = new Set(parts);
+  const parts2 = shape.split("_").map((p) => mapDir(t, p));
+  const set = new Set(parts2);
   if (set.has("north") && set.has("south")) return "north_south";
   if (set.has("east") && set.has("west")) return "east_west";
   const ns = set.has("north") ? "north" : "south";
@@ -2196,6 +2418,7 @@ var AIR_STATE = "minecraft:air";
 var FLAG_CONNECT = 1;
 var FLAG_STAIR_SHAPE = 2;
 var FLAG_COMPLETE = 4;
+var FLAG_REDSTONE = 8;
 var SIDES = ["north", "east", "south", "west"];
 function connectsLikeFence(cat, name) {
   const v = cat.propValues(name, "north");
@@ -2217,6 +2440,8 @@ var InternalPalette = class {
       flags |= FLAG_CONNECT;
     }
     if (name.endsWith("_stairs") && !ex.has("shape")) flags |= FLAG_STAIR_SHAPE;
+    if (name === "redstone_wire" && !SIDES.some((s) => ex.has(s))) flags |= FLAG_REDSTONE;
+    if (name === "repeater" && !ex.has("locked")) flags |= FLAG_REDSTONE;
     if (props.half === "lower" && "half" in props || props.part === "foot")
       flags |= FLAG_COMPLETE;
     return this.addRaw(name, props, flags);
@@ -2421,7 +2646,7 @@ function stairShape(e, x, y, z3, entryAt) {
     const [dx, dz] = DIR_VEC[d];
     return entryAt(x + dx, y, z3 + dz);
   };
-  const axisOf = (d) => d === "east" || d === "west" ? "x" : "z";
+  const axisOf2 = (d) => d === "east" || d === "west" ? "x" : "z";
   const canTakeShape = (face) => {
     const n = rel(face);
     return !isStairs(n) || n.props.facing !== facing || n.props.half !== half;
@@ -2429,18 +2654,3294 @@ function stairShape(e, x, y, z3, entryAt) {
   const behind = rel(facing);
   if (isStairs(behind) && behind.props.half === half) {
     const d1 = behind.props.facing;
-    if (axisOf(d1) !== axisOf(facing) && canTakeShape(OPPOSITE[d1])) {
+    if (axisOf2(d1) !== axisOf2(facing) && canTakeShape(OPPOSITE[d1])) {
       return d1 === CCW[facing] ? "outer_left" : "outer_right";
     }
   }
   const front = rel(OPPOSITE[facing]);
   if (isStairs(front) && front.props.half === half) {
     const d2 = front.props.facing;
-    if (axisOf(d2) !== axisOf(facing) && canTakeShape(d2)) {
+    if (axisOf2(d2) !== axisOf2(facing) && canTakeShape(d2)) {
       return d2 === CCW[facing] ? "inner_left" : "inner_right";
     }
   }
   return "straight";
+}
+
+// packages/redstone/src/blocks.ts
+var K = {
+  AIR: 0,
+  SOLID: 1,
+  WIRE: 2,
+  TORCH: 3,
+  WALL_TORCH: 4,
+  REPEATER: 5,
+  COMPARATOR: 6,
+  LEVER: 7,
+  BUTTON: 8,
+  PLATE: 9,
+  WEIGHTED_PLATE: 10,
+  REDSTONE_BLOCK: 11,
+  LAMP: 12,
+  PISTON: 13,
+  PISTON_HEAD: 14,
+  MOVING_PISTON: 15,
+  OBSERVER: 16,
+  TARGET: 17,
+  NOTE_BLOCK: 18,
+  DOOR: 19,
+  TRAPDOOR: 20,
+  FENCE_GATE: 21,
+  DISPENSER: 22,
+  HOPPER: 23,
+  COPPER_BULB: 24,
+  TNT: 25,
+  POWERED_RAIL: 26,
+  RAIL: 27,
+  DAYLIGHT: 28,
+  TRIPWIRE_HOOK: 29,
+  LECTERN: 30,
+  TRAPPED_CHEST: 31,
+  SCULK_SENSOR: 32,
+  LIGHTNING_ROD: 33,
+  CRAFTER: 34,
+  BELL: 35
+};
+function kindOf2(name) {
+  switch (name) {
+    case "air":
+    case "cave_air":
+    case "void_air":
+      return K.AIR;
+    case "redstone_wire":
+      return K.WIRE;
+    case "redstone_torch":
+      return K.TORCH;
+    case "redstone_wall_torch":
+      return K.WALL_TORCH;
+    case "repeater":
+      return K.REPEATER;
+    case "comparator":
+      return K.COMPARATOR;
+    case "lever":
+      return K.LEVER;
+    case "light_weighted_pressure_plate":
+    case "heavy_weighted_pressure_plate":
+      return K.WEIGHTED_PLATE;
+    case "redstone_block":
+      return K.REDSTONE_BLOCK;
+    case "redstone_lamp":
+      return K.LAMP;
+    case "piston":
+    case "sticky_piston":
+      return K.PISTON;
+    case "piston_head":
+      return K.PISTON_HEAD;
+    case "moving_piston":
+      return K.MOVING_PISTON;
+    case "observer":
+      return K.OBSERVER;
+    case "target":
+      return K.TARGET;
+    case "note_block":
+      return K.NOTE_BLOCK;
+    case "dispenser":
+    case "dropper":
+      return K.DISPENSER;
+    case "hopper":
+      return K.HOPPER;
+    case "tnt":
+      return K.TNT;
+    case "powered_rail":
+    case "activator_rail":
+      return K.POWERED_RAIL;
+    case "rail":
+    case "detector_rail":
+      return K.RAIL;
+    case "daylight_detector":
+      return K.DAYLIGHT;
+    case "tripwire_hook":
+      return K.TRIPWIRE_HOOK;
+    case "lectern":
+      return K.LECTERN;
+    case "trapped_chest":
+      return K.TRAPPED_CHEST;
+    case "sculk_sensor":
+    case "calibrated_sculk_sensor":
+      return K.SCULK_SENSOR;
+    case "crafter":
+      return K.CRAFTER;
+    case "bell":
+      return K.BELL;
+  }
+  if (name.endsWith("_button")) return K.BUTTON;
+  if (name.endsWith("_pressure_plate")) return K.PLATE;
+  if (name.endsWith("_trapdoor")) return K.TRAPDOOR;
+  if (name.endsWith("_door")) return K.DOOR;
+  if (name.endsWith("_fence_gate")) return K.FENCE_GATE;
+  if (name.endsWith("copper_bulb")) return K.COPPER_BULB;
+  if (name.endsWith("lightning_rod")) return K.LIGHTNING_ROD;
+  return K.SOLID;
+}
+function isSignalSourceKind(kind, name) {
+  switch (kind) {
+    case K.WIRE:
+    case K.TORCH:
+    case K.WALL_TORCH:
+    case K.REPEATER:
+    case K.COMPARATOR:
+    case K.LEVER:
+    case K.BUTTON:
+    case K.PLATE:
+    case K.WEIGHTED_PLATE:
+    case K.REDSTONE_BLOCK:
+    case K.OBSERVER:
+    case K.TARGET:
+    case K.DAYLIGHT:
+    case K.TRIPWIRE_HOOK:
+    case K.LECTERN:
+    case K.TRAPPED_CHEST:
+    case K.SCULK_SENSOR:
+    case K.LIGHTNING_ROD:
+      return true;
+    case K.RAIL:
+      return name === "detector_rail";
+    default:
+      return false;
+  }
+}
+var NOT_CONDUCTIVE = /(^|_)glass$|_leaves$|^ice$|^frosted_ice$|^glowstone$|^sea_lantern$|^beacon$|^redstone_block$|^observer$|^tnt$|^moving_piston$|^(sticky_)?piston$|^structure_void$|^light$|copper_bulb$|copper_grate$/;
+var NO_SUPPORT = /_leaves$/;
+var CONDUCTIVE_ANYWAY = /^soul_sand$|^mud$/;
+var STURDY_TOP_ANYWAY = /^(sticky_)?piston$|^soul_sand$|^mud$|^dirt_path$|^farmland$|^observer$/;
+var CENTER_TOP = /_fence$|_wall$|^iron_bars$|_pane$|^chain$|^iron_chain$|_chain$|^lantern$/;
+function blockTraits(name, isFullCube) {
+  const kind = kindOf2(name);
+  const full = kind !== K.AIR && isFullCube(name);
+  const conductor = kind !== K.AIR && kind !== K.PISTON && kind !== K.REDSTONE_BLOCK && kind !== K.OBSERVER && (full && !NOT_CONDUCTIVE.test(name) || CONDUCTIVE_ANYWAY.test(name));
+  const support = !NO_SUPPORT.test(name);
+  const sturdyTop = support && (full || STURDY_TOP_ANYWAY.test(name));
+  return {
+    name,
+    kind,
+    conductor,
+    sturdyTop,
+    sturdySide: support && (full || kind === K.PISTON || kind === K.OBSERVER),
+    centerTop: sturdyTop || CENTER_TOP.test(name),
+    signalSource: isSignalSourceKind(kind, name)
+  };
+}
+function stateTraits(base, props) {
+  const n = base.name;
+  if (n.endsWith("_slab")) {
+    if (props.type === "double")
+      return { ...base, conductor: true, sturdyTop: true, sturdySide: true, centerTop: true };
+    if (props.type === "top") return { ...base, sturdyTop: true, centerTop: true };
+  } else if (n.endsWith("_stairs") && props.half === "top") {
+    return { ...base, sturdyTop: true, centerTop: true };
+  } else if (base.kind === K.PISTON && props.extended === "true") {
+    return { ...base, sturdyTop: false, sturdySide: false, centerTop: false };
+  } else if (n === "snow" && props.layers === "8") {
+    return { ...base, sturdyTop: true, centerTop: true };
+  }
+  return base;
+}
+var PUSH = { NORMAL: 0, DESTROY: 1, BLOCK: 2, PUSH_ONLY: 3 };
+var IMMOVABLE = /^(obsidian|crying_obsidian|respawn_anchor|reinforced_deepslate|bedrock|barrier|end_portal_frame|end_portal|end_gateway|nether_portal|command_block|chain_command_block|repeating_command_block|structure_block|jigsaw|light|grindstone|piston_head|moving_piston|enchanting_table|ender_chest|lodestone|anvil|chipped_anvil|damaged_anvil|beacon|conduit|spawner|trial_spawner|vault|test_block|test_instance_block)$/;
+var BLOCK_ENTITY = /(^|_)(chest|furnace|smoker|hopper|dispenser|dropper|barrel|brewing_stand|jukebox|lectern|beehive|bee_nest|campfire|sign|hanging_sign|banner|bed|head|skull|daylight_detector|comparator|enchanting_table|beacon|conduit|bell|crafter|chiseled_bookshelf|decorated_pot|sculk_sensor|sculk_catalyst|sculk_shrieker|calibrated_sculk_sensor|creaking_heart|trial_spawner|vault|spawner|shelf|copper_golem_statue)$/;
+var DESTROY_ON_PUSH = /^(redstone_wire|redstone_torch|redstone_wall_torch|torch|wall_torch|soul_torch|soul_wall_torch|copper_torch|copper_wall_torch|repeater|comparator|lever|tripwire|tripwire_hook|cobweb|cake|candle_cake|dragon_egg|flower_pot|ladder|vine|snow|lily_pad|scaffolding|pumpkin|carved_pumpkin|jack_o_lantern|melon|cocoa|sugar_cane|cactus|bamboo|bamboo_sapling|chorus_plant|chorus_flower|sea_pickle|turtle_egg|sniffer_egg|frogspawn|pointed_dripstone|big_dripleaf|big_dripleaf_stem|small_dripleaf|spore_blossom|glow_lichen|sculk_vein|resin_clump|lantern|soul_lantern|end_rod|fire|soul_fire|water|lava|bubble_column|light|moss_carpet|pale_moss_carpet|pale_hanging_moss|hanging_roots|leaf_litter|wildflowers|bush|firefly_bush|short_dry_grass|tall_dry_grass|cactus_flower|pink_petals|azalea|flowering_azalea|heavy_core|decorated_pot|pitcher_crop|pitcher_plant|torchflower|torchflower_crop|sweet_berry_bush|nether_wart|wheat|carrots|potatoes|beetroots|melon_stem|pumpkin_stem|attached_melon_stem|attached_pumpkin_stem|kelp|kelp_plant|seagrass|tall_seagrass|cave_vines|cave_vines_plant|weeping_vines|weeping_vines_plant|twisting_vines|twisting_vines_plant|structure_void)$/;
+var DESTROY_SUFFIX = /(_button|_pressure_plate|_door|_bed|_banner|_wall_banner|_carpet|_sapling|_flower|_tulip|_orchid|_mushroom|_fungus|_roots|_sprouts|_coral|_coral_fan|_coral_wall_fan|_head|_wall_head|_skull|_wall_skull|_candle|candle|_shulker_box|shulker_box|_sign|_wall_sign|_hanging_sign|_wall_hanging_sign|_pane_dummy|_grass|_fern|_bush|_propagule|_lantern|_amethyst_bud|amethyst_cluster)$/;
+var FLOWERS = /^(dandelion|poppy|blue_orchid|allium|azure_bluet|cornflower|lily_of_the_valley|wither_rose|oxeye_daisy|sunflower|lilac|rose_bush|peony|open_eyeblossom|closed_eyeblossom|fern|large_fern|dead_bush|short_grass|grass|tall_grass|crimson_roots|warped_roots|nether_sprouts|brown_mushroom|red_mushroom|crimson_fungus|warped_fungus|mangrove_propagule)$/;
+function pushReactionOf(name) {
+  if (/_glazed_terracotta$/.test(name)) return PUSH.PUSH_ONLY;
+  if (IMMOVABLE.test(name)) return PUSH.BLOCK;
+  if (DESTROY_ON_PUSH.test(name) || DESTROY_SUFFIX.test(name) || FLOWERS.test(name))
+    return PUSH.DESTROY;
+  return PUSH.NORMAL;
+}
+function hasBlockEntity(name) {
+  return BLOCK_ENTITY.test(name);
+}
+function buttonTicks(name) {
+  return name === "stone_button" || name === "polished_blackstone_button" ? 20 : 30;
+}
+function plateMaxWeight(name) {
+  return name === "heavy_weighted_pressure_plate" ? 150 : 15;
+}
+
+// packages/redstone/src/containers.ts
+var STACK_16 = /^(ender_pearl|snowball|egg|blue_egg|brown_egg|bucket|armor_stand|honey_bottle|written_book|.*_sign|.*_hanging_sign|.*_banner)$/;
+var STACK_1 = /^(.*_(sword|pickaxe|axe|shovel|hoe|helmet|chestplate|leggings|boots|horse_armor|boat|chest_boat|bed|shulker_box|bundle)|.*_bucket|potion|splash_potion|lingering_potion|bow|crossbow|trident|mace|shield|elytra|totem_of_undying|saddle|minecart|.*_minecart|music_disc_.*|enchanted_book|cake|carrot_on_a_stick|warped_fungus_on_a_stick|fishing_rod|flint_and_steel|shears|brush|spyglass|goat_horn|knowledge_book|debug_stick|writable_book|suspicious_stew|mushroom_stew|rabbit_stew|beetroot_soup|wolf_armor|shulker_box)$/;
+function maxStackSize(itemId) {
+  const id = itemId.replace(/^minecraft:/, "");
+  if (STACK_1.test(id)) return 1;
+  if (STACK_16.test(id)) return 16;
+  return 64;
+}
+var SLOTS = [
+  [/^(chest|trapped_chest|barrel|.*shulker_box)$/, 27],
+  [/^hopper$/, 5],
+  [/^(dispenser|dropper|crafter)$/, 9],
+  [/^(furnace|blast_furnace|smoker)$/, 3],
+  [/^brewing_stand$/, 5],
+  [/^decorated_pot$/, 1]
+];
+function containerSlots(name) {
+  for (const [re, n] of SLOTS) if (re.test(name)) return n;
+  return 0;
+}
+function itemsOf(data) {
+  const items = data?.Items;
+  if (!Array.isArray(items)) return [];
+  const out = [];
+  for (const it of items) {
+    if (!it || typeof it !== "object") continue;
+    const r = it;
+    const id = typeof r.id === "string" ? r.id : "";
+    const raw = r.count ?? r.Count ?? 1;
+    const count = typeof raw === "number" ? raw : Number.parseInt(String(raw), 10);
+    if (id && Number.isFinite(count) && count > 0) out.push({ id, count });
+  }
+  return out;
+}
+function containerSignal(items, slots) {
+  if (slots <= 0 || items.length === 0) return 0;
+  let f = 0;
+  for (const it of items) {
+    const max = Math.min(64, maxStackSize(it.id));
+    f = Math.fround(f + Math.fround(Math.min(it.count, max) / max));
+  }
+  f = Math.fround(f / slots);
+  if (f <= 0) return 0;
+  return Math.floor(Math.fround(f * 14)) + 1;
+}
+function stateSignal(name, props) {
+  switch (name) {
+    case "cake":
+      return (7 - Number(props.bites ?? 0)) * 2;
+    case "candle_cake":
+      return 14;
+    case "water_cauldron":
+    case "powder_snow_cauldron":
+      return Number(props.level ?? 0);
+    case "lava_cauldron":
+      return 3;
+    case "cauldron":
+      return props.level !== void 0 ? Number(props.level) : 0;
+    case "composter":
+      return Number(props.level ?? 0);
+    case "end_portal_frame":
+      return props.eye === "true" ? 15 : 0;
+    case "respawn_anchor":
+      return Math.floor(Number(props.charges ?? 0) / 4 * 15);
+    case "beehive":
+    case "bee_nest":
+      return Number(props.honey_level ?? 0);
+    case "jukebox":
+      return props.has_record === "true" ? 1 : 0;
+    case "lectern":
+      return props.has_book === "true" ? 1 : 0;
+    case "chiseled_bookshelf": {
+      let n = 0;
+      for (let i = 0; i < 6; i++) if (props[`slot_${i}_occupied`] === "true") n = i + 1;
+      return n;
+    }
+  }
+  if (name.endsWith("copper_bulb")) return props.lit === "true" ? 15 : 0;
+  return null;
+}
+function hasAnalogOutput(name) {
+  return containerSlots(name) > 0 || stateSignal(name, {}) !== null;
+}
+
+// packages/redstone/src/dirs.ts
+var DOWN = 0;
+var UP = 1;
+var NORTH = 2;
+var SOUTH = 3;
+var WEST = 4;
+var EAST = 5;
+var DIR_NAMES = ["down", "up", "north", "south", "west", "east"];
+var OPPOSITE2 = [UP, DOWN, SOUTH, NORTH, EAST, WEST];
+var ALL = [DOWN, UP, NORTH, SOUTH, WEST, EAST];
+var UPDATE_ORDER = [WEST, EAST, DOWN, UP, NORTH, SOUTH];
+var SHAPE_ORDER = [WEST, EAST, NORTH, SOUTH, DOWN, UP];
+var HORIZONTAL = [NORTH, EAST, SOUTH, WEST];
+function dirOf(name) {
+  switch (name) {
+    case "down":
+      return DOWN;
+    case "up":
+      return UP;
+    case "north":
+      return NORTH;
+    case "south":
+      return SOUTH;
+    case "west":
+      return WEST;
+    case "east":
+      return EAST;
+    default:
+      return -1;
+  }
+}
+function axisOf(d) {
+  return d < 2 ? 1 : d < 4 ? 2 : 0;
+}
+function clockwise(d) {
+  switch (d) {
+    case NORTH:
+      return EAST;
+    case EAST:
+      return SOUTH;
+    case SOUTH:
+      return WEST;
+    case WEST:
+      return NORTH;
+    default:
+      return d;
+  }
+}
+function counterClockwise(d) {
+  switch (d) {
+    case NORTH:
+      return WEST;
+    case WEST:
+      return SOUTH;
+    case SOUTH:
+      return EAST;
+    case EAST:
+      return NORTH;
+    default:
+      return d;
+  }
+}
+
+// packages/redstone/src/states.ts
+var SIDE_NONE = 0;
+var SIDE_SIDE = 1;
+var SIDE_UP = 2;
+var SIDE_NAMES = ["none", "side", "up"];
+var sideOf = (v) => v === "up" ? SIDE_UP : v === "side" ? SIDE_SIDE : 0;
+function blockNameOf2(state) {
+  const noNs = state.includes(":") ? state.slice(state.indexOf(":") + 1) : state;
+  const br = noNs.indexOf("[");
+  return br === -1 ? noNs : noNs.slice(0, br);
+}
+function propsOf2(state) {
+  const br = state.indexOf("[");
+  const out = {};
+  if (br === -1) return out;
+  for (const pair of state.slice(br + 1, -1).split(",")) {
+    const eq = pair.indexOf("=");
+    if (eq > 0) out[pair.slice(0, eq)] = pair.slice(eq + 1);
+  }
+  return out;
+}
+function stringifyState2(name, props) {
+  const keys = Object.keys(props).sort();
+  const base = `minecraft:${name}`;
+  return keys.length ? `${base}[${keys.map((k) => `${k}=${props[k]}`).join(",")}]` : base;
+}
+var StateTable = class {
+  constructor(isFullCube) {
+    this.isFullCube = isFullCube;
+  }
+  infos = [];
+  ids = /* @__PURE__ */ new Map();
+  withCache = [];
+  baseTraits = /* @__PURE__ */ new Map();
+  nameIds = /* @__PURE__ */ new Map();
+  get size() {
+    return this.infos.length;
+  }
+  idOf(state) {
+    const hit = this.ids.get(state);
+    if (hit !== void 0) return hit;
+    const name = blockNameOf2(state);
+    return this.add(stringifyState2(name, propsOf2(state)), name, propsOf2(state));
+  }
+  idOfName(name, props = {}) {
+    return this.idOf(stringifyState2(name, props));
+  }
+  add(state, name, props) {
+    const canonical = this.ids.get(state);
+    if (canonical !== void 0) return canonical;
+    let base = this.baseTraits.get(name);
+    if (!base) {
+      base = blockTraits(name, this.isFullCube);
+      this.baseTraits.set(name, base);
+    }
+    const traits = stateTraits(base, props);
+    const id = this.infos.length;
+    const p = props;
+    const info = {
+      ...traits,
+      id,
+      state,
+      props: p,
+      facing: dirOf(p.facing),
+      face: p.face,
+      power: p.power !== void 0 ? Number(p.power) : -1,
+      powered: p.powered === "true",
+      lit: p.lit === "true",
+      extended: p.extended === "true",
+      open: p.open === "true",
+      triggered: p.triggered === "true",
+      enabled: p.enabled !== "false",
+      locked: p.locked === "true",
+      delay: p.delay !== void 0 ? Number(p.delay) : 1,
+      subtract: p.mode === "subtract",
+      sides: [0, 0, sideOf(p.north), sideOf(p.south), sideOf(p.west), sideOf(p.east)],
+      push: pushReactionOf(name),
+      blockEntity: hasBlockEntity(name),
+      nameId: this.nameIdOf(name)
+    };
+    this.infos.push(info);
+    this.withCache.push(/* @__PURE__ */ new Map());
+    this.ids.set(state, id);
+    return id;
+  }
+  nameIdOf(name) {
+    let n = this.nameIds.get(name);
+    if (n === void 0) {
+      n = this.nameIds.size;
+      this.nameIds.set(name, n);
+    }
+    return n;
+  }
+  info(id) {
+    return this.infos[id];
+  }
+  kind(id) {
+    return this.infos[id].kind;
+  }
+  /** Same block with one or more properties changed (unknown properties are ignored). */
+  with(id, key, value) {
+    const cache = this.withCache[id];
+    const k = `${key}=${value}`;
+    const hit = cache.get(k);
+    if (hit !== void 0) return hit;
+    const info = this.info(id);
+    let out = id;
+    if (key in info.props && info.props[key] !== value) {
+      const props = { ...info.props, [key]: value };
+      out = this.add(stringifyState2(info.name, props), info.name, props);
+    }
+    cache.set(k, out);
+    return out;
+  }
+  withBool(id, key, value) {
+    return this.with(id, key, value ? "true" : "false");
+  }
+  withPower(id, power) {
+    return this.with(id, "power", String(power));
+  }
+  withSides(id, n, e, s, w) {
+    let out = this.with(id, "north", SIDE_NAMES[n]);
+    out = this.with(out, "east", SIDE_NAMES[e]);
+    out = this.with(out, "south", SIDE_NAMES[s]);
+    return this.with(out, "west", SIDE_NAMES[w]);
+  }
+  withSide(id, dir, side) {
+    const key = dir === NORTH ? "north" : dir === SOUTH ? "south" : dir === WEST ? "west" : "east";
+    return this.with(id, key, SIDE_NAMES[side]);
+  }
+};
+
+// packages/redstone/src/version.ts
+function parts(v) {
+  return v.split(".").map((n) => Number.parseInt(n, 10) || 0);
+}
+function versionAtLeast(a, b) {
+  const pa = parts(a);
+  const pb = parts(b);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (d !== 0) return d > 0;
+  }
+  return true;
+}
+function rulesFor(version) {
+  const at = (v) => versionAtLeast(version, v);
+  return {
+    version,
+    incrementalDust: !at("1.13"),
+    liveDustSides: !at("1.16"),
+    tickThisTickCheck: at("1.13"),
+    queuedUpdates: at("1.19"),
+    noteBlockState: at("1.13"),
+    noteBlockImmovable: !at("1.13"),
+    shapeSurvival: at("1.13"),
+    splitBlocks: !at("1.13"),
+    dustOnGlass: at("1.14"),
+    maxScheduledPerTick: at("1.9.1") ? 65536 : 1e3
+  };
+}
+
+// packages/redstone/src/world.ts
+var F = {
+  NEIGHBORS: 1,
+  CLIENTS: 2,
+  INVISIBLE: 4,
+  KNOWN_SHAPE: 16,
+  SUPPRESS_DROPS: 32,
+  MOVED: 64
+};
+var UPDATE_ALL = 3;
+var P_EXTREMELY_HIGH = -3;
+var P_VERY_HIGH = -2;
+var P_HIGH = -1;
+var P_NORMAL = 0;
+var PAD = 2;
+var GLASSY = /(^|_)glass$|^ice$|^sea_lantern$/;
+var MAX_DEPTH = 900;
+var MAX_UPDATES_PER_TICK = 2e7;
+var MODERN_DEFAULTS = {
+  piston_head: { facing: "north", short: "false", type: "normal" },
+  moving_piston: { facing: "north", type: "normal" }
+};
+function heapLess(a, b) {
+  return a.time !== b.time ? a.time < b.time : a.priority !== b.priority ? a.priority < b.priority : a.seq < b.seq;
+}
+var World = class {
+  rules;
+  states;
+  size;
+  offset;
+  /** Array dimensions and where local (0,0,0) sits in them. */
+  W;
+  H;
+  D;
+  mx;
+  my;
+  mz;
+  off;
+  cells;
+  /** Game time: ticks completed. */
+  time = 0;
+  events = [];
+  AIR;
+  defaults;
+  wireSignals = true;
+  handlingTick = false;
+  seq = 0;
+  heap = [];
+  scheduled = /* @__PURE__ */ new Map();
+  runningThisTick = /* @__PURE__ */ new Set();
+  eventQueue = [];
+  eventHead = 0;
+  eventKeys = /* @__PURE__ */ new Set();
+  moving = /* @__PURE__ */ new Map();
+  tickers = [];
+  pendingTickers = [];
+  comparatorOut = /* @__PURE__ */ new Map();
+  inventories = /* @__PURE__ */ new Map();
+  plateEntities = /* @__PURE__ */ new Map();
+  toggles = [];
+  changedMark;
+  changed = [];
+  depth = 0;
+  updates = 0;
+  // queued updates (1.19+)
+  stack = [];
+  added = [];
+  count = 0;
+  constructor(opts) {
+    this.rules = rulesFor(opts.version);
+    this.states = new StateTable(opts.isFullCube);
+    this.defaults = { ...MODERN_DEFAULTS, ...opts.defaults };
+    this.size = [...opts.size];
+    this.offset = opts.offset ?? [0, 64, 0];
+    const margin = Math.max(0, opts.margin ?? 6);
+    const [sx, sy, sz] = opts.size;
+    this.mx = PAD + margin;
+    this.mz = PAD + margin;
+    this.my = PAD + 1;
+    this.W = sx + 2 * this.mx;
+    this.D = sz + 2 * this.mz;
+    this.H = sy + this.my + margin + PAD;
+    const total = this.W * this.H * this.D;
+    this.cells = new Uint16Array(total);
+    this.changedMark = new Uint8Array(total);
+    this.off = [-this.W * this.D, this.W * this.D, -this.W, this.W, -1, 1];
+    this.AIR = this.states.idOf("minecraft:air");
+    const ids = opts.palette.map((s) => this.states.idOf(s));
+    let i = 0;
+    for (let y = 0; y < sy; y++)
+      for (let z3 = 0; z3 < sz; z3++)
+        for (let x = 0; x < sx; x++, i++) {
+          const id = ids[opts.data[i]];
+          if (id !== void 0 && id !== this.AIR) this.cells[this.index(x, y, z3)] = id;
+        }
+    if (opts.ground ?? true) {
+      const stone = this.states.idOf("minecraft:stone");
+      for (let z3 = -margin; z3 < sz + margin; z3++)
+        for (let x = -margin; x < sx + margin; x++) this.cells[this.index(x, -1, z3)] = stone;
+    }
+    if (this.AIR !== 0) throw new Error("air must be state 0");
+    for (const be of opts.blockEntities ?? []) {
+      const p = this.index(...be.pos);
+      const items = itemsOf(be.data);
+      if (items.length) this.inventories.set(p, items);
+      const out = be.data.OutputSignal;
+      if (typeof out === "number") this.comparatorOut.set(p, out);
+    }
+  }
+  // ---------------------------------------------------------------- coordinates
+  /** Cell index of local build coordinates (no bounds check). */
+  index(x, y, z3) {
+    return x + this.mx + this.W * (z3 + this.mz + this.D * (y + this.my));
+  }
+  /** Local build coordinates of a cell. */
+  coords(i) {
+    const x = i % this.W;
+    const t = (i - x) / this.W;
+    const z3 = t % this.D;
+    const y = (t - z3) / this.D;
+    return [x - this.mx, y - this.my, z3 - this.mz];
+  }
+  /** Inside the simulated area (the build, its margin and the ground layer). */
+  valid(i) {
+    if (i < 0 || i >= this.cells.length) return false;
+    const x = i % this.W;
+    const t = (i - x) / this.W;
+    const z3 = t % this.D;
+    const y = (t - z3) / this.D;
+    return x >= PAD && x < this.W - PAD && z3 >= PAD && z3 < this.D - PAD && y >= PAD && y < this.H - PAD;
+  }
+  inBuild(x, y, z3) {
+    return x >= 0 && y >= 0 && z3 >= 0 && x < this.size[0] && y < this.size[1] && z3 < this.size[2];
+  }
+  rel(i, d, n = 1) {
+    return i + this.off[d] * n;
+  }
+  info(i) {
+    return this.states.infos[this.cells[i]];
+  }
+  stateAt(x, y, z3) {
+    return this.info(this.index(x, y, z3)).state;
+  }
+  /** What the viewer should draw: a moving block shows the block it carries, where it lands. */
+  displayState(i) {
+    const m = this.moving.get(i);
+    return m ? this.states.info(m.state).state : this.info(i).state;
+  }
+  /** Java's BlockPos.hashCode at this cell's world position (for HashSet/HashMap order). */
+  hashOf(i) {
+    const [x, y, z3] = this.coords(i);
+    const wx = x + this.offset[0];
+    const wy = y + this.offset[1];
+    const wz = z3 + this.offset[2];
+    return Math.imul(wy + Math.imul(wz, 31) | 0, 31) + wx | 0;
+  }
+  /** Iteration order of a Java HashSet/HashMap (capacity 16) holding these cells. */
+  javaHashOrder(cells, hashes) {
+    const bucket = hashes.map((h) => (h ^ h >>> 16) & 15);
+    const idx = cells.map((_, k) => k);
+    idx.sort((a, b) => bucket[a] - bucket[b] || a - b);
+    return idx.map((k) => cells[k]);
+  }
+  // ---------------------------------------------------------------- change tracking
+  markChanged(i) {
+    if (this.changedMark[i]) return;
+    this.changedMark[i] = 1;
+    this.changed.push(i);
+  }
+  /** Cells whose state (or displayed state) changed since the last call. */
+  takeChanges() {
+    const out = this.changed;
+    this.changed = [];
+    for (const i of out) this.changedMark[i] = 0;
+    return out;
+  }
+  event(type, i, detail) {
+    this.events.push({ tick: this.time, type, pos: this.coords(i), ...detail ? { detail } : {} });
+    if (this.events.length > 5e3) this.events.splice(0, 1e3);
+  }
+  // ---------------------------------------------------------------- Level.setBlock
+  setBlock(i, id, flags, rec = 512) {
+    if (!this.valid(i)) {
+      if (id !== this.AIR) this.event("left-area", i, this.states.info(id).name);
+      return false;
+    }
+    const oldId = this.cells[i];
+    if (oldId === id) return false;
+    this.cells[i] = id;
+    this.markChanged(i);
+    const oldI = this.states.info(oldId);
+    const newI = this.states.info(id);
+    const moved = (flags & F.MOVED) !== 0;
+    this.onRemove(i, oldI, newI, moved);
+    if (this.info(i).nameId !== newI.nameId) return false;
+    this.onPlace(i, newI, oldI, moved);
+    if (this.cells[i] !== id) return true;
+    if (flags & F.NEIGHBORS) {
+      this.updateNeighborsAt(i, oldI.nameId);
+      if (hasAnalogOutput(newI.name)) this.updateNeighbourForOutputSignal(i, newI.nameId);
+    }
+    if (!(flags & F.KNOWN_SHAPE) && rec > 0) {
+      const f = flags & ~(F.NEIGHBORS | F.SUPPRESS_DROPS);
+      this.updateIndirectNeighbourShapes(oldI, i, f, rec - 1);
+      this.updateNeighbourShapes(newI, i, f, rec - 1);
+      this.updateIndirectNeighbourShapes(newI, i, f, rec - 1);
+    }
+    return true;
+  }
+  /** Level.removeBlock: the fluid left behind (always air here). */
+  removeBlock(i) {
+    return this.setBlock(i, this.AIR, UPDATE_ALL);
+  }
+  /** Level.destroyBlock: the block drops as an item. */
+  destroyBlock(i, rec = 512) {
+    const info = this.info(i);
+    if (info.kind === K.AIR) return false;
+    this.event("break", i, info.name);
+    return this.setBlock(i, this.AIR, UPDATE_ALL, rec);
+  }
+  updateOrDestroy(oldId, newId, i, flags, rec) {
+    if (newId === oldId) return;
+    if (this.states.kind(newId) === K.AIR) this.destroyBlock(i, rec);
+    else this.setBlock(i, newId, flags & ~F.SUPPRESS_DROPS, rec);
+  }
+  // ---------------------------------------------------------------- neighbour updates
+  guard() {
+    if (++this.updates > MAX_UPDATES_PER_TICK) {
+      throw new Error("More than 20 million block updates in one tick: the circuit loops.");
+    }
+    return true;
+  }
+  /** Level.neighborChanged. */
+  neighborChanged(i, src, from) {
+    if (this.rules.queuedUpdates) {
+      this.addAndRun(this.job(0, i, src, from));
+      return;
+    }
+    if (this.depth > MAX_DEPTH) {
+      this.event("suppressed", i);
+      return;
+    }
+    this.depth++;
+    try {
+      this.runNeighborChanged(i, src, from);
+    } finally {
+      this.depth--;
+    }
+  }
+  /** Level.updateNeighborsAt: the six neighbours in the game's order. */
+  updateNeighborsAt(i, src, skip = -1) {
+    if (this.rules.queuedUpdates) {
+      this.addAndRun(this.job(1, i, src, i, skip));
+      return;
+    }
+    for (const d of UPDATE_ORDER) if (d !== skip) this.neighborChanged(this.rel(i, d), src, i);
+  }
+  neighborShapeChanged(dir, neighborState, i, from, flags, rec) {
+    if (this.rules.queuedUpdates) {
+      const j = this.job(2, i, 0, from);
+      j.dir = dir;
+      j.state = neighborState;
+      j.flags = flags;
+      j.rec = rec;
+      this.addAndRun(j);
+      return;
+    }
+    this.runShapeUpdate(dir, neighborState, i, from, flags, rec);
+  }
+  job(kind, pos, src, from, skip = -1) {
+    return {
+      kind,
+      pos,
+      src,
+      from,
+      idx: kind === 1 && UPDATE_ORDER[0] === skip ? 1 : 0,
+      skip,
+      dir: 0,
+      state: 0,
+      flags: 0,
+      rec: 0
+    };
+  }
+  /** CollectingNeighborUpdater.addAndRun. */
+  addAndRun(job) {
+    const nested = this.count > 0;
+    this.count++;
+    if (nested) this.added.push(job);
+    else this.stack.push(job);
+    if (nested) return;
+    try {
+      while (this.stack.length > 0 || this.added.length > 0) {
+        for (let k = this.added.length - 1; k >= 0; k--) this.stack.push(this.added[k]);
+        this.added.length = 0;
+        const top = this.stack[this.stack.length - 1];
+        while (this.added.length === 0) {
+          if (!this.runJobStep(top)) {
+            this.stack.pop();
+            break;
+          }
+        }
+      }
+    } finally {
+      this.stack.length = 0;
+      this.added.length = 0;
+      this.count = 0;
+    }
+  }
+  /** Run one step of a job; false when it has none left. */
+  runJobStep(j) {
+    if (j.kind === 0) {
+      this.runNeighborChanged(j.pos, j.src, j.from);
+      return false;
+    }
+    if (j.kind === 2) {
+      this.runShapeUpdate(j.dir, j.state, j.pos, j.from, j.flags, j.rec);
+      return false;
+    }
+    const d = UPDATE_ORDER[j.idx++];
+    this.runNeighborChanged(this.rel(j.pos, d), j.src, j.pos);
+    if (j.idx < 6 && UPDATE_ORDER[j.idx] === j.skip) j.idx++;
+    return j.idx < 6;
+  }
+  runShapeUpdate(dir, neighborState, i, from, flags, rec) {
+    this.guard();
+    const old = this.cells[i];
+    const next = this.updateShape(i, old, dir, neighborState, from);
+    this.updateOrDestroy(old, next, i, flags, rec);
+  }
+  /** BlockState.updateNeighbourShapes. */
+  updateNeighbourShapes(info, i, flags, rec) {
+    for (const d of SHAPE_ORDER)
+      this.neighborShapeChanged(OPPOSITE2[d], info.id, this.rel(i, d), i, flags, rec);
+  }
+  /** Only dust has indirect shape updates: wires one block up or down its connections. */
+  updateIndirectNeighbourShapes(info, i, flags, rec) {
+    if (info.kind !== K.WIRE) return;
+    for (const d of HORIZONTAL) {
+      if (info.sides[d] === SIDE_NONE) continue;
+      const n = this.rel(i, d);
+      if (this.info(n).kind === K.WIRE) continue;
+      const below = this.rel(n, DOWN);
+      if (this.info(below).kind === K.WIRE) {
+        const p = this.rel(below, OPPOSITE2[d]);
+        this.neighborShapeChanged(OPPOSITE2[d], this.cells[p], below, p, flags, rec);
+      }
+      const above = this.rel(n, UP);
+      if (this.info(above).kind === K.WIRE) {
+        const p = this.rel(above, OPPOSITE2[d]);
+        this.neighborShapeChanged(OPPOSITE2[d], this.cells[p], above, p, flags, rec);
+      }
+    }
+  }
+  /** Block.updateFromNeighbourShapes. */
+  updateFromNeighbourShapes(id, i) {
+    let s = id;
+    for (const d of SHAPE_ORDER) {
+      const n = this.rel(i, d);
+      s = this.updateShape(i, s, d, this.cells[n], n);
+    }
+    return s;
+  }
+  /** Level.updateNeighbourForOutputSignal: comparators next to (or behind a block from) it. */
+  updateNeighbourForOutputSignal(i, src) {
+    for (const d of HORIZONTAL) {
+      let n = this.rel(i, d);
+      let ni = this.info(n);
+      if (ni.kind === K.COMPARATOR) this.neighborChanged(n, src, i);
+      else if (ni.conductor) {
+        n = this.rel(n, d);
+        ni = this.info(n);
+        if (ni.kind === K.COMPARATOR) this.neighborChanged(n, src, i);
+      }
+    }
+  }
+  // ---------------------------------------------------------------- scheduled ticks
+  tickKey(i, type) {
+    return i * 4096 + type;
+  }
+  /** Level.scheduleTick; `type` is the block asking (default: the block there now). */
+  scheduleTick(i, delay, priority = P_NORMAL, type = this.info(i).nameId) {
+    const key = this.tickKey(i, type);
+    if (this.scheduled.has(key)) return;
+    const t = { time: this.time + delay, priority, seq: this.seq++, pos: i, type };
+    this.scheduled.set(key, t);
+    const h = this.heap;
+    h.push(t);
+    let k = h.length - 1;
+    while (k > 0) {
+      const parent = k - 1 >> 1;
+      if (!heapLess(t, h[parent])) break;
+      h[k] = h[parent];
+      k = parent;
+    }
+    h[k] = t;
+  }
+  popTick() {
+    const h = this.heap;
+    const top = h[0];
+    const last = h.pop();
+    if (!top || !last || h.length === 0) return top;
+    let k = 0;
+    const n = h.length;
+    for (; ; ) {
+      const l = 2 * k + 1;
+      if (l >= n) break;
+      const r = l + 1;
+      const c = r < n && heapLess(h[r], h[l]) ? r : l;
+      if (!heapLess(h[c], last)) break;
+      h[k] = h[c];
+      k = c;
+    }
+    h[k] = last;
+    return top;
+  }
+  hasScheduledTick(i) {
+    return this.scheduled.has(this.tickKey(i, this.info(i).nameId));
+  }
+  willTickThisTick(i) {
+    return this.runningThisTick.has(this.tickKey(i, this.info(i).nameId));
+  }
+  runScheduledTicks() {
+    this.handlingTick = true;
+    try {
+      const run = [];
+      while (this.heap.length > 0 && this.heap[0].time <= this.time) {
+        if (run.length >= this.rules.maxScheduledPerTick) break;
+        const t = this.popTick();
+        const key = this.tickKey(t.pos, t.type);
+        this.scheduled.delete(key);
+        this.runningThisTick.add(key);
+        run.push(t);
+      }
+      for (const t of run) {
+        this.runningThisTick.delete(this.tickKey(t.pos, t.type));
+        if (this.info(t.pos).nameId === t.type) this.tickBlock(t.pos);
+      }
+    } finally {
+      this.handlingTick = false;
+      this.runningThisTick.clear();
+    }
+  }
+  // ---------------------------------------------------------------- block events
+  blockEvent(i, b0, b1) {
+    const type = this.info(i).nameId;
+    const key = `${i},${type},${b0},${b1}`;
+    if (this.eventKeys.has(key)) return;
+    this.eventKeys.add(key);
+    this.eventQueue.push({ pos: i, type, b0, b1 });
+  }
+  runBlockEvents() {
+    while (this.eventHead < this.eventQueue.length) {
+      const e = this.eventQueue[this.eventHead++];
+      this.eventKeys.delete(`${e.pos},${e.type},${e.b0},${e.b1}`);
+      if (this.info(e.pos).nameId === e.type) this.triggerEvent(e.pos, e.b0, e.b1);
+    }
+    this.eventQueue = [];
+    this.eventHead = 0;
+  }
+  // ---------------------------------------------------------------- the game tick
+  /** One game tick: scheduled ticks, block events, entities (pressure plates), block entities. */
+  tick() {
+    this.time++;
+    this.updates = 0;
+    this.runScheduledTicks();
+    this.runBlockEvents();
+    this.tickEntities();
+    this.tickBlockEntities();
+  }
+  run(ticks) {
+    for (let t = 0; t < ticks; t++) this.tick();
+  }
+  /** Nothing scheduled, queued or moving: the circuit rests until something changes. */
+  get idle() {
+    if (this.heap.length > 0 || this.eventQueue.length > this.eventHead) return false;
+    if (this.tickers.some((m) => !m.removed) || this.pendingTickers.some((m) => !m.removed))
+      return false;
+    for (const n of this.plateEntities.values()) if (n > 0) return false;
+    return true;
+  }
+  /** Ticks until the next scheduled tick (Infinity if none). */
+  get nextTickIn() {
+    const t = this.heap[0];
+    return t ? Math.max(0, t.time - this.time) : Infinity;
+  }
+  tickEntities() {
+    for (const [i, n] of this.plateEntities) {
+      if (n <= 0) continue;
+      const info = this.info(i);
+      if (info.kind !== K.PLATE && info.kind !== K.WEIGHTED_PLATE) continue;
+      if (this.plateSignal(info) === 0) this.checkPlate(i, info, 0);
+    }
+  }
+  tickBlockEntities() {
+    if (this.pendingTickers.length) {
+      this.tickers.push(...this.pendingTickers);
+      this.pendingTickers = [];
+    }
+    const list2 = this.tickers;
+    for (let k = 0; k < list2.length; k++) {
+      const m = list2[k];
+      if (m.removed) continue;
+      if (this.info(m.pos).kind !== K.MOVING_PISTON) {
+        m.removed = true;
+        if (this.moving.get(m.pos) === m) this.moving.delete(m.pos);
+        continue;
+      }
+      this.tickMoving(m);
+    }
+    this.tickers = list2.filter((m) => !m.removed);
+  }
+  // ---------------------------------------------------------------- signals
+  /** BlockState.getSignal: what the block at i gives a neighbour that looks at it along d. */
+  signal(i, info, d) {
+    switch (info.kind) {
+      case K.WIRE:
+        return this.wireSignal(i, info, d);
+      case K.TORCH:
+        return info.lit && d !== UP ? 15 : 0;
+      case K.WALL_TORCH:
+        return info.lit && info.facing !== d ? 15 : 0;
+      case K.REPEATER:
+        return info.powered && info.facing === d ? 15 : 0;
+      case K.COMPARATOR:
+        return info.powered && info.facing === d ? this.comparatorOut.get(i) ?? 0 : 0;
+      case K.LEVER:
+      case K.BUTTON:
+      case K.LIGHTNING_ROD:
+      case K.LECTERN:
+      case K.TRIPWIRE_HOOK:
+        return info.powered ? 15 : 0;
+      case K.PLATE:
+      case K.WEIGHTED_PLATE:
+        return this.plateSignal(info);
+      case K.REDSTONE_BLOCK:
+        return 15;
+      case K.OBSERVER:
+        return info.powered && info.facing === d ? 15 : 0;
+      case K.TARGET:
+      case K.DAYLIGHT:
+      case K.SCULK_SENSOR:
+        return Math.max(0, info.power);
+      case K.RAIL:
+        return info.name === "detector_rail" && info.powered ? 15 : 0;
+      default:
+        return 0;
+    }
+  }
+  /** BlockState.getDirectSignal (strong power). */
+  directSignal(i, info, d) {
+    switch (info.kind) {
+      case K.WIRE:
+        return this.wireSignal(i, info, d);
+      case K.TORCH:
+      case K.WALL_TORCH:
+        return d === DOWN ? this.signal(i, info, d) : 0;
+      case K.REPEATER:
+      case K.COMPARATOR:
+      case K.OBSERVER:
+        return this.signal(i, info, d);
+      case K.LEVER:
+      case K.BUTTON:
+        return info.powered && connectedDir(info) === d ? 15 : 0;
+      case K.PLATE:
+      case K.WEIGHTED_PLATE:
+        return d === UP ? this.plateSignal(info) : 0;
+      case K.LIGHTNING_ROD:
+      case K.TRIPWIRE_HOOK:
+        return info.powered && info.facing === d ? 15 : 0;
+      case K.LECTERN:
+        return d === UP && info.powered ? 15 : 0;
+      case K.SCULK_SENSOR:
+        return d === UP ? Math.max(0, info.power) : 0;
+      case K.RAIL:
+        return d === UP && info.name === "detector_rail" && info.powered ? 15 : 0;
+      default:
+        return 0;
+    }
+  }
+  /** Level.getSignal: a conductor passes on the strong power it receives. */
+  levelSignal(i, d) {
+    const info = this.info(i);
+    const s = this.signal(i, info, d);
+    return info.conductor ? Math.max(s, this.directSignalTo(i)) : s;
+  }
+  /** Level.getDirectSignalTo: strongest strong power into a block. */
+  directSignalTo(i) {
+    let best = 0;
+    for (const d of ALL) {
+      const n = this.rel(i, d);
+      const s = this.directSignal(n, this.info(n), d);
+      if (s > best) {
+        best = s;
+        if (best >= 15) return best;
+      }
+    }
+    return best;
+  }
+  hasNeighborSignal(i) {
+    for (const d of ALL) if (this.levelSignal(this.rel(i, d), d) > 0) return true;
+    return false;
+  }
+  bestNeighborSignal(i) {
+    let best = 0;
+    for (const d of ALL) {
+      const s = this.levelSignal(this.rel(i, d), d);
+      if (s > best) {
+        best = s;
+        if (best >= 15) return best;
+      }
+    }
+    return best;
+  }
+  /**
+   * Power a block receives from its neighbours, without passing through other blocks: what a
+   * redstone lamp or piston placed there would see. For probes.
+   */
+  receivedPower(i) {
+    let best = this.directSignalTo(i);
+    for (const d of ALL) {
+      const n = this.rel(i, d);
+      best = Math.max(best, this.signal(n, this.info(n), d));
+    }
+    return best;
+  }
+  isSignalSource(info) {
+    return info.kind === K.WIRE ? this.wireSignals : info.signalSource;
+  }
+  // ---------------------------------------------------------------- redstone dust
+  wireSignal(i, info, d) {
+    if (!this.wireSignals || d === DOWN || info.power <= 0) return 0;
+    if (d === UP) return info.power;
+    if (this.rules.liveDustSides) return this.legacyWirePowers(i, d) ? info.power : 0;
+    return info.sides[OPPOSITE2[d]] !== SIDE_NONE ? info.power : 0;
+  }
+  /** 1.8–1.15 BlockRedstoneWire.getWeakPower: sides worked out from the neighbours. */
+  legacyWirePowers(i, d) {
+    let set = 0;
+    for (const e of HORIZONTAL) if (this.legacyPowerSourceAt(i, e)) set |= 1 << e;
+    if (set === 0) return true;
+    return (set & 1 << d) !== 0 && (set & 1 << counterClockwise(d)) === 0 && (set & 1 << clockwise(d)) === 0;
+  }
+  legacyPowerSourceAt(i, side) {
+    const b = this.rel(i, side);
+    const bi = this.info(b);
+    const aboveConducts = this.info(this.rel(i, UP)).conductor;
+    if (!aboveConducts && bi.conductor && this.info(this.rel(b, UP)).kind === K.WIRE) return true;
+    if (this.wireConnectsTo(bi, side)) return true;
+    if (bi.kind === K.REPEATER && bi.powered && bi.facing === side) return true;
+    return !bi.conductor && this.info(this.rel(b, DOWN)).kind === K.WIRE;
+  }
+  /** RedStoneWireBlock.shouldConnectTo (dir -1 = null). */
+  wireConnectsTo(info, dir) {
+    if (info.kind === K.WIRE) return true;
+    if (info.kind === K.REPEATER)
+      return dir >= 0 && (info.facing === dir || info.facing === OPPOSITE2[dir]);
+    if (info.kind === K.OBSERVER) return dir === info.facing;
+    return dir >= 0 && this.isSignalSource(info);
+  }
+  canHoldWire(info) {
+    if (!this.rules.dustOnGlass && GLASSY.test(info.name)) return false;
+    return info.sturdyTop || info.kind === K.HOPPER;
+  }
+  connectingSide(i, dir, canConnectUp) {
+    const n = this.rel(i, dir);
+    const ni = this.info(n);
+    if (canConnectUp && this.canHoldWire(ni) && this.wireConnectsTo(this.info(this.rel(n, UP)), -1))
+      return ni.sturdySide ? SIDE_UP : SIDE_SIDE;
+    if (!this.wireConnectsTo(ni, dir) && (ni.conductor || !this.wireConnectsTo(this.info(this.rel(n, DOWN)), -1)))
+      return SIDE_NONE;
+    return SIDE_SIDE;
+  }
+  /** RedStoneWireBlock.getConnectionState (1.16+), or plain connections before 1.16. */
+  wireConnectionState(i, id) {
+    const st = this.states;
+    const info = st.info(id);
+    const canUp = !this.info(this.rel(i, UP)).conductor;
+    let n = this.connectingSide(i, NORTH, canUp);
+    let e = this.connectingSide(i, EAST, canUp);
+    let s = this.connectingSide(i, SOUTH, canUp);
+    let w = this.connectingSide(i, WEST, canUp);
+    if (this.rules.liveDustSides) return st.withSides(id, n, e, s, w);
+    const wasDot = isDot(info);
+    if (wasDot && !n && !e && !s && !w) return st.withSides(id, 0, 0, 0, 0);
+    const noNS = !n && !s;
+    const noEW = !e && !w;
+    if (!w && noNS) w = SIDE_SIDE;
+    if (!e && noNS) e = SIDE_SIDE;
+    if (!n && noEW) n = SIDE_SIDE;
+    if (!s && noEW) s = SIDE_SIDE;
+    return st.withSides(id, n, e, s, w);
+  }
+  wireUpdateShape(i, id, dir) {
+    if (dir === DOWN) return id;
+    if (dir === UP || this.rules.liveDustSides) return this.wireConnectionState(i, id);
+    const info = this.states.info(id);
+    const side = this.connectingSide(i, dir, !this.info(this.rel(i, UP)).conductor);
+    if (side !== SIDE_NONE === (info.sides[dir] !== SIDE_NONE) && !isCross(info))
+      return this.states.withSide(id, dir, side);
+    const cross = this.states.withSides(id, SIDE_SIDE, SIDE_SIDE, SIDE_SIDE, SIDE_SIDE);
+    return this.wireConnectionState(i, this.states.withSide(cross, dir, side));
+  }
+  wirePower(info) {
+    return info.kind === K.WIRE ? info.power : 0;
+  }
+  wireTarget(i) {
+    this.wireSignals = false;
+    const received = this.bestNeighborSignal(i);
+    this.wireSignals = true;
+    let j = 0;
+    if (received < 15) {
+      const aboveConducts = this.info(this.rel(i, UP)).conductor;
+      for (const d of HORIZONTAL) {
+        const n = this.rel(i, d);
+        const ni = this.info(n);
+        j = Math.max(j, this.wirePower(ni));
+        if (ni.conductor && !aboveConducts)
+          j = Math.max(j, this.wirePower(this.info(this.rel(n, UP))));
+        else if (!ni.conductor) j = Math.max(j, this.wirePower(this.info(this.rel(n, DOWN))));
+      }
+    }
+    return Math.max(received, j - 1);
+  }
+  /** 1.8–1.12 calculateCurrentChanges: one level at a time while depowering. */
+  legacyWireTarget(i, info) {
+    let j = info.power;
+    this.wireSignals = false;
+    const k = this.bestNeighborSignal(i);
+    this.wireSignals = true;
+    if (k > 0 && k > j - 1) j = k;
+    let l = 0;
+    const aboveConducts = this.info(this.rel(i, UP)).conductor;
+    for (const d of HORIZONTAL) {
+      const n = this.rel(i, d);
+      const ni = this.info(n);
+      l = Math.max(l, this.wirePower(ni));
+      if (ni.conductor && !aboveConducts)
+        l = Math.max(l, this.wirePower(this.info(this.rel(n, UP))));
+      else if (!ni.conductor) l = Math.max(l, this.wirePower(this.info(this.rel(n, DOWN))));
+    }
+    if (l > j) j = l - 1;
+    else if (j > 0) j--;
+    else j = 0;
+    if (k > j - 1) j = k;
+    return j;
+  }
+  /** RedStoneWireBlock.updatePowerStrength. */
+  updateWirePower(i, id) {
+    const info = this.states.info(id);
+    const target = this.rules.incrementalDust ? this.legacyWireTarget(i, info) : this.wireTarget(i);
+    if (info.power === target) return;
+    if (this.cells[i] === id) this.setBlock(i, this.states.withPower(id, target), F.CLIENTS);
+    const h = this.hashOf(i);
+    const cells = [i];
+    const hashes = [h];
+    const dh = [-31, 31, -961, 961, -1, 1];
+    for (const d of ALL) {
+      cells.push(this.rel(i, d));
+      hashes.push(h + dh[d] | 0);
+    }
+    const src = info.nameId;
+    for (const p of this.javaHashOrder(cells, hashes)) this.updateNeighborsAt(p, src);
+  }
+  updateNeighborsOfNeighboringWires(i, src) {
+    for (const d of HORIZONTAL) this.checkCornerChangeAt(this.rel(i, d), src);
+    for (const d of HORIZONTAL) {
+      const n = this.rel(i, d);
+      this.checkCornerChangeAt(this.rel(n, this.info(n).conductor ? UP : DOWN), src);
+    }
+  }
+  checkCornerChangeAt(i, src) {
+    if (this.info(i).kind !== K.WIRE) return;
+    this.updateNeighborsAt(i, src);
+    for (const d of ALL) this.updateNeighborsAt(this.rel(i, d), src);
+  }
+  // ---------------------------------------------------------------- survival
+  canSurvive(i, info) {
+    switch (info.kind) {
+      case K.WIRE:
+        return this.canHoldWire(this.info(this.rel(i, DOWN)));
+      case K.REPEATER:
+      case K.COMPARATOR:
+      case K.RAIL:
+      case K.POWERED_RAIL:
+        return this.info(this.rel(i, DOWN)).sturdyTop;
+      case K.TORCH:
+        return this.info(this.rel(i, DOWN)).centerTop;
+      case K.PLATE:
+      case K.WEIGHTED_PLATE:
+        return this.info(this.rel(i, DOWN)).centerTop;
+      case K.WALL_TORCH:
+        return this.info(this.rel(i, OPPOSITE2[info.facing])).sturdySide;
+      case K.LEVER:
+      case K.BUTTON: {
+        const c = connectedDir(info);
+        const support = this.info(this.rel(i, OPPOSITE2[c]));
+        return c === UP ? support.sturdyTop : support.sturdySide;
+      }
+      case K.PISTON_HEAD: {
+        const base = this.info(this.rel(i, OPPOSITE2[info.facing]));
+        return this.isFittingBase(info, base) || base.kind === K.MOVING_PISTON && base.facing === info.facing;
+      }
+      case K.DOOR:
+        return info.props.half === "upper" ? this.info(this.rel(i, DOWN)).kind === K.DOOR : this.info(this.rel(i, DOWN)).sturdyTop;
+      default:
+        return true;
+    }
+  }
+  isFittingBase(head, base) {
+    const sticky = head.props.type === "sticky";
+    return base.kind === K.PISTON && base.name === "sticky_piston" === sticky && base.facing === head.facing && base.extended;
+  }
+  // ---------------------------------------------------------------- shape updates
+  /** BlockState.updateShape: dir points from this block to the neighbour that changed. */
+  updateShape(i, id, dir, neighbor, _from) {
+    const info = this.states.info(id);
+    const surviveOnShape = this.rules.shapeSurvival;
+    switch (info.kind) {
+      case K.WIRE:
+        return this.wireUpdateShape(i, id, dir);
+      case K.REPEATER:
+        if (dir >= NORTH && axisOf(dir) !== axisOf(info.facing))
+          return this.states.withBool(id, "locked", this.isLocked(i, info));
+        return id;
+      case K.OBSERVER:
+        if (info.facing === dir && !info.powered && !this.hasScheduledTickOf(i, info.nameId))
+          this.scheduleTick(i, 2, P_NORMAL, info.nameId);
+        return id;
+      case K.TORCH:
+      case K.PLATE:
+      case K.WEIGHTED_PLATE:
+        return surviveOnShape && dir === DOWN && !this.canSurvive(i, info) ? this.AIR : id;
+      case K.WALL_TORCH:
+        return surviveOnShape && dir === OPPOSITE2[info.facing] && !this.canSurvive(i, info) ? this.AIR : id;
+      case K.LEVER:
+      case K.BUTTON:
+        return surviveOnShape && OPPOSITE2[connectedDir(info)] === dir && !this.canSurvive(i, info) ? this.AIR : id;
+      case K.PISTON_HEAD:
+        return dir === OPPOSITE2[info.facing] && !this.canSurvive(i, info) ? this.AIR : id;
+      case K.DOOR: {
+        const lower = info.props.half === "lower";
+        if (dir === UP || dir === DOWN) {
+          if (lower === (dir === UP)) {
+            const ni = this.states.info(neighbor);
+            if (ni.nameId === info.nameId && ni.props.half !== info.props.half) {
+              let s = this.states.with(id, "open", ni.props.open ?? "false");
+              s = this.states.with(s, "powered", ni.props.powered ?? "false");
+              s = this.states.with(s, "facing", ni.props.facing ?? "north");
+              return this.states.with(s, "hinge", ni.props.hinge ?? "left");
+            }
+            return this.AIR;
+          }
+          if (lower && dir === DOWN && !this.canSurvive(i, info)) return this.AIR;
+        }
+        return id;
+      }
+      default:
+        return id;
+    }
+  }
+  // ---------------------------------------------------------------- onPlace / onRemove
+  onPlace(i, info, old, moved) {
+    const sameBlock = old.nameId === info.nameId;
+    switch (info.kind) {
+      case K.WIRE:
+        if (!sameBlock) {
+          this.updateWirePower(i, info.id);
+          this.updateNeighborsAt(this.rel(i, UP), info.nameId);
+          this.updateNeighborsAt(this.rel(i, DOWN), info.nameId);
+          this.updateNeighborsOfNeighboringWires(i, info.nameId);
+        }
+        return;
+      case K.TORCH:
+      case K.WALL_TORCH:
+        if (this.rules.splitBlocks && (!info.lit || sameBlock && old.lit)) return;
+        for (const d of ALL) this.updateNeighborsAt(this.rel(i, d), info.nameId);
+        return;
+      case K.REPEATER:
+      case K.COMPARATOR:
+        if (info.kind === K.COMPARATOR && !this.comparatorOut.has(i)) this.comparatorOut.set(i, 0);
+        this.updateDiodeFront(i, info);
+        return;
+      case K.OBSERVER:
+        if (!sameBlock && info.powered && !this.hasScheduledTick(i)) {
+          const s = this.states.withBool(info.id, "powered", false);
+          this.setBlock(i, s, F.CLIENTS | F.KNOWN_SHAPE);
+          this.updateObserverFront(i, this.states.info(s));
+        }
+        return;
+      case K.PISTON:
+        if (!sameBlock && !this.moving.has(i)) this.checkIfExtend(i, info);
+        return;
+      case K.TNT:
+        if (!sameBlock && this.hasNeighborSignal(i)) this.primeTnt(i);
+        return;
+      case K.HOPPER:
+        if (!sameBlock) this.checkHopper(i, info);
+        return;
+      case K.COPPER_BULB:
+        if (!sameBlock) this.checkBulb(i, info);
+        return;
+      case K.POWERED_RAIL:
+        if (!sameBlock && !moved) this.neighborChanged(i, info.nameId, i);
+        return;
+      default:
+        return;
+    }
+  }
+  onRemove(i, old, info, moved) {
+    const sameBlock = old.nameId === info.nameId;
+    switch (old.kind) {
+      case K.WIRE:
+        if (!moved && !sameBlock) {
+          for (const d of ALL) this.updateNeighborsAt(this.rel(i, d), old.nameId);
+          this.updateWirePower(i, old.id);
+          this.updateNeighborsOfNeighboringWires(i, old.nameId);
+        }
+        return;
+      case K.TORCH:
+      case K.WALL_TORCH:
+        if (moved) return;
+        if (this.rules.splitBlocks && (!old.lit || sameBlock && info.lit)) return;
+        for (const d of ALL) this.updateNeighborsAt(this.rel(i, d), old.nameId);
+        return;
+      case K.REPEATER:
+      case K.COMPARATOR:
+        if (!moved && !sameBlock) {
+          this.comparatorOut.delete(i);
+          this.updateDiodeFront(i, old);
+        } else if (this.rules.splitBlocks && old.powered && !info.powered) {
+          for (const d of ALL) this.updateNeighborsAt(this.rel(i, d), old.nameId);
+        }
+        return;
+      case K.OBSERVER:
+        if (!sameBlock && old.powered && this.hasScheduledTickOf(i, old.nameId))
+          this.updateObserverFront(
+            i,
+            this.states.info(this.states.withBool(old.id, "powered", false))
+          );
+        return;
+      case K.LEVER:
+      case K.BUTTON:
+        if (!moved && !sameBlock && old.powered) this.updateAttachedNeighbours(i, old);
+        return;
+      case K.PLATE:
+      case K.WEIGHTED_PLATE:
+        if (!moved && !sameBlock && this.plateSignal(old) > 0) {
+          this.updateNeighborsAt(i, old.nameId);
+          this.updateNeighborsAt(this.rel(i, DOWN), old.nameId);
+        }
+        if (!sameBlock) this.plateEntities.delete(i);
+        return;
+      case K.PISTON_HEAD:
+        if (!sameBlock) {
+          const b = this.rel(i, OPPOSITE2[old.facing]);
+          if (this.isFittingBase(old, this.info(b))) this.destroyBlock(b);
+        }
+        return;
+      case K.MOVING_PISTON:
+        if (!sameBlock) {
+          const m = this.moving.get(i);
+          if (m) this.finalTick(m);
+        }
+        return;
+      case K.POWERED_RAIL:
+        if (!moved && !sameBlock) {
+          if (/^ascending/.test(old.props.shape ?? ""))
+            this.updateNeighborsAt(this.rel(i, UP), old.nameId);
+          this.updateNeighborsAt(i, old.nameId);
+          this.updateNeighborsAt(this.rel(i, DOWN), old.nameId);
+        }
+        return;
+      default:
+        if (!sameBlock) this.inventories.delete(i);
+        return;
+    }
+  }
+  hasScheduledTickOf(i, nameId) {
+    return this.scheduled.has(this.tickKey(i, nameId));
+  }
+  // ---------------------------------------------------------------- neighbour changed
+  runNeighborChanged(i, src, from) {
+    this.guard();
+    const info = this.info(i);
+    switch (info.kind) {
+      case K.AIR:
+      case K.SOLID:
+        return;
+      case K.WIRE:
+        if (this.canSurvive(i, info)) this.updateWirePower(i, info.id);
+        else this.destroyBlock(i);
+        return;
+      case K.TORCH:
+      case K.WALL_TORCH:
+        if (!this.rules.shapeSurvival && !this.canSurvive(i, info)) {
+          this.destroyBlock(i);
+          return;
+        }
+        if (info.lit === this.torchHasSignal(i, info) && !(this.rules.tickThisTickCheck && this.willTickThisTick(i)))
+          this.scheduleTick(i, 2);
+        return;
+      case K.REPEATER:
+      case K.COMPARATOR:
+        if (!this.canSurvive(i, info)) {
+          this.destroyBlock(i);
+          for (const d of ALL) this.updateNeighborsAt(this.rel(i, d), info.nameId);
+          return;
+        }
+        if (info.kind === K.REPEATER) this.repeaterCheck(i, info);
+        else this.comparatorCheck(i, info);
+        return;
+      case K.LEVER:
+      case K.BUTTON:
+      case K.PLATE:
+      case K.WEIGHTED_PLATE:
+        if (!this.rules.shapeSurvival && !this.canSurvive(i, info)) this.destroyBlock(i);
+        return;
+      case K.LAMP: {
+        const powered = this.hasNeighborSignal(i);
+        if (info.lit !== powered) {
+          if (info.lit) this.scheduleTick(i, 4);
+          else this.setBlock(i, this.states.withBool(info.id, "lit", true), F.CLIENTS);
+        }
+        return;
+      }
+      case K.PISTON:
+        this.checkIfExtend(i, info);
+        return;
+      case K.PISTON_HEAD:
+        if (this.canSurvive(i, info))
+          this.neighborChanged(this.rel(i, OPPOSITE2[info.facing]), src, from);
+        return;
+      case K.NOTE_BLOCK: {
+        const powered = this.hasNeighborSignal(i);
+        if (powered !== info.powered) {
+          if (powered && this.info(this.rel(i, UP)).kind === K.AIR) this.blockEvent(i, 0, 0);
+          const s = this.states.withBool(info.id, "powered", powered);
+          this.setBlock(i, s, this.rules.noteBlockState ? UPDATE_ALL : F.CLIENTS | F.KNOWN_SHAPE);
+        }
+        return;
+      }
+      case K.DOOR: {
+        const other = this.rel(i, info.props.half === "lower" ? UP : DOWN);
+        const powered = this.hasNeighborSignal(i) || this.hasNeighborSignal(other);
+        if (src !== info.nameId && powered !== info.powered) {
+          let s = this.states.withBool(info.id, "powered", powered);
+          s = this.states.withBool(s, "open", powered);
+          this.setBlock(i, s, F.CLIENTS);
+        }
+        return;
+      }
+      case K.TRAPDOOR: {
+        const powered = this.hasNeighborSignal(i);
+        if (powered !== info.powered) {
+          let s = this.states.withBool(info.id, "powered", powered);
+          if (info.open !== powered) s = this.states.withBool(s, "open", powered);
+          this.setBlock(i, s, F.CLIENTS);
+        }
+        return;
+      }
+      case K.FENCE_GATE: {
+        const powered = this.hasNeighborSignal(i);
+        if (powered !== info.powered) {
+          let s = this.states.withBool(info.id, "powered", powered);
+          s = this.states.withBool(s, "open", powered);
+          this.setBlock(i, s, F.CLIENTS);
+        }
+        return;
+      }
+      case K.DISPENSER:
+      case K.CRAFTER: {
+        const powered = this.hasNeighborSignal(i) || info.kind === K.DISPENSER && this.hasNeighborSignal(this.rel(i, UP));
+        if (powered && !info.triggered) {
+          this.scheduleTick(i, 4);
+          this.setBlock(i, this.states.withBool(info.id, "triggered", true), F.INVISIBLE);
+        } else if (!powered && info.triggered) {
+          let s = this.states.withBool(info.id, "triggered", false);
+          if (info.kind === K.CRAFTER) s = this.states.withBool(s, "crafting", false);
+          this.setBlock(i, s, F.INVISIBLE);
+        }
+        return;
+      }
+      case K.HOPPER:
+        this.checkHopper(i, info);
+        return;
+      case K.COPPER_BULB:
+        this.checkBulb(i, info);
+        return;
+      case K.TNT:
+        if (this.hasNeighborSignal(i)) this.primeTnt(i);
+        return;
+      case K.POWERED_RAIL:
+        if (!this.canSurvive(i, info)) {
+          this.destroyBlock(i);
+          return;
+        }
+        this.updatePoweredRail(i, info);
+        return;
+      case K.RAIL:
+        if (!this.canSurvive(i, info)) this.destroyBlock(i);
+        return;
+      case K.BELL: {
+        const powered = this.hasNeighborSignal(i);
+        if (powered !== info.powered) {
+          if (powered) this.event("bell", i);
+          this.setBlock(i, this.states.withBool(info.id, "powered", powered), UPDATE_ALL);
+        }
+        return;
+      }
+      default:
+        return;
+    }
+  }
+  // ---------------------------------------------------------------- scheduled tick handlers
+  tickBlock(i) {
+    const info = this.info(i);
+    switch (info.kind) {
+      case K.TORCH:
+      case K.WALL_TORCH:
+        this.tickTorch(i, info);
+        return;
+      case K.REPEATER:
+        this.tickRepeater(i, info);
+        return;
+      case K.COMPARATOR:
+        this.refreshComparator(i, info);
+        return;
+      case K.LAMP:
+        if (info.lit && !this.hasNeighborSignal(i))
+          this.setBlock(i, this.states.withBool(info.id, "lit", false), F.CLIENTS);
+        return;
+      case K.OBSERVER:
+        if (info.powered)
+          this.setBlock(i, this.states.withBool(info.id, "powered", false), F.CLIENTS);
+        else {
+          this.setBlock(i, this.states.withBool(info.id, "powered", true), F.CLIENTS);
+          this.scheduleTick(i, 2);
+        }
+        this.updateObserverFront(i, info);
+        return;
+      case K.BUTTON:
+        if (info.powered) {
+          this.setBlock(i, this.states.withBool(info.id, "powered", false), UPDATE_ALL);
+          this.updateAttachedNeighbours(i, info);
+        }
+        return;
+      case K.PLATE:
+      case K.WEIGHTED_PLATE: {
+        const s = this.plateSignal(info);
+        if (s > 0) this.checkPlate(i, info, s);
+        return;
+      }
+      case K.TARGET:
+        if (info.power > 0) this.setBlock(i, this.states.withPower(info.id, 0), UPDATE_ALL);
+        return;
+      case K.DISPENSER:
+        this.event("dispense", i, info.name);
+        return;
+      case K.CRAFTER:
+        this.event("craft", i);
+        return;
+      default:
+        return;
+    }
+  }
+  // ---------------------------------------------------------------- torches
+  torchHasSignal(i, info) {
+    if (info.kind === K.TORCH) return this.levelSignal(this.rel(i, DOWN), DOWN) > 0;
+    const d = OPPOSITE2[info.facing];
+    return this.levelSignal(this.rel(i, d), d) > 0;
+  }
+  /** RedstoneTorchBlock.isToggledTooFrequently: 8 toggles within 60 ticks burns it out. */
+  toggledTooOften(i, add) {
+    if (add) this.toggles.push({ pos: i, when: this.time });
+    let n = 0;
+    for (const t of this.toggles) if (t.pos === i && ++n >= 8) return true;
+    return false;
+  }
+  tickTorch(i, info) {
+    const powered = this.torchHasSignal(i, info);
+    while (this.toggles.length > 0 && this.time - this.toggles[0].when > 60)
+      this.toggles.shift();
+    if (info.lit) {
+      if (powered) {
+        this.setBlock(i, this.states.withBool(info.id, "lit", false), UPDATE_ALL);
+        if (this.toggledTooOften(i, true)) {
+          this.event("burnout", i);
+          this.scheduleTick(i, 160);
+        }
+      }
+    } else if (!powered && !this.toggledTooOften(i, false)) {
+      this.setBlock(i, this.states.withBool(info.id, "lit", true), UPDATE_ALL);
+    }
+  }
+  // ---------------------------------------------------------------- repeaters and comparators
+  isDiode(info) {
+    return info.kind === K.REPEATER || info.kind === K.COMPARATOR;
+  }
+  /** DiodeBlock.getInputSignal (+ ComparatorBlock's container reading). */
+  diodeInput(i, info) {
+    const d = info.facing;
+    const b = this.rel(i, d);
+    let s = this.levelSignal(b, d);
+    const bi = this.info(b);
+    if (s < 15 && bi.kind === K.WIRE) s = Math.max(s, bi.power);
+    if (info.kind !== K.COMPARATOR) return s;
+    const analog = this.analogSignal(b, bi);
+    if (analog !== null) return analog;
+    if (s < 15 && bi.conductor) {
+      const b2 = this.rel(b, d);
+      const a2 = this.analogSignal(b2, this.info(b2));
+      if (a2 !== null) return a2;
+    }
+    return s;
+  }
+  /** Strongest side input: diodes only for repeaters (locking), any source for comparators. */
+  sideInput(i, info) {
+    const diodesOnly = info.kind === K.REPEATER;
+    let best = 0;
+    for (const d of [clockwise(info.facing), counterClockwise(info.facing)]) {
+      const n = this.rel(i, d);
+      const ni = this.info(n);
+      let s = 0;
+      if (diodesOnly) s = this.isDiode(ni) ? this.directSignal(n, ni, d) : 0;
+      else if (ni.kind === K.REDSTONE_BLOCK) s = 15;
+      else if (ni.kind === K.WIRE) s = ni.power;
+      else if (this.isSignalSource(ni)) s = this.directSignal(n, ni, d);
+      best = Math.max(best, s);
+    }
+    return best;
+  }
+  isLocked(i, info) {
+    return info.kind === K.REPEATER && this.sideInput(i, info) > 0;
+  }
+  /** The diode in front isn't pointing back at this one. */
+  shouldPrioritize(i, info) {
+    const d = OPPOSITE2[info.facing];
+    const front = this.info(this.rel(i, d));
+    return this.isDiode(front) && front.facing !== d;
+  }
+  repeaterCheck(i, info) {
+    if (this.isLocked(i, info)) return;
+    const on = this.diodeInput(i, info) > 0;
+    if (info.powered === on) return;
+    if (this.rules.tickThisTickCheck && this.willTickThisTick(i)) return;
+    const p = this.shouldPrioritize(i, info) ? P_EXTREMELY_HIGH : info.powered ? P_VERY_HIGH : P_HIGH;
+    this.scheduleTick(i, info.delay * 2, p);
+  }
+  tickRepeater(i, info) {
+    if (this.isLocked(i, info)) return;
+    const on = this.diodeInput(i, info) > 0;
+    if (info.powered && !on)
+      this.setBlock(i, this.states.withBool(info.id, "powered", false), F.CLIENTS);
+    else if (!info.powered) {
+      this.setBlock(i, this.states.withBool(info.id, "powered", true), F.CLIENTS);
+      if (!on) this.scheduleTick(i, info.delay * 2, P_VERY_HIGH);
+    }
+  }
+  comparatorOutput(i, info) {
+    const input = this.diodeInput(i, info);
+    if (input === 0) return 0;
+    const side = this.sideInput(i, info);
+    if (side > input) return 0;
+    return info.subtract ? input - side : input;
+  }
+  comparatorOn(i, info) {
+    const input = this.diodeInput(i, info);
+    if (input === 0) return false;
+    const side = this.sideInput(i, info);
+    return input > side || input === side && !info.subtract;
+  }
+  comparatorCheck(i, info) {
+    if (this.rules.tickThisTickCheck && this.willTickThisTick(i)) return;
+    const out = this.comparatorOutput(i, info);
+    const cur = this.comparatorOut.get(i) ?? 0;
+    if (out !== cur || info.powered !== this.comparatorOn(i, info)) {
+      this.scheduleTick(i, 2, this.shouldPrioritize(i, info) ? P_HIGH : P_NORMAL);
+    }
+  }
+  refreshComparator(i, info) {
+    const out = this.comparatorOutput(i, info);
+    const cur = this.comparatorOut.get(i) ?? 0;
+    this.comparatorOut.set(i, out);
+    if (cur === out && info.subtract) return;
+    const on = this.comparatorOn(i, info);
+    if (info.powered && !on)
+      this.setBlock(i, this.states.withBool(info.id, "powered", false), F.CLIENTS);
+    else if (!info.powered && on)
+      this.setBlock(i, this.states.withBool(info.id, "powered", true), F.CLIENTS);
+    this.updateDiodeFront(i, info);
+  }
+  /** DiodeBlock.updateNeighborsInFront. */
+  updateDiodeFront(i, info) {
+    const d = info.facing;
+    const front = this.rel(i, OPPOSITE2[d]);
+    this.neighborChanged(front, info.nameId, i);
+    this.updateNeighborsAt(front, info.nameId, d);
+  }
+  /** Signal a comparator reads from a container or a block with a fill level, or null. */
+  analogSignal(i, info) {
+    const fromState = stateSignal(info.name, info.props);
+    if (fromState !== null) return fromState;
+    const slots = containerSlots(info.name);
+    if (slots === 0) return null;
+    const items = [...this.inventories.get(i) ?? []];
+    let total = slots;
+    if ((info.name === "chest" || info.name === "trapped_chest") && info.props.type !== "single") {
+      const d = info.props.type === "left" ? clockwise(info.facing) : counterClockwise(info.facing);
+      const other = this.rel(i, d);
+      const oi = this.info(other);
+      if (oi.nameId === info.nameId && oi.props.type !== "single") {
+        items.push(...this.inventories.get(other) ?? []);
+        total += slots;
+      }
+    }
+    return containerSignal(items, total);
+  }
+  // ---------------------------------------------------------------- observers
+  updateObserverFront(i, info) {
+    const d = info.facing;
+    const back = this.rel(i, OPPOSITE2[d]);
+    this.neighborChanged(back, info.nameId, i);
+    this.updateNeighborsAt(back, info.nameId, d);
+  }
+  // ---------------------------------------------------------------- levers, buttons, plates
+  updateAttachedNeighbours(i, info) {
+    this.updateNeighborsAt(i, info.nameId);
+    this.updateNeighborsAt(this.rel(i, OPPOSITE2[connectedDir(info)]), info.nameId);
+  }
+  plateSignal(info) {
+    return info.kind === K.WEIGHTED_PLATE ? Math.max(0, info.power) : info.powered ? 15 : 0;
+  }
+  plateTarget(i, info) {
+    const n = this.plateEntities.get(i) ?? 0;
+    if (n <= 0) return 0;
+    if (info.kind === K.PLATE) return 15;
+    const max = plateMaxWeight(info.name);
+    return Math.ceil(Math.min(max, n) / max * 15);
+  }
+  /** BasePressurePlateBlock.checkPressed. */
+  checkPlate(i, info, current) {
+    const target = this.plateTarget(i, info);
+    if (current !== target) {
+      const s = info.kind === K.WEIGHTED_PLATE ? this.states.withPower(info.id, target) : this.states.withBool(info.id, "powered", target > 0);
+      this.setBlock(i, s, F.CLIENTS);
+      this.updateNeighborsAt(i, info.nameId);
+      this.updateNeighborsAt(this.rel(i, DOWN), info.nameId);
+    }
+    if (target > 0) this.scheduleTick(i, info.kind === K.WEIGHTED_PLATE ? 10 : 20);
+  }
+  // ---------------------------------------------------------------- other consumers
+  checkHopper(i, info) {
+    const enabled = !this.hasNeighborSignal(i);
+    if (enabled !== info.enabled)
+      this.setBlock(i, this.states.withBool(info.id, "enabled", enabled), F.INVISIBLE);
+  }
+  checkBulb(i, info) {
+    const powered = this.hasNeighborSignal(i);
+    if (powered === info.powered) return;
+    let s = info.id;
+    if (!info.powered) s = this.states.withBool(s, "lit", !info.lit);
+    this.setBlock(i, this.states.withBool(s, "powered", powered), UPDATE_ALL);
+  }
+  primeTnt(i) {
+    this.event("tnt", i, "primed: explodes 80 ticks later (explosions are not simulated)");
+    this.setBlock(i, this.AIR, UPDATE_ALL);
+  }
+  /** PoweredRailBlock: power travels up to 8 rails from a powered one. */
+  updatePoweredRail(i, info) {
+    const powered = this.hasNeighborSignal(i) || this.findRailSignal(i, info, true, 0) || this.findRailSignal(i, info, false, 0);
+    if (powered === info.powered) return;
+    this.setBlock(i, this.states.withBool(info.id, "powered", powered), UPDATE_ALL);
+    this.updateNeighborsAt(this.rel(i, DOWN), info.nameId);
+    if (/^ascending/.test(info.props.shape ?? ""))
+      this.updateNeighborsAt(this.rel(i, UP), info.nameId);
+  }
+  findRailSignal(i, info, forward, depth) {
+    if (depth >= 8) return false;
+    let dx = 0;
+    let dy = 0;
+    let dz = 0;
+    let flat = true;
+    let shape = info.props.shape ?? "north_south";
+    switch (shape) {
+      case "north_south":
+        dz = forward ? 1 : -1;
+        break;
+      case "east_west":
+        dx = forward ? -1 : 1;
+        break;
+      case "ascending_east":
+        if (forward) dx = -1;
+        else {
+          dx = 1;
+          dy = 1;
+          flat = false;
+        }
+        shape = "east_west";
+        break;
+      case "ascending_west":
+        if (forward) {
+          dx = -1;
+          dy = 1;
+          flat = false;
+        } else dx = 1;
+        shape = "east_west";
+        break;
+      case "ascending_north":
+        if (forward) dz = 1;
+        else {
+          dz = -1;
+          dy = 1;
+          flat = false;
+        }
+        shape = "north_south";
+        break;
+      case "ascending_south":
+        if (forward) {
+          dz = 1;
+          dy = 1;
+          flat = false;
+        } else dz = -1;
+        shape = "north_south";
+        break;
+    }
+    const n = i + dx + this.W * dz + this.W * this.D * dy;
+    if (this.sameRailWithPower(n, info, forward, depth, shape)) return true;
+    return flat && this.sameRailWithPower(this.rel(n, DOWN), info, forward, depth, shape);
+  }
+  sameRailWithPower(i, rail, forward, depth, shape) {
+    const info = this.info(i);
+    if (info.nameId !== rail.nameId) return false;
+    const s = info.props.shape ?? "";
+    if (shape === "east_west" && /north|south/.test(s)) return false;
+    if (shape === "north_south" && /east|west/.test(s)) return false;
+    if (!info.powered) return false;
+    if (this.hasNeighborSignal(i)) return true;
+    return this.findRailSignal(i, info, forward, depth + 1);
+  }
+  // ---------------------------------------------------------------- pistons
+  /** PistonBaseBlock.isPushable; the simulated area's edge stands in for the world limits. */
+  isPushable(i, move, allowDestroy, pistonFacing) {
+    if (!this.valid(i) || !this.valid(this.rel(i, move))) return false;
+    const info = this.info(i);
+    if (info.kind === K.AIR) return true;
+    if (info.kind === K.PISTON) {
+      if (info.extended) return false;
+    } else {
+      if (info.push === PUSH.BLOCK) return false;
+      if (info.push === PUSH.DESTROY) return allowDestroy;
+      if (info.push === PUSH.PUSH_ONLY) return move === pistonFacing;
+    }
+    if (this.rules.noteBlockImmovable && info.kind === K.NOTE_BLOCK) return false;
+    return !info.blockEntity;
+  }
+  pistonPowered(i, facing) {
+    for (const d of ALL) if (d !== facing && this.levelSignal(this.rel(i, d), d) > 0) return true;
+    if (this.levelSignal(i, DOWN) > 0) return true;
+    const above = this.rel(i, UP);
+    for (const d of ALL) if (d !== DOWN && this.levelSignal(this.rel(above, d), d) > 0) return true;
+    return false;
+  }
+  checkIfExtend(i, info) {
+    const d = info.facing;
+    const powered = this.pistonPowered(i, d);
+    if (powered && !info.extended) {
+      if (new PistonStructure(this, i, d, true).resolve()) this.blockEvent(i, 0, d);
+    } else if (!powered && info.extended) {
+      const p2 = this.rel(i, d, 2);
+      const s2 = this.info(p2);
+      let type = 1;
+      if (s2.kind === K.MOVING_PISTON && s2.facing === d) {
+        const m = this.moving.get(p2);
+        if (m && m.extending && (m.progressO < 0.5 || this.time === m.lastTicked || this.handlingTick))
+          type = 2;
+      }
+      this.blockEvent(i, type, d);
+    }
+  }
+  triggerEvent(i, type, param) {
+    const info = this.info(i);
+    if (info.kind === K.NOTE_BLOCK) {
+      this.event("note", i, `${info.props.instrument ?? "harp"} ${info.props.note ?? "0"}`);
+      return;
+    }
+    if (info.kind !== K.PISTON) return;
+    const d = info.facing;
+    const sticky = info.name === "sticky_piston";
+    const extended = this.states.withBool(info.id, "extended", true);
+    const powered = this.pistonPowered(i, d);
+    if (powered && (type === 1 || type === 2)) {
+      this.setBlock(i, extended, F.CLIENTS);
+      return;
+    }
+    if (!powered && type === 0) return;
+    if (type === 0) {
+      if (!this.moveBlocks(i, d, true, sticky)) return;
+      this.setBlock(i, extended, F.MOVED | UPDATE_ALL);
+      return;
+    }
+    const front = this.rel(i, d);
+    const inFront = this.moving.get(front);
+    if (inFront) this.finalTick(inFront);
+    const movingId = this.newState("moving_piston", {
+      facing: DIR_NAMES[d],
+      type: sticky ? "sticky" : "normal"
+    });
+    this.setBlock(i, movingId, F.INVISIBLE | F.KNOWN_SHAPE);
+    const base = this.newState(
+      info.name,
+      {
+        facing: DIR_NAMES[param & 7],
+        extended: "false"
+      },
+      info.id
+    );
+    this.addMoving(i, base, d, false, true);
+    this.updateNeighborsAt(i, this.states.info(movingId).nameId);
+    this.updateNeighbourShapes(this.states.info(movingId), i, F.CLIENTS, 512);
+    if (sticky) {
+      const p2 = this.rel(i, d, 2);
+      const s3 = this.info(p2);
+      let spat = false;
+      if (s3.kind === K.MOVING_PISTON) {
+        const m = this.moving.get(p2);
+        if (m && m.dir === d && m.extending) {
+          this.finalTick(m);
+          spat = true;
+        }
+      }
+      if (!spat) {
+        if (type !== 1 || s3.kind === K.AIR || !this.isPushable(p2, OPPOSITE2[d], false, d) || s3.push !== PUSH.NORMAL && s3.kind !== K.PISTON)
+          this.removeBlock(front);
+        else this.moveBlocks(i, d, false, sticky);
+      }
+    } else {
+      this.removeBlock(front);
+    }
+  }
+  /** A state the engine creates, with this version's properties for that block. */
+  newState(name, props, like) {
+    const base = like !== void 0 ? { ...this.states.info(like).props } : { ...this.defaults[name] ?? {} };
+    for (const [k, v] of Object.entries(props)) if (k in base) base[k] = v;
+    return this.states.idOfName(name, base);
+  }
+  moveBlocks(i, dir, extending, sticky) {
+    const front = this.rel(i, dir);
+    if (!extending && this.info(front).kind === K.PISTON_HEAD)
+      this.setBlock(front, this.AIR, F.INVISIBLE | F.KNOWN_SHAPE);
+    const res = new PistonStructure(this, i, dir, extending);
+    if (!res.resolve()) return false;
+    const toPush = res.toPush;
+    const toDestroy = res.toDestroy;
+    const map = /* @__PURE__ */ new Map();
+    const moved = [];
+    for (const p of toPush) {
+      moved.push(this.cells[p]);
+      map.set(p, this.cells[p]);
+    }
+    const order = [...map.keys()];
+    const blockStates = [];
+    const dir2 = extending ? dir : OPPOSITE2[dir];
+    for (let k = toDestroy.length - 1; k >= 0; k--) {
+      const p = toDestroy[k];
+      const s = this.cells[p];
+      this.event("break", p, this.states.info(s).name);
+      this.setBlock(p, this.AIR, F.CLIENTS | F.KNOWN_SHAPE);
+      blockStates.push(s);
+    }
+    const movingNormal = this.newState("moving_piston", { facing: DIR_NAMES[dir] });
+    for (let k = toPush.length - 1; k >= 0; k--) {
+      const from = toPush[k];
+      const s = this.cells[from];
+      const p = this.rel(from, dir2);
+      map.delete(p);
+      this.setBlock(p, movingNormal, F.MOVED | F.INVISIBLE);
+      this.addMoving(p, moved[k], dir, extending, false);
+      blockStates.push(s);
+    }
+    if (extending) {
+      const type = sticky ? "sticky" : "normal";
+      const head = this.newState("piston_head", {
+        facing: DIR_NAMES[dir],
+        type,
+        short: "false"
+      });
+      const movingHead = this.newState("moving_piston", { facing: DIR_NAMES[dir], type });
+      map.delete(front);
+      this.setBlock(front, movingHead, F.MOVED | F.INVISIBLE);
+      this.addMoving(front, head, dir, true, true);
+    }
+    const left = order.filter((p) => map.has(p));
+    const leftOrder = this.javaHashOrder(
+      left,
+      left.map((p) => this.hashOf(p))
+    );
+    for (const p of leftOrder) this.setBlock(p, this.AIR, F.MOVED | F.KNOWN_SHAPE | F.CLIENTS);
+    const airInfo = this.states.info(this.AIR);
+    for (const p of leftOrder) {
+      this.updateIndirectNeighbourShapes(this.states.info(map.get(p)), p, F.CLIENTS, 512);
+      this.updateNeighbourShapes(airInfo, p, F.CLIENTS, 512);
+    }
+    let j = 0;
+    for (let k = toDestroy.length - 1; k >= 0; k--) {
+      const s = this.states.info(blockStates[j++]);
+      const p = toDestroy[k];
+      this.updateIndirectNeighbourShapes(s, p, F.CLIENTS, 512);
+      this.updateNeighborsAt(p, s.nameId);
+    }
+    for (let k = toPush.length - 1; k >= 0; k--)
+      this.updateNeighborsAt(
+        toPush[k],
+        this.states.info(blockStates[j++]).nameId
+      );
+    if (extending) this.updateNeighborsAt(front, this.states.nameIdOf("piston_head"));
+    return true;
+  }
+  addMoving(i, state, dir, extending, source) {
+    const old = this.moving.get(i);
+    if (old) old.removed = true;
+    const m = {
+      pos: i,
+      state,
+      dir,
+      extending,
+      source,
+      progress: 0,
+      progressO: 0,
+      lastTicked: 0,
+      removed: false
+    };
+    this.moving.set(i, m);
+    this.pendingTickers.push(m);
+    this.markChanged(i);
+  }
+  removeMoving(m) {
+    m.removed = true;
+    if (this.moving.get(m.pos) === m) this.moving.delete(m.pos);
+  }
+  /** PistonMovingBlockEntity.tick. */
+  tickMoving(m) {
+    m.lastTicked = this.time;
+    m.progressO = m.progress;
+    if (m.progressO >= 1) {
+      this.removeMoving(m);
+      if (this.info(m.pos).kind === K.MOVING_PISTON) {
+        const s = this.updateFromNeighbourShapes(m.state, m.pos);
+        if (this.states.kind(s) === K.AIR) {
+          this.setBlock(m.pos, m.state, F.MOVED | F.KNOWN_SHAPE | F.INVISIBLE);
+          this.updateOrDestroy(m.state, s, m.pos, UPDATE_ALL, 512);
+        } else {
+          this.setBlock(m.pos, s, F.MOVED | UPDATE_ALL);
+          this.neighborChanged(m.pos, this.states.info(s).nameId, m.pos);
+        }
+      }
+      this.markChanged(m.pos);
+    } else {
+      m.progress = Math.min(1, m.progress + 0.5);
+    }
+  }
+  /** PistonMovingBlockEntity.finalTick: land the block now. */
+  finalTick(m) {
+    if (m.progressO >= 1) return;
+    m.progress = 1;
+    m.progressO = 1;
+    this.removeMoving(m);
+    if (this.info(m.pos).kind === K.MOVING_PISTON) {
+      const s = m.source ? this.AIR : this.updateFromNeighbourShapes(m.state, m.pos);
+      this.setBlock(m.pos, s, UPDATE_ALL);
+      this.neighborChanged(m.pos, this.states.info(s).nameId, m.pos);
+    }
+    this.markChanged(m.pos);
+  }
+  // ---------------------------------------------------------------- player actions
+  /** Right-click: flip a lever, press a button, cycle a repeater, toggle a comparator or door. */
+  use(i) {
+    const info = this.info(i);
+    switch (info.kind) {
+      case K.LEVER: {
+        const s = this.states.withBool(info.id, "powered", !info.powered);
+        this.setBlock(i, s, UPDATE_ALL);
+        this.updateAttachedNeighbours(i, this.states.info(s));
+        return true;
+      }
+      case K.BUTTON: {
+        if (info.powered) return false;
+        const s = this.states.withBool(info.id, "powered", true);
+        this.setBlock(i, s, UPDATE_ALL);
+        this.updateAttachedNeighbours(i, this.states.info(s));
+        this.scheduleTick(i, buttonTicks(info.name));
+        return true;
+      }
+      case K.REPEATER:
+        this.setBlock(
+          i,
+          this.states.with(info.id, "delay", String(info.delay % 4 + 1)),
+          UPDATE_ALL
+        );
+        return true;
+      case K.COMPARATOR: {
+        const s = this.states.with(info.id, "mode", info.subtract ? "compare" : "subtract");
+        this.setBlock(i, s, F.CLIENTS);
+        this.refreshComparator(i, this.states.info(s));
+        return true;
+      }
+      case K.DOOR:
+      case K.TRAPDOOR:
+      case K.FENCE_GATE:
+        if (/^iron_/.test(info.name)) return false;
+        this.setBlock(i, this.states.withBool(info.id, "open", !info.open), F.CLIENTS | 8);
+        return true;
+      case K.NOTE_BLOCK:
+        this.blockEvent(i, 0, 0);
+        return true;
+      default:
+        return false;
+    }
+  }
+  /** Entities standing on a pressure plate (weighted plates count them). */
+  setPlateEntities(i, count) {
+    this.plateEntities.set(i, Math.max(0, count));
+  }
+  plateEntitiesAt(i) {
+    return this.plateEntities.get(i) ?? 0;
+  }
+  /** A projectile hits a target block: power for `ticks` (arrows 20, others 8). */
+  hitTarget(i, power, ticks = 20) {
+    const info = this.info(i);
+    if (info.kind !== K.TARGET) return;
+    this.setBlock(i, this.states.withPower(info.id, Math.max(0, Math.min(15, power))), UPDATE_ALL);
+    this.scheduleTick(i, ticks);
+  }
+  /** Set the power level a daylight detector, sculk sensor or similar block gives off. */
+  setPower(i, power) {
+    const info = this.info(i);
+    if (info.power < 0) return;
+    this.setBlock(i, this.states.withPower(info.id, Math.max(0, Math.min(15, power))), UPDATE_ALL);
+  }
+  /** Place a block like a player (diodes start their tick if powered). */
+  place(i, state) {
+    const id = this.states.idOf(state);
+    this.setBlock(i, id, UPDATE_ALL | 8);
+    const info = this.states.info(id);
+    if (this.isDiode(info) && this.cells[i] === id) {
+      const on = info.kind === K.COMPARATOR ? this.comparatorOn(i, info) : this.diodeInput(i, info) > 0;
+      if (on) this.scheduleTick(i, 1);
+    }
+  }
+  /** Break a block like a player. */
+  breakBlock(i) {
+    this.destroyBlock(i);
+  }
+  /**
+   * Bring the build to life as if every component had just been placed: refresh dust shapes,
+   * repeater locks and door halves, update every component once, then run until nothing is
+   * scheduled (or maxTicks pass). Returns true when the circuit came to rest.
+   */
+  powerOn(maxTicks = 1200) {
+    const comps = [];
+    for (let i = 0; i < this.cells.length; i++) {
+      const k = this.info(i).kind;
+      if (k !== K.AIR && k !== K.SOLID) comps.push(i);
+    }
+    for (const i of comps) {
+      const id = this.cells[i];
+      const k = this.states.kind(id);
+      if (k !== K.WIRE && k !== K.REPEATER && k !== K.DOOR) continue;
+      const s = this.updateFromNeighbourShapes(id, i);
+      if (s !== id && this.states.kind(s) !== K.AIR) {
+        this.cells[i] = s;
+        this.markChanged(i);
+      }
+    }
+    for (const i of comps) {
+      const info = this.info(i);
+      if (info.kind === K.COMPARATOR && !this.comparatorOut.has(i))
+        this.comparatorOut.set(i, info.powered ? this.comparatorOutput(i, info) : 0);
+      if (info.kind === K.AIR) continue;
+      this.updates = 0;
+      this.neighborChanged(i, info.nameId, i);
+    }
+    return this.settle(maxTicks);
+  }
+  /** Run until idle; false if still busy after maxTicks (a clock, or a long delay line). */
+  settle(maxTicks) {
+    for (let t = 0; t < maxTicks; t++) {
+      if (this.idle) return true;
+      this.tick();
+    }
+    return this.idle;
+  }
+  /** Everything that changes while the world runs, to rewind it (test cases start alike). */
+  snapshot() {
+    const copyMoving = (m) => ({ ...m });
+    const moving = /* @__PURE__ */ new Map();
+    for (const m of [...this.moving.values(), ...this.tickers, ...this.pendingTickers])
+      if (!moving.has(m)) moving.set(m, copyMoving(m));
+    return {
+      cells: this.cells.slice(),
+      time: this.time,
+      seq: this.seq,
+      heap: this.heap.map((t) => ({ ...t })),
+      events: this.eventQueue.slice(this.eventHead).map((e) => ({ ...e })),
+      moving: [...this.moving.entries()].map(([k, m]) => [k, moving.get(m)]),
+      tickers: this.tickers.map((m) => moving.get(m)),
+      pending: this.pendingTickers.map((m) => moving.get(m)),
+      comparatorOut: new Map(this.comparatorOut),
+      inventories: new Map(this.inventories),
+      plateEntities: new Map(this.plateEntities),
+      toggles: this.toggles.map((t) => ({ ...t })),
+      eventLog: this.events.length
+    };
+  }
+  restore(s) {
+    for (let i = 0; i < this.cells.length; i++)
+      if (this.cells[i] !== s.cells[i]) this.markChanged(i);
+    this.cells.set(s.cells);
+    this.time = s.time;
+    this.seq = s.seq;
+    const copies = /* @__PURE__ */ new Map();
+    const copy = (m) => {
+      let c = copies.get(m);
+      if (!c) copies.set(m, c = { ...m });
+      return c;
+    };
+    this.heap = s.heap.map((t) => ({ ...t }));
+    this.scheduled.clear();
+    for (const t of this.heap) this.scheduled.set(this.tickKey(t.pos, t.type), t);
+    this.eventQueue = s.events.map((e) => ({ ...e }));
+    this.eventHead = 0;
+    this.eventKeys.clear();
+    for (const e of this.eventQueue) this.eventKeys.add(`${e.pos},${e.type},${e.b0},${e.b1}`);
+    for (const k of this.moving.keys()) this.markChanged(k);
+    this.moving.clear();
+    for (const [k, m] of s.moving) {
+      this.moving.set(k, copy(m));
+      this.markChanged(k);
+    }
+    this.tickers = s.tickers.map(copy);
+    this.pendingTickers = s.pending.map(copy);
+    this.comparatorOut.clear();
+    for (const [k, v] of s.comparatorOut) this.comparatorOut.set(k, v);
+    this.inventories.clear();
+    for (const [k, v] of s.inventories) this.inventories.set(k, v);
+    this.plateEntities.clear();
+    for (const [k, v] of s.plateEntities) this.plateEntities.set(k, v);
+    this.toggles = s.toggles.map((t) => ({ ...t }));
+    this.events.length = Math.min(this.events.length, s.eventLog);
+  }
+  /**
+   * The state a player placing this block would get from its neighbours: dust connections (a
+   * lone dust is a cross from 1.16), a repeater's lock. Other blocks are returned unchanged.
+   */
+  placementState(i) {
+    const info = this.info(i);
+    if (info.kind === K.WIRE)
+      return this.wireConnectionState(i, this.states.withSides(info.id, 1, 1, 1, 1));
+    if (info.kind === K.REPEATER)
+      return this.states.withBool(info.id, "locked", this.isLocked(i, info));
+    return info.id;
+  }
+  /** Comparator output strength (its block entity), for probes. */
+  comparatorOutputAt(i) {
+    return this.comparatorOut.get(i) ?? 0;
+  }
+};
+function connectedDir(info) {
+  return info.face === "floor" ? UP : info.face === "ceiling" ? DOWN : info.facing;
+}
+function isDot(info) {
+  const s = info.sides;
+  return !s[NORTH] && !s[SOUTH] && !s[EAST] && !s[WEST];
+}
+function isCross(info) {
+  const s = info.sides;
+  return !!s[NORTH] && !!s[SOUTH] && !!s[EAST] && !!s[WEST];
+}
+var PistonStructure = class {
+  constructor(w, piston, pistonDir, extending) {
+    this.w = w;
+    this.piston = piston;
+    this.pistonDir = pistonDir;
+    this.extending = extending;
+    this.pushDir = extending ? pistonDir : OPPOSITE2[pistonDir];
+    this.start = w.rel(piston, pistonDir, extending ? 1 : 2);
+  }
+  toPush = [];
+  toDestroy = [];
+  pushDir;
+  start;
+  resolve() {
+    this.toPush.length = 0;
+    this.toDestroy.length = 0;
+    const w = this.w;
+    const info = w.info(this.start);
+    if (!w.isPushable(this.start, this.pushDir, false, this.pistonDir)) {
+      if (this.extending && info.push === PUSH.DESTROY && w.valid(this.start)) {
+        this.toDestroy.push(this.start);
+        return true;
+      }
+      return false;
+    }
+    if (!this.addBlockLine(this.start, this.pushDir)) return false;
+    for (let k = 0; k < this.toPush.length; k++) {
+      const p = this.toPush[k];
+      if (isStickyBlock(w.info(p)) && !this.addBranchingBlocks(p)) return false;
+    }
+    return true;
+  }
+  addBlockLine(from, dir) {
+    const w = this.w;
+    let info = w.info(from);
+    if (info.kind === K.AIR) return true;
+    if (!w.isPushable(from, this.pushDir, false, dir)) return true;
+    if (from === this.piston) return true;
+    if (this.toPush.includes(from)) return true;
+    let i = 1;
+    if (i + this.toPush.length > 12) return false;
+    const back = OPPOSITE2[this.pushDir];
+    while (isStickyBlock(info)) {
+      const p = w.rel(from, back, i);
+      const prev = info;
+      info = w.info(p);
+      if (info.kind === K.AIR || !canStickBlocks(prev, info) || !w.isPushable(p, this.pushDir, false, back) || p === this.piston)
+        break;
+      if (++i + this.toPush.length > 12) return false;
+    }
+    let j = 0;
+    for (let k = i - 1; k >= 0; k--) {
+      this.toPush.push(w.rel(from, back, k));
+      j++;
+    }
+    for (let k = 1; ; k++) {
+      const p = w.rel(from, this.pushDir, k);
+      const l = this.toPush.indexOf(p);
+      if (l > -1) {
+        this.reorder(j, l);
+        for (let m = 0; m <= l + j; m++) {
+          const q = this.toPush[m];
+          if (isStickyBlock(w.info(q)) && !this.addBranchingBlocks(q)) return false;
+        }
+        return true;
+      }
+      info = w.info(p);
+      if (info.kind === K.AIR) return true;
+      if (!w.isPushable(p, this.pushDir, true, this.pushDir) || p === this.piston) return false;
+      if (info.push === PUSH.DESTROY) {
+        this.toDestroy.push(p);
+        return true;
+      }
+      if (this.toPush.length >= 12) return false;
+      this.toPush.push(p);
+      j++;
+    }
+  }
+  reorder(i, j) {
+    const a = this.toPush.slice(0, j);
+    const b = this.toPush.slice(this.toPush.length - i);
+    const c = this.toPush.slice(j, this.toPush.length - i);
+    this.toPush.length = 0;
+    this.toPush.push(...a, ...b, ...c);
+  }
+  addBranchingBlocks(from) {
+    const w = this.w;
+    const info = w.info(from);
+    for (const d of ALL) {
+      if (axisOf(d) === axisOf(this.pushDir)) continue;
+      const p = w.rel(from, d);
+      if (!canStickBlocks(w.info(p), info) || this.addBlockLine(p, d)) continue;
+      return false;
+    }
+    return true;
+  }
+};
+function isStickyBlock(info) {
+  return info.name === "slime_block" || info.name === "honey_block";
+}
+function canStickBlocks(a, b) {
+  if (a.name === "honey_block" && b.name === "slime_block") return false;
+  if (a.name === "slime_block" && b.name === "honey_block") return false;
+  return isStickyBlock(a) || isStickyBlock(b);
+}
+
+// packages/redstone/src/expr.ts
+var BINARY = {
+  "||": 1,
+  "&&": 2,
+  "|": 3,
+  "^": 4,
+  "&": 5,
+  "==": 6,
+  "!=": 6,
+  "<": 7,
+  "<=": 7,
+  ">": 7,
+  ">=": 7,
+  "<<": 8,
+  ">>": 8,
+  "+": 9,
+  "-": 9,
+  "*": 10,
+  "/": 10,
+  "%": 10,
+  "**": 11
+};
+var FUNCS = {
+  min: (...a) => Math.min(...a),
+  max: (...a) => Math.max(...a),
+  abs: (a = 0) => Math.abs(a),
+  floor: (a = 0) => Math.floor(a),
+  bit: (x = 0, i = 0) => Math.floor(x / 2 ** i) % 2 === 0 ? 0 : 1
+};
+var TOKEN = /\s*(\d+(?:\.\d+)?|0x[0-9a-fA-F]+|0b[01]+|[A-Za-z_][\w]*|\*\*|<<|>>|<=|>=|==|!=|&&|\|\||[-+*/%&|^~!<>?:(),])/y;
+function tokenize(src) {
+  const out = [];
+  TOKEN.lastIndex = 0;
+  let pos = 0;
+  while (pos < src.length) {
+    if (/^\s*$/.test(src.slice(pos))) break;
+    TOKEN.lastIndex = pos;
+    const m = TOKEN.exec(src);
+    if (!m) throw new Error(`Unexpected "${src.slice(pos).trim().slice(0, 12)}" in "${src}".`);
+    out.push(m[1]);
+    pos = TOKEN.lastIndex;
+  }
+  return out;
+}
+var Expr = class {
+  constructor(source) {
+    this.source = source;
+    const tokens = tokenize(source);
+    let k = 0;
+    const names = /* @__PURE__ */ new Set();
+    const peek = () => tokens[k];
+    const next = () => tokens[k++];
+    const expect = (t) => {
+      if (next() !== t) throw new Error(`Expected "${t}" in "${source}".`);
+    };
+    const primary = () => {
+      const tok = next();
+      if (tok === void 0) throw new Error(`"${source}" ends too early.`);
+      if (tok === "(") {
+        const e = ternary();
+        expect(")");
+        return e;
+      }
+      if (tok === "-" || tok === "+" || tok === "!" || tok === "~")
+        return { t: "un", op: tok, a: unary() };
+      if (/^0x/.test(tok)) return { t: "num", v: Number.parseInt(tok.slice(2), 16) };
+      if (/^0b/.test(tok)) return { t: "num", v: Number.parseInt(tok.slice(2), 2) };
+      if (/^\d/.test(tok)) return { t: "num", v: Number(tok) };
+      if (tok === "true" || tok === "false") return { t: "num", v: tok === "true" ? 1 : 0 };
+      if (/^[A-Za-z_]/.test(tok)) {
+        if (peek() === "(") {
+          if (!FUNCS[tok]) throw new Error(`Unknown function ${tok}() in "${source}".`);
+          next();
+          const args = [];
+          if (peek() !== ")") {
+            for (; ; ) {
+              args.push(ternary());
+              if (peek() === ",") next();
+              else break;
+            }
+          }
+          expect(")");
+          return { t: "call", f: tok, args };
+        }
+        names.add(tok);
+        return { t: "name", v: tok };
+      }
+      throw new Error(`Unexpected "${tok}" in "${source}".`);
+    };
+    const unary = () => primary();
+    const binary = (minPrec) => {
+      let left = unary();
+      for (; ; ) {
+        const op = peek();
+        const prec = op !== void 0 ? BINARY[op] : void 0;
+        if (prec === void 0 || prec < minPrec) return left;
+        next();
+        const right = binary(op === "**" ? prec : prec + 1);
+        left = { t: "bin", op, a: left, b: right };
+      }
+    };
+    const ternary = () => {
+      const c = binary(1);
+      if (peek() !== "?") return c;
+      next();
+      const a = ternary();
+      expect(":");
+      return { t: "if", c, a, b: ternary() };
+    };
+    this.node = ternary();
+    if (k !== tokens.length) throw new Error(`Unexpected "${tokens[k]}" in "${source}".`);
+    this.names = names;
+  }
+  node;
+  names;
+  eval(vars) {
+    const ev = (n) => {
+      switch (n.t) {
+        case "num":
+          return n.v;
+        case "name": {
+          const v = vars(n.v);
+          if (v === void 0) throw new Error(`Unknown name "${n.v}" in "${this.source}".`);
+          return v;
+        }
+        case "un": {
+          const a = ev(n.a);
+          return n.op === "-" ? -a : n.op === "!" ? a ? 0 : 1 : n.op === "~" ? -Math.trunc(a) - 1 : a;
+        }
+        case "if":
+          return ev(n.c) ? ev(n.a) : ev(n.b);
+        case "call":
+          return FUNCS[n.f](...n.args.map(ev));
+        case "bin": {
+          if (n.op === "&&") return ev(n.a) && ev(n.b) ? 1 : 0;
+          if (n.op === "||") return ev(n.a) || ev(n.b) ? 1 : 0;
+          const a = ev(n.a);
+          const b = ev(n.b);
+          switch (n.op) {
+            case "+":
+              return a + b;
+            case "-":
+              return a - b;
+            case "*":
+              return a * b;
+            case "/":
+              return b === 0 ? 0 : Math.trunc(a / b);
+            case "%":
+              return b === 0 ? 0 : a % b;
+            case "**":
+              return a ** b;
+            case "&":
+              return Number(BigInt.asIntN(64, BigInt(Math.trunc(a)) & BigInt(Math.trunc(b))));
+            case "|":
+              return Number(BigInt.asIntN(64, BigInt(Math.trunc(a)) | BigInt(Math.trunc(b))));
+            case "^":
+              return Number(BigInt.asIntN(64, BigInt(Math.trunc(a)) ^ BigInt(Math.trunc(b))));
+            case "<<":
+              return Math.trunc(a) * 2 ** Math.trunc(b);
+            case ">>":
+              return Math.floor(Math.trunc(a) / 2 ** Math.trunc(b));
+            case "==":
+              return a === b ? 1 : 0;
+            case "!=":
+              return a !== b ? 1 : 0;
+            case "<":
+              return a < b ? 1 : 0;
+            case "<=":
+              return a <= b ? 1 : 0;
+            case ">":
+              return a > b ? 1 : 0;
+            case ">=":
+              return a >= b ? 1 : 0;
+          }
+          return 0;
+        }
+      }
+    };
+    return ev(this.node);
+  }
+};
+
+// packages/redstone/src/circuit.ts
+var INPUT_KINDS = /* @__PURE__ */ new Set([
+  K.LEVER,
+  K.BUTTON,
+  K.PLATE,
+  K.WEIGHTED_PLATE,
+  K.TARGET,
+  K.DAYLIGHT,
+  K.SCULK_SENSOR
+]);
+var NOTABLE = /* @__PURE__ */ new Set(["burnout", "break", "suppressed", "left-area", "tnt"]);
+var Circuit = class {
+  constructor(world, spec, origin) {
+    this.world = world;
+    this.spec = spec;
+    this.origin = origin;
+    const list2 = (at) => Array.isArray(at[0]) ? at : [at];
+    for (const [kind, map, target] of [
+      ["input", spec.inputs, this.inputs],
+      ["output", spec.outputs, this.outputs]
+    ]) {
+      for (const [name, io] of Object.entries(map ?? {})) {
+        if (!/^[A-Za-z_]\w*$/.test(name)) {
+          this.errors.push(
+            `${kind} "${name}": names are letters, digits and _ (like A, sum, clk_2).`
+          );
+          continue;
+        }
+        if (this.inputs.has(name) || this.outputs.has(name)) {
+          this.errors.push(`"${name}" is both an input and an output.`);
+          continue;
+        }
+        const bits = [];
+        for (const p of list2(io.at)) {
+          const local = [p[0] - origin[0], p[1] - origin[1], p[2] - origin[2]];
+          const i = world.index(...local);
+          if (!world.valid(i)) {
+            this.errors.push(`${kind} ${name} at [${p.join(", ")}] is outside the build.`);
+            continue;
+          }
+          const info = world.info(i);
+          if (kind === "input" && !io.as && !INPUT_KINDS.has(info.kind)) {
+            this.errors.push(
+              `input ${name} at [${p.join(", ")}] is ${info.name}: an input must be a lever, button, pressure plate, target or daylight detector \u2014 or give "as" (e.g. "redstone_block") to place a block there for 1.`
+            );
+          }
+          bits.push({ i, original: info.state });
+        }
+        target.set(name, { name, bits, spec: io });
+      }
+    }
+  }
+  inputs = /* @__PURE__ */ new Map();
+  outputs = /* @__PURE__ */ new Map();
+  errors = [];
+  io(name) {
+    const io = this.inputs.get(name) ?? this.outputs.get(name);
+    if (!io) throw new Error(`No input or output named "${name}".`);
+    return io;
+  }
+  readBit(i, mode) {
+    const w = this.world;
+    const info = w.info(i);
+    if (mode === "block")
+      return /^minecraft:(air|cave_air|void_air)$/.test(w.displayState(i)) ? 0 : 1;
+    let p;
+    switch (info.kind) {
+      case K.WIRE:
+      case K.WEIGHTED_PLATE:
+      case K.TARGET:
+      case K.DAYLIGHT:
+      case K.SCULK_SENSOR:
+        p = Math.max(0, info.power);
+        break;
+      case K.COMPARATOR:
+        p = info.powered ? w.comparatorOutputAt(i) : 0;
+        break;
+      case K.LAMP:
+      case K.TORCH:
+      case K.WALL_TORCH:
+      case K.COPPER_BULB:
+        p = info.lit ? 15 : 0;
+        break;
+      case K.PISTON:
+        p = info.extended ? 15 : 0;
+        break;
+      case K.DOOR:
+      case K.TRAPDOOR:
+      case K.FENCE_GATE:
+        p = info.open ? 15 : 0;
+        break;
+      case K.DISPENSER:
+      case K.CRAFTER:
+        p = info.triggered ? 15 : 0;
+        break;
+      case K.HOPPER:
+        p = info.enabled ? 0 : 15;
+        break;
+      case K.REPEATER:
+      case K.OBSERVER:
+      case K.LEVER:
+      case K.BUTTON:
+      case K.NOTE_BLOCK:
+      case K.POWERED_RAIL:
+      case K.BELL:
+      case K.PLATE:
+        p = info.powered ? 15 : 0;
+        break;
+      default:
+        p = w.receivedPower(i);
+    }
+    return mode === "power" ? p : p > 0 ? 1 : 0;
+  }
+  /** Current value: a bus reads as an integer, bit 0 first. */
+  read(name) {
+    const io = this.io(name);
+    const mode = this.outputs.has(name) ? io.spec.read ?? "bit" : "bit";
+    if (io.bits.length === 1) return this.readBit(io.bits[0].i, mode);
+    let v = 0;
+    io.bits.forEach((b, k) => {
+      if (this.readBit(b.i, mode === "block" ? "block" : "bit")) v += 2 ** k;
+    });
+    return v;
+  }
+  values() {
+    const out = {};
+    for (const n of [...this.inputs.keys(), ...this.outputs.keys()]) out[n] = this.read(n);
+    return out;
+  }
+  /** Drive an input like a player would. Between ticks, like a click. */
+  set(name, value) {
+    const io = this.inputs.get(name);
+    if (!io) throw new Error(`No input named "${name}".`);
+    const w = this.world;
+    const single = io.bits.length === 1;
+    io.bits.forEach((b, k) => {
+      const bit = Math.floor(value / 2 ** k) % 2 === 1;
+      const info = w.info(b.i);
+      if (io.spec.as) {
+        const want = bit ? io.spec.as : b.original;
+        const cur = info.state.replace(/^minecraft:/, "");
+        if (cur !== want.replace(/^minecraft:/, "") && info.state !== want) {
+          if (bit) w.place(b.i, want.includes(":") ? want : `minecraft:${want}`);
+          else if (b.original === "minecraft:air") w.breakBlock(b.i);
+          else w.place(b.i, b.original);
+        }
+        return;
+      }
+      switch (info.kind) {
+        case K.LEVER:
+          if (info.powered !== bit) w.use(b.i);
+          return;
+        case K.BUTTON:
+          if (bit) w.use(b.i);
+          return;
+        case K.PLATE:
+        case K.WEIGHTED_PLATE:
+          w.setPlateEntities(b.i, single ? value : bit ? 1 : 0);
+          return;
+        case K.TARGET:
+          if (bit || single && value > 0)
+            w.hitTarget(b.i, single ? Math.min(15, value) || 15 : 15);
+          return;
+        case K.DAYLIGHT:
+        case K.SCULK_SENSOR:
+          w.setPower(b.i, single ? Math.min(15, value) : bit ? 15 : 0);
+          return;
+        default:
+          throw new Error(`${name}: ${info.name} at bit ${k} can't be driven.`);
+      }
+    });
+  }
+  /** Press a button input (every bit). */
+  press(name) {
+    const io = this.inputs.get(name);
+    if (!io) throw new Error(`No input named "${name}".`);
+    for (const b of io.bits) {
+      const info = this.world.info(b.i);
+      if (info.kind !== K.BUTTON)
+        throw new Error(
+          `press ${name}: ${info.name} isn't a button \u2014 use {"pulse": {"${name}": ticks}}.`
+        );
+      this.world.use(b.i);
+    }
+  }
+  local(p) {
+    return this.world.index(p[0] - this.origin[0], p[1] - this.origin[1], p[2] - this.origin[2]);
+  }
+};
+function mulberry(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = a + 1831565813 >>> 0;
+    let t = a;
+    t = Math.imul(t ^ t >>> 15, t | 1);
+    t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+function testCases(test) {
+  const entries = Object.entries(test.forAll ?? {});
+  if (entries.length === 0) return [{}];
+  const domains = entries.map(([name, d]) => {
+    const values = Array.isArray(d) ? Array.from({ length: Math.max(0, d[1] - d[0] + 1) }, (_, k) => d[0] + k) : d.values;
+    return { name, values };
+  });
+  const total = domains.reduce((n, d) => n * d.values.length, 1);
+  const limit = test.samples ?? 256;
+  const pick = (index2) => {
+    const v = {};
+    let rest = index2;
+    for (const d of domains) {
+      v[d.name] = d.values[rest % d.values.length];
+      rest = Math.floor(rest / d.values.length);
+    }
+    return v;
+  };
+  if (total <= limit) return Array.from({ length: total }, (_, k) => pick(k));
+  const rand = mulberry(test.seed ?? 1);
+  const out = [];
+  out.push(pick(0), pick(total - 1));
+  while (out.length < limit) out.push(pick(Math.floor(rand() * total)));
+  return out;
+}
+function stepName(s) {
+  return Object.keys(s)[0] ?? "?";
+}
+function* runCase(c, test, vars, out) {
+  const w = c.world;
+  const t0 = w.time;
+  const pulses = [];
+  const traced = out.trace ? test.trace ?? [] : [];
+  const last = /* @__PURE__ */ new Map();
+  const sample = () => {
+    for (const n of traced) {
+      const v = c.read(n);
+      if (last.get(n) !== v) {
+        last.set(n, v);
+        out.trace[n] ??= [];
+        out.trace[n]?.push([w.time - t0, v]);
+      }
+    }
+  };
+  const lookup = (name) => name in vars ? vars[name] : c.inputs.has(name) || c.outputs.has(name) ? c.read(name) : void 0;
+  const value = (v) => {
+    if (typeof v === "boolean") return v ? 1 : 0;
+    if (typeof v === "number") return v;
+    return expr(v).eval(lookup);
+  };
+  const ticks = (v) => Math.max(0, Math.floor(typeof v === "number" ? v : value(v)));
+  const fail = (step, message) => ({
+    ...Object.keys(vars).length ? { vars } : {},
+    tick: w.time - t0,
+    step,
+    message
+  });
+  function* tick() {
+    w.tick();
+    for (let k = pulses.length - 1; k >= 0; k--) {
+      const p = pulses[k];
+      if (w.time - t0 >= p.at) {
+        c.set(p.name, p.value);
+        pulses.splice(k, 1);
+      }
+    }
+    sample();
+    yield w.time - t0;
+  }
+  const check = (spec) => {
+    if (typeof spec === "string") {
+      const e = expr(spec);
+      return e.eval(lookup) ? null : `${spec} is false (${describe2(e.names)})`;
+    }
+    const wrong = [];
+    for (const [name, want] of Object.entries(spec)) {
+      const got = c.read(name);
+      const exp = value(want);
+      if (got !== exp) wrong.push(`${name} is ${got}, expected ${exp}`);
+    }
+    return wrong.length ? wrong.join("; ") : null;
+  };
+  const describe2 = (names) => [...names].map((n) => `${n}=${lookup(n) ?? "?"}`).join(", ");
+  sample();
+  for (let s = 0; s < test.steps.length; s++) {
+    const step = test.steps[s];
+    if (out.progress) out.progress.step = s;
+    try {
+      if ("set" in step) {
+        for (const [name, v] of Object.entries(step.set)) c.set(name, value(v));
+        sample();
+      } else if ("pulse" in step) {
+        for (const [name, n] of Object.entries(step.pulse)) {
+          c.set(name, 1);
+          pulses.push({ at: w.time - t0 + Math.max(1, ticks(n)), name, value: 0 });
+        }
+        sample();
+      } else if ("press" in step) {
+        for (const name of Array.isArray(step.press) ? step.press : [step.press]) c.press(name);
+        sample();
+      } else if ("wait" in step) {
+        const n = ticks(step.wait);
+        for (let k = 0; k < n; k++) yield* tick();
+      } else if ("settle" in step) {
+        const max = step.settle === true ? 400 : ticks(step.settle);
+        let k = 0;
+        while ((!w.idle || pulses.length > 0) && k < max) {
+          yield* tick();
+          k++;
+        }
+        if (!w.idle) return fail(s, `still changing after ${max} ticks (a clock never settles)`);
+      } else if ("measure" in step) {
+        const rises = [];
+        let highTicks = 0;
+        let prev = c.read(step.measure);
+        const total = ticks(step.ticks);
+        for (let k = 0; k < total; k++) {
+          yield* tick();
+          const v = c.read(step.measure);
+          if (v && !prev) rises.push(k);
+          if (v) highTicks++;
+          prev = v;
+        }
+        const period = rises.length >= 2 ? (rises[rises.length - 1] - rises[0]) / (rises.length - 1) : 0;
+        const high = rises.length ? highTicks / rises.length : highTicks ? total : 0;
+        const m = { pulses: rises.length, period, high };
+        if (out.notes.length < 40)
+          out.notes.push(
+            `${step.measure}: ${m.pulses} pulses in ${total} ticks` + (m.pulses >= 2 ? `, period ${round(m.period)}` : "") + (m.pulses ? `, high ${round(m.high)} ticks each` : "")
+          );
+        for (const [k, want] of Object.entries(step.expect ?? {})) {
+          const got = m[k];
+          if (Math.abs(got - want) > 0.01)
+            return fail(s, `${step.measure} ${k} is ${round(got)}, expected ${want}`);
+        }
+      } else if ("expect" in step) {
+        if (step.within !== void 0) {
+          const within = ticks(step.within);
+          let k = 0;
+          let wrong = check(step.expect);
+          while (wrong && k < within) {
+            yield* tick();
+            k++;
+            wrong = check(step.expect);
+          }
+          if (wrong) return fail(s, `not within ${within} ticks: ${wrong}`);
+          if (out.notes.length < 40) out.notes.push(`${label(step.expect)} after ${k} ticks`);
+        } else {
+          let wrong = check(step.expect);
+          if (wrong) return fail(s, wrong);
+          const hold = ticks(step.for ?? 0);
+          for (let k = 0; k < hold; k++) {
+            yield* tick();
+            wrong = check(step.expect);
+            if (wrong) return fail(s, `held ${k} ticks, then ${wrong}`);
+          }
+        }
+      } else if ("log" in step) {
+        const names = Array.isArray(step.log) ? step.log : [step.log];
+        if (out.notes.length < 40)
+          out.notes.push(`t=${w.time - t0}: ${names.map((n) => `${n}=${c.read(n)}`).join(", ")}`);
+      } else if ("use" in step) {
+        w.use(c.local(step.use));
+      } else if ("place" in step) {
+        const b = step.place.block;
+        w.place(c.local(step.place.at), b.includes(":") ? b : `minecraft:${b}`);
+      } else if ("break" in step) {
+        w.breakBlock(c.local(step.break));
+      } else {
+        return fail(s, `unknown step ${stepName(step)}`);
+      }
+    } catch (error) {
+      return fail(s, error instanceof Error ? error.message : String(error));
+    }
+  }
+  return null;
+}
+var exprCache = /* @__PURE__ */ new Map();
+function expr(src) {
+  let e = exprCache.get(src);
+  if (!e) {
+    e = new Expr(src);
+    if (exprCache.size > 500) exprCache.clear();
+    exprCache.set(src, e);
+  }
+  return e;
+}
+function round(n) {
+  return Number.isInteger(n) ? String(n) : n.toFixed(2);
+}
+function label(e) {
+  return typeof e === "string" ? e : Object.entries(e).map(([k, v]) => `${k}=${String(v)}`).join(", ");
+}
+function runTest(c, test, start, deadline = Infinity) {
+  const result = {
+    name: test.name,
+    ok: true,
+    cases: 0,
+    failed: 0,
+    failures: [],
+    notes: [],
+    events: [],
+    ticks: 0
+  };
+  const cases = testCases(test);
+  for (const vars of cases) {
+    c.world.restore(start);
+    const first = result.cases === 0;
+    const out = first && test.trace?.length ? { notes: result.notes, trace: {} } : { notes: first ? result.notes : [] };
+    const eventsBefore = c.world.events.length;
+    const t0 = c.world.time;
+    const gen = runCase(c, test, vars, out);
+    let failure = null;
+    let timedOut = false;
+    try {
+      let r = gen.next();
+      for (let n = 1; !r.done; n++) {
+        if ((n & 255) === 0 && Date.now() > deadline) {
+          timedOut = true;
+          break;
+        }
+        r = gen.next();
+      }
+      if (r.done) failure = r.value;
+    } catch (error) {
+      failure = {
+        tick: c.world.time - t0,
+        step: 0,
+        message: `the simulation stopped: ${error instanceof Error ? error.message : String(error)}`
+      };
+    }
+    if (timedOut) {
+      result.ok = false;
+      result.failed++;
+      result.failures.push({
+        tick: c.world.time - t0,
+        step: 0,
+        message: "ran out of time (the tests of one build may take 15 s): fewer cases or shorter waits"
+      });
+      break;
+    }
+    result.cases++;
+    result.ticks += c.world.time - t0;
+    if (first) {
+      if ("trace" in out && out.trace) result.trace = out.trace;
+      const o = c.origin;
+      for (const e of c.world.events.slice(eventsBefore))
+        if (NOTABLE.has(e.type) && result.events.length < 20)
+          result.events.push({
+            ...e,
+            tick: e.tick - t0,
+            pos: [e.pos[0] + o[0], e.pos[1] + o[1], e.pos[2] + o[2]]
+          });
+    }
+    if (failure) {
+      result.ok = false;
+      result.failed++;
+      if (result.failures.length < 5) result.failures.push(failure);
+    }
+  }
+  c.world.restore(start);
+  return result;
+}
+function runCircuit(world, spec, origin, opts = {}) {
+  const started = Date.now();
+  const circuit = new Circuit(world, spec, origin);
+  const t0 = world.time;
+  const report = {
+    errors: [...circuit.errors],
+    powerOn: { settled: false, ticks: 0 },
+    tests: [],
+    skipped: [],
+    ms: 0
+  };
+  try {
+    report.powerOn.settled = world.powerOn(spec.settleTicks ?? 1200);
+  } catch (error) {
+    report.errors.push(
+      `Power-on stopped: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+  report.powerOn.ticks = world.time - t0;
+  const tests = opts.tests ?? spec.tests ?? [];
+  if (report.errors.length === 0 && tests.length) {
+    const start = world.snapshot();
+    const deadline = started + (opts.budgetMs ?? 15e3);
+    for (const t of tests) {
+      if (Date.now() > deadline) {
+        report.skipped.push(t.name);
+        continue;
+      }
+      report.tests.push(runTest(circuit, t, start, deadline));
+    }
+    world.restore(start);
+  }
+  report.ms = Date.now() - started;
+  return { circuit, report };
+}
+function fmtVars(v) {
+  return v ? ` [${Object.entries(v).map(([k, n]) => `${k}=${n}`).join(", ")}]` : "";
+}
+function formatReport(r) {
+  const lines = [];
+  for (const e of r.errors) lines.push(`\u2717 ${e}`);
+  lines.push(
+    r.powerOn.settled ? `Power-on: the circuit rests after ${r.powerOn.ticks} ticks.` : `Power-on: still changing after ${r.powerOn.ticks} ticks \u2014 a clock, or something oscillating.`
+  );
+  const passed = r.tests.filter((t) => t.ok).length;
+  if (r.tests.length) lines.push(`Tests: ${passed}/${r.tests.length} passed (${r.ms} ms).`);
+  for (const t of r.tests) {
+    const cases = t.cases > 1 ? ` (${t.cases - t.failed}/${t.cases} cases)` : "";
+    lines.push(`${t.ok ? "\u2713" : "\u2717"} ${t.name}${cases}`);
+    for (const f of t.failures)
+      lines.push(`    step ${f.step + 1}, t=${f.tick}${fmtVars(f.vars)}: ${f.message}`);
+    if (t.failed > t.failures.length)
+      lines.push(`    \u2026and ${t.failed - t.failures.length} more failing cases`);
+    for (const n of t.notes.slice(0, 12)) lines.push(`    \xB7 ${n}`);
+    for (const [name, changes] of Object.entries(t.trace ?? {}))
+      lines.push(`    ~ ${name}: ${changes.map(([tick, v]) => `${v}@${tick}`).join(" ")}`);
+    for (const e of t.events.slice(0, 6))
+      lines.push(
+        `    ! ${e.type} at [${e.pos.join(", ")}] t=${e.tick}${e.detail ? ` (${e.detail})` : ""}`
+      );
+  }
+  if (r.skipped.length) lines.push(`Not run (time budget): ${r.skipped.join(", ")}`);
+  return lines.join("\n");
+}
+
+// packages/block-compiler/src/redstone.ts
+function worldFor(volume, catalog, opts = {}) {
+  return new World({
+    version: catalog.version.id,
+    size: [volume.sizeX, volume.sizeY, volume.sizeZ],
+    palette: volume.palette,
+    data: volume.data,
+    isFullCube: (n) => catalog.isFullCube(n),
+    defaults: {
+      piston_head: catalog.defaultProps("piston_head"),
+      moving_piston: catalog.defaultProps("moving_piston")
+    },
+    margin: opts.margin ?? 6,
+    ...opts.offset ? { offset: opts.offset } : {},
+    blockEntities: volume.blockEntities
+  });
+}
+function applyRedstoneShapes(volume, entries, catalog) {
+  const flagged = new Uint8Array(volume.palette.length);
+  let any = false;
+  entries.forEach((e, id) => {
+    if (e.flags & FLAG_REDSTONE && id < flagged.length) {
+      flagged[id] = 1;
+      any = true;
+    }
+  });
+  if (!any) return;
+  const world = worldFor(volume, catalog, { margin: 0 });
+  const { sizeX, sizeY, sizeZ } = volume;
+  const data = volume.data;
+  const updates = [];
+  let i = 0;
+  for (let y = 0; y < sizeY; y++)
+    for (let z3 = 0; z3 < sizeZ; z3++)
+      for (let x = 0; x < sizeX; x++, i++) {
+        if (!flagged[data[i]]) continue;
+        const id = world.placementState(world.index(x, y, z3));
+        updates.push([i, world.states.info(id).state]);
+      }
+  for (const [k, state] of updates) data[k] = volume.idFor(state);
+}
+function runBuildCircuit(volume, circuit, catalog) {
+  const world = worldFor(volume, catalog);
+  const { report } = runCircuit(world, circuit, volume.origin);
+  if (!report.powerOn.settled) return report;
+  const { sizeX, sizeY, sizeZ } = volume;
+  let i = 0;
+  const comparators = /* @__PURE__ */ new Map();
+  for (let y = 0; y < sizeY; y++)
+    for (let z3 = 0; z3 < sizeZ; z3++)
+      for (let x = 0; x < sizeX; x++, i++) {
+        const w = world.index(x, y, z3);
+        const state = world.displayState(w);
+        if (state !== volume.palette[volume.data[i]])
+          volume.data[i] = volume.idFor(state);
+        if (world.info(w).kind === K.COMPARATOR)
+          comparators.set(`${x},${y},${z3}`, world.comparatorOutputAt(w));
+      }
+  for (const be of volume.blockEntities) {
+    const key = be.pos.join(",");
+    const out = comparators.get(key);
+    if (out === void 0) continue;
+    be.data = { ...be.data, OutputSignal: out };
+    comparators.delete(key);
+  }
+  for (const [key, out] of comparators) {
+    if (out === 0) continue;
+    const pos = key.split(",").map(Number);
+    volume.blockEntities.push({ id: "minecraft:comparator", pos, data: { OutputSignal: out } });
+  }
+  return report;
 }
 
 // packages/block-compiler/src/noise.ts
@@ -2633,12 +6134,12 @@ var BlockResolver = class {
   }
   /** Every concrete block name a reference can produce (for masks and replace targets). */
   namesOf(ref, where, depth = 0) {
-    const parts = splitRef(ref);
-    if (!parts) {
+    const parts2 = splitRef(ref);
+    if (!parts2) {
       this.fail(where, `"${ref}" is not a valid block reference.`);
       return { names: [], states: [] };
     }
-    const entry = this.lookup(parts.key);
+    const entry = this.lookup(parts2.key);
     if (entry !== void 0 && depth < 8) {
       const refs = typeof entry === "string" ? [entry] : "mix" in entry ? Object.keys(entry.mix) : entry.gradient.blocks;
       const out = { names: [], states: [] };
@@ -2649,15 +6150,15 @@ var BlockResolver = class {
       }
       return out;
     }
-    const name = parts.key.replace(/^minecraft:/, "").toLowerCase();
+    const name = parts2.key.replace(/^minecraft:/, "").toLowerCase();
     const resolved2 = this.catalog.resolveName(name);
     if (!resolved2) {
       const r2 = this.catalog.normalize(name);
       this.fail(where, r2.ok ? `Unknown block "${name}".` : r2.error);
       return { names: [], states: [] };
     }
-    if (Object.keys(parts.props).length === 0) return { names: [resolved2], states: [] };
-    const r = this.catalog.normalize(`${resolved2}${propsString(parts.props)}`);
+    if (Object.keys(parts2.props).length === 0) return { names: [resolved2], states: [] };
+    const r = this.catalog.normalize(`${resolved2}${propsString(parts2.props)}`);
     if (!r.ok) {
       this.fail(where, r.error);
       return { names: [], states: [] };
@@ -2686,23 +6187,23 @@ var BlockResolver = class {
       this.fail(where, `palette reference "${ref}" is circular or too deeply nested.`);
       return SKIP;
     }
-    const parts = splitRef(ref);
-    if (!parts) {
+    const parts2 = splitRef(ref);
+    if (!parts2) {
       this.fail(
         where,
         `"${ref}" is not a valid block reference (expected name or name[prop=value]).`
       );
       return SKIP;
     }
-    const merged = { ...parts.props, ...strict };
-    const entry = this.lookup(parts.key);
+    const merged = { ...parts2.props, ...strict };
+    const entry = this.lookup(parts2.key);
     if (entry !== void 0) {
-      const ctx = `${where}${where ? " " : ""}(palette "${parts.key}")`;
+      const ctx = `${where}${where ? " " : ""}(palette "${parts2.key}")`;
       if (typeof entry === "string") return this.resolve(entry, merged, soft, ctx, depth + 1);
-      if ("mix" in entry) return this.mix(parts.key, entry, merged, soft, ctx, depth);
-      return this.gradient(parts.key, entry, merged, soft, ctx, depth);
+      if ("mix" in entry) return this.mix(parts2.key, entry, merged, soft, ctx, depth);
+      return this.gradient(parts2.key, entry, merged, soft, ctx, depth);
     }
-    return this.block(parts.key, merged, soft, where);
+    return this.block(parts2.key, merged, soft, where);
   }
   block(rawName, strict, soft, where) {
     const name = rawName.replace(/^minecraft:/, "").toLowerCase();
@@ -2792,6 +6293,9 @@ function chunkKey(cx, cy, cz) {
 var SparseVolume = class {
   chunks = /* @__PURE__ */ new Map();
   writes = 0;
+  /** Lowest and highest chunk layer allocated so far (for top-down column scans). */
+  minChunkY = Infinity;
+  maxChunkY = -Infinity;
   last = null;
   lastKey = -1;
   chunkAt(x, y, z3, create) {
@@ -2815,6 +6319,8 @@ var SparseVolume = class {
         prov: new Uint16Array(CHUNK * CHUNK * CHUNK)
       };
       this.chunks.set(key, chunk);
+      if (cy < this.minChunkY) this.minChunkY = cy;
+      if (cy > this.maxChunkY) this.maxChunkY = cy;
     }
     if (chunk) {
       this.last = chunk;
@@ -2829,6 +6335,11 @@ var SparseVolume = class {
     const c = this.chunkAt(x, y, z3, false);
     if (!c) return 0;
     return c.ids[(y & MASK) << 8 | (z3 & MASK) << 4 | x & MASK];
+  }
+  getProv(x, y, z3) {
+    const c = this.chunkAt(x, y, z3, false);
+    if (!c) return 0;
+    return c.prov[(y & MASK) << 8 | (z3 & MASK) << 4 | x & MASK];
   }
   set(x, y, z3, id, prov) {
     const c = this.chunkAt(x, y, z3, id !== 0);
@@ -2905,7 +6416,15 @@ var CompileContext = class {
   warnings = /* @__PURE__ */ new Set();
   blockEntities = /* @__PURE__ */ new Map();
   seed;
+  /** Provenance ids of operations that shape the ground (terrain, flatten). */
+  groundProvs = /* @__PURE__ */ new Set();
+  /** Spec bounds of the site the build stands on, when there is one. */
+  siteBounds = null;
+  /** Block entities of the site (kept while the block they belong to stays). */
+  siteEntities = /* @__PURE__ */ new Map();
   outOfRange = 0;
+  classes = [];
+  columnCache = /* @__PURE__ */ new Map();
   error(message) {
     this.resolver.errors.push(this.where ? `${this.where}: ${message}` : message);
   }
@@ -2917,9 +6436,9 @@ var CompileContext = class {
     return this.resolver.source(ref, this.where, soft);
   }
   /** Make a provenance entry for the current operation path. */
-  enterProv(label) {
+  enterProv(label2) {
     if (this.provTable.length >= 65535) return 65535;
-    this.provTable.push(label);
+    this.provTable.push(label2);
     this.prov = this.provTable.length - 1;
     return this.prov;
   }
@@ -2961,6 +6480,68 @@ var CompileContext = class {
       }
     }
     this.volume.set(wx, wy, wz, id, this.prov);
+  }
+  /** Write a block source at a world position (no transform; honours the mask). */
+  putWorldSource(wx, wy, wz, src) {
+    const id = src.id >= 0 ? src.id : src.id === -1 ? src.pick(wx, wy, wz) : -2;
+    if (id >= 0) this.putWorld(wx, wy, wz, id);
+  }
+  classOf(id) {
+    let c = this.classes[id];
+    if (c === void 0) {
+      c = terrainClass(this.palette.get(id).name);
+      this.classes[id] = c;
+    }
+    return c;
+  }
+  /** Top and bottom y worth scanning in a column. */
+  scanRange() {
+    if (this.siteBounds) return [this.siteBounds.max[1], this.siteBounds.min[1]];
+    const v = this.volume;
+    if (v.maxChunkY === -Infinity) return null;
+    return [v.maxChunkY * 16 + 15, v.minChunkY * 16];
+  }
+  /**
+   * World y of the topmost ground block of a column: the site's natural ground and what terrain
+   * or flatten operations made. Buildings, trees, plants and water are not ground.
+   */
+  groundAt(wx, wz) {
+    const key = (wx + 32768) * 65536 + (wz + 32768);
+    const hit = this.columnCache.get(key);
+    if (hit && hit.writes === this.volume.writes) return hit.ground;
+    const range = this.scanRange();
+    let ground = null;
+    if (range) {
+      for (let y = range[0]; y >= range[1]; y--) {
+        const id = this.volume.get(wx, y, wz);
+        if (id === 0 || this.classOf(id) !== "ground") continue;
+        const p = this.volume.getProv(wx, y, wz);
+        if (p === 0 || this.groundProvs.has(p)) {
+          ground = y;
+          break;
+        }
+      }
+    }
+    this.columnCache.set(key, { writes: this.volume.writes, ground });
+    return ground;
+  }
+  /** World y of the topmost block of any kind in a column. */
+  surfaceAt(wx, wz) {
+    const range = this.scanRange();
+    if (!range) return null;
+    for (let y = range[0]; y >= range[1]; y--) if (this.volume.get(wx, y, wz) !== 0) return y;
+    return null;
+  }
+  /** World y of the water (or lava) surface above the ground of a column, if any. */
+  waterAt(wx, wz) {
+    const range = this.scanRange();
+    if (!range) return null;
+    const ground = this.groundAt(wx, wz) ?? range[1] - 1;
+    for (let y = range[0]; y > ground; y--) {
+      const id = this.volume.get(wx, y, wz);
+      if (id !== 0 && this.classOf(id) === "liquid") return y;
+    }
+    return null;
   }
   /** Run fn with an extra local transform (child -> current). */
   withTransform(local, fn) {
@@ -4148,8 +7729,10 @@ function scatter(ctx, op, placeComponent) {
       for (let y = y1; y >= y0; y--) {
         const id = ctx.get(x, y, z3);
         if (id === 0) continue;
-        if (ctx.get(x, y + 1, z3) !== 0) break;
         const name = ctx.palette.get(id).name;
+        if (isReplaceablePlant(name)) continue;
+        const above = ctx.get(x, y + 1, z3);
+        if (above !== 0 && !isReplaceablePlant(ctx.palette.get(above).name)) break;
         if (on ? on.has(name) : !/leaves|water|lava|glass/.test(name)) targets.push([x, y + 1, z3]);
         break;
       }
@@ -4164,6 +7747,225 @@ function scatter(ctx, op, placeComponent) {
     else if (op.component) placeComponent(op.component, [x, y, z3], Math.floor(h * 4) * 90);
     else if (op.tree)
       tree(ctx, { type: "tree", kind: op.tree, at: [x, y, z3], seed: Math.floor(h * 1e6) });
+  }
+}
+
+// packages/block-compiler/src/ops/ground.ts
+function worldRect(ctx, from, to) {
+  const a = ctx.toWorld(from[0], 0, from[2]);
+  const b = ctx.toWorld(to[0], 0, to[2]);
+  return {
+    x0: Math.min(a[0], b[0]),
+    x1: Math.max(a[0], b[0]),
+    z0: Math.min(a[2], b[2]),
+    z1: Math.max(a[2], b[2])
+  };
+}
+function outside(r, circle, x, z3) {
+  if (!circle) {
+    const dx = Math.max(r.x0 - x, 0, x - r.x1);
+    const dz = Math.max(r.z0 - z3, 0, z3 - r.z1);
+    return Math.hypot(dx, dz);
+  }
+  const cx = (r.x0 + r.x1) / 2;
+  const cz = (r.z0 + r.z1) / 2;
+  const rx = (r.x1 - r.x0) / 2 + 0.5;
+  const rz = (r.z1 - r.z0) / 2 + 0.5;
+  const n = Math.hypot((x - cx) / rx, (z3 - cz) / rz);
+  return n <= 1 ? 0 : (n - 1) * Math.min(rx, rz);
+}
+function smoothstep(t) {
+  const c = Math.min(1, Math.max(0, t));
+  return c * c * (3 - 2 * c);
+}
+function mostCommon(counts) {
+  let best = null;
+  let n = 0;
+  for (const [id, c] of counts)
+    if (c > n) {
+      best = id;
+      n = c;
+    }
+  return best;
+}
+function groundLayers(ctx, op, columns) {
+  const depth = op.depth ?? 3;
+  const tops = /* @__PURE__ */ new Map();
+  const subs = /* @__PURE__ */ new Map();
+  const cores = /* @__PURE__ */ new Map();
+  const bump = (m, id) => {
+    if (id !== 0 && ctx.classOf(id) === "ground") m.set(id, (m.get(id) ?? 0) + 1);
+  };
+  const step = Math.max(1, Math.floor(columns.length / 400));
+  for (let i = 0; i < columns.length; i += step) {
+    const [x, z3, g] = columns[i];
+    if (g === null) continue;
+    bump(tops, ctx.volume.get(x, g, z3));
+    for (let d = 1; d <= Math.max(1, depth); d++) bump(subs, ctx.volume.get(x, g - d, z3));
+    bump(cores, ctx.volume.get(x, g - depth - 3, z3));
+  }
+  const pick = (ref, found, fallback) => {
+    if (ref) return ctx.source(ref);
+    const id = mostCommon(found);
+    return id !== null ? { id } : ctx.source(fallback);
+  };
+  return {
+    surface: pick(op.surface, tops, "grass_block"),
+    sub: pick(op.subsurface, subs, "dirt"),
+    core: pick(op.core, cores, "stone"),
+    depth
+  };
+}
+function topOfScan(ctx) {
+  if (ctx.siteBounds) return ctx.siteBounds.max[1];
+  const v = ctx.volume;
+  return v.maxChunkY === -Infinity ? 0 : v.maxChunkY * 16 + 15;
+}
+function bottomOfScan(ctx) {
+  if (ctx.siteBounds) return ctx.siteBounds.min[1];
+  const v = ctx.volume;
+  return v.minChunkY === Infinity ? -1 : v.minChunkY * 16;
+}
+function flatten(ctx, op) {
+  ctx.groundProvs.add(ctx.prov);
+  const r = worldRect(ctx, op.from, op.to);
+  const circle = op.shape === "circle";
+  const blend = op.blend ?? 4;
+  const columns = [];
+  const inside = [];
+  for (let z3 = r.z0 - blend; z3 <= r.z1 + blend; z3++)
+    for (let x = r.x0 - blend; x <= r.x1 + blend; x++) {
+      const d = outside(r, circle, x, z3);
+      if (d > blend + 0.5 || blend === 0 && d > 0) continue;
+      const g = ctx.groundAt(x, z3);
+      columns.push([x, z3, g]);
+      if (d === 0 && g !== null) inside.push(g);
+    }
+  if (!columns.length) return;
+  const ty = ctx.transform.ty;
+  let level;
+  if (op.level !== void 0) level = op.level + ty;
+  else if (inside.length) {
+    inside.sort((a, b) => a - b);
+    level = inside[Math.floor(inside.length / 2)] + 1;
+  } else level = ty;
+  const layers2 = groundLayers(ctx, op, columns);
+  const bottom = bottomOfScan(ctx);
+  const top = topOfScan(ctx);
+  const covered = (id) => id !== 0 && /^(grass_block|mycelium|podzol|dirt_path|grass_path)$/.test(ctx.palette.get(id).name);
+  for (const [x, z3, g0] of columns) {
+    const d = outside(r, circle, x, z3);
+    const g = g0 ?? bottom - 1;
+    const w = d === 0 ? 1 : smoothstep(1 - d / (blend + 1));
+    const target = Math.round(g + (level - 1 - g) * w);
+    const fillAt = (y) => {
+      const src = y === target ? layers2.surface : y > target - layers2.depth ? layers2.sub : layers2.core;
+      ctx.putWorldSource(x, y, z3, src);
+    };
+    if (target > g) {
+      if (g0 !== null && layers2.depth > 0 && covered(ctx.volume.get(x, g, z3)))
+        ctx.putWorldSource(x, g, z3, layers2.sub);
+      for (let y = Math.max(g + 1, bottom); y <= target; y++) fillAt(y);
+    } else if (target < g) {
+      for (let y = g + 2; y >= g + 1; y--) {
+        const id = ctx.volume.get(x, y, z3);
+        if (id !== 0 && isReplaceablePlant(ctx.palette.get(id).name)) ctx.putWorld(x, y, z3, 0);
+      }
+      for (let y = g; y > target; y--) ctx.putWorld(x, y, z3, 0);
+      ctx.putWorldSource(x, target, z3, layers2.surface);
+    }
+    if (d === 0 && op.clear !== false) {
+      for (let y = top; y > target; y--)
+        if (ctx.volume.get(x, y, z3) !== 0) ctx.putWorld(x, y, z3, 0);
+    }
+  }
+}
+function foundation(ctx, op) {
+  const r = worldRect(ctx, op.from, op.to);
+  const circle = op.shape === "circle";
+  const topY = Math.max(op.from[1], op.to[1]) + ctx.transform.ty;
+  const depth = op.depth ?? 1;
+  const src = ctx.source(op.block);
+  const spacing = op.spacing ?? 4;
+  const isPillar = (x, z3) => {
+    if (op.style !== "pillars") return true;
+    const ex = x === r.x0 || x === r.x1;
+    const ez = z3 === r.z0 || z3 === r.z1;
+    if (circle) {
+      const rim = outside(r, true, x, z3) === 0 && outside({ x0: r.x0 + 1, x1: r.x1 - 1, z0: r.z0 + 1, z1: r.z1 - 1 }, true, x, z3) > 0;
+      return rim && (Math.abs(x - r.x0) + Math.abs(z3 - r.z0)) % spacing === 0;
+    }
+    if (ex && ez) return true;
+    if (ez) return (x - r.x0) % spacing === 0;
+    if (ex) return (z3 - r.z0) % spacing === 0;
+    return false;
+  };
+  const columns = [];
+  let floating = 0;
+  for (let z3 = r.z0; z3 <= r.z1; z3++)
+    for (let x = r.x0; x <= r.x1; x++) {
+      if (circle && outside(r, true, x, z3) > 0) continue;
+      if (!isPillar(x, z3)) continue;
+      const g = ctx.groundAt(x, z3);
+      if (g === null) {
+        floating++;
+        continue;
+      }
+      columns.push([x, z3, g]);
+    }
+  for (const [x, z3, g] of columns) {
+    for (let y = g - depth + 1; y <= topY; y++) ctx.putWorldSource(x, y, z3, src);
+  }
+  if (floating)
+    ctx.warn(
+      `foundation: no ground under ${floating} column(s); they were left empty (ground comes from the site or from terrain/flatten).`
+    );
+}
+function path(ctx, op) {
+  ctx.groundProvs.add(ctx.prov);
+  const name = op.block ?? ["dirt_path", "grass_path", "gravel"].find((n) => ctx.catalog.has(n));
+  const src = ctx.source(name ?? "gravel");
+  const edge = op.edge ? ctx.source(op.edge) : null;
+  const half = (op.width ?? 3) / 2;
+  const pts = op.points.map(([x, z3]) => {
+    const w = ctx.toWorld(x, 0, z3);
+    return [w[0], w[2]];
+  });
+  const dist = /* @__PURE__ */ new Map();
+  for (let i = 0; i + 1 < pts.length; i++) {
+    const [ax, az] = pts[i];
+    const [bx, bz] = pts[i + 1];
+    const len = Math.hypot(bx - ax, bz - az);
+    const minX = Math.floor(Math.min(ax, bx) - half);
+    const maxX = Math.ceil(Math.max(ax, bx) + half);
+    const minZ = Math.floor(Math.min(az, bz) - half);
+    const maxZ = Math.ceil(Math.max(az, bz) + half);
+    for (let z3 = minZ; z3 <= maxZ; z3++)
+      for (let x = minX; x <= maxX; x++) {
+        const t = len === 0 ? 0 : Math.max(0, Math.min(1, ((x - ax) * (bx - ax) + (z3 - az) * (bz - az)) / (len * len)));
+        const d = Math.hypot(x - (ax + t * (bx - ax)), z3 - (az + t * (bz - az)));
+        if (d > half) continue;
+        const key = (x + 32768) * 65536 + (z3 + 32768);
+        const prev = dist.get(key);
+        if (!prev || d < prev.d) dist.set(key, { x, z: z3, d });
+      }
+  }
+  const cells = [];
+  for (const { x, z: z3, d } of dist.values()) {
+    if (ctx.waterAt(x, z3) !== null) continue;
+    const g = ctx.groundAt(x, z3);
+    if (g !== null) cells.push([x, z3, g, d]);
+  }
+  const seed = ctx.seed ^ 2471;
+  for (const [x, z3, g, d] of cells) {
+    const atEdge = edge && d > half - 1 && hash3(x, g, z3, seed) < 0.6;
+    ctx.putWorldSource(x, g, z3, atEdge ? edge : src);
+    if (op.clear !== false) {
+      for (let y = g + 1; y <= g + 2; y++) {
+        const id = ctx.volume.get(x, y, z3);
+        if (id !== 0 && isReplaceablePlant(ctx.palette.get(id).name)) ctx.putWorld(x, y, z3, 0);
+      }
+    }
   }
 }
 
@@ -4208,6 +8010,22 @@ function compileBuildSpec(input, options = {}) {
     paletteDefs,
     spec.components ?? {}
   );
+  const site = spec.site ? options.site : void 0;
+  if (spec.site && !site)
+    throw new BuildSpecError([
+      `site: "${spec.site.id}" is not available. Import it again (import_site) or remove "site".`
+    ]);
+  let siteStates = [];
+  if (site) {
+    if (spec.size)
+      throw new BuildSpecError([`size: a build on a site takes the site's size; remove "size".`]);
+    const siteVersion = resolveVersion(site.version);
+    if (siteVersion && getCatalog(siteVersion).version.dataset !== catalog.version.dataset)
+      throw new BuildSpecError([
+        `minecraftVersion: this site comes from Minecraft ${site.version}; set "minecraftVersion": "${site.version}" so the blocks match the world.`
+      ]);
+    siteStates = loadSite(ctx, site);
+  }
   const runner = new OperationRunner(ctx, options.scriptTimeoutMs ?? 2e4);
   try {
     spec.operations.forEach((op, i) => runner.run(op, `operations[${i}]`, []));
@@ -4224,7 +8042,32 @@ function compileBuildSpec(input, options = {}) {
   completeMultiBlocks(sparse, palette);
   const { volume, clipped } = finalize(sparse, palette, spec, ctx);
   applyAutoStates(volume, palette.entries, catalog);
+  applyRedstoneShapes(volume, palette.entries, catalog);
+  const circuit = spec.circuit ? runBuildCircuit(volume, spec.circuit, catalog) : void 0;
   const compact = volume.compact();
+  let siteDiff;
+  if (site) {
+    const changed = new Uint8Array(compact.data.length);
+    let changes = 0;
+    for (let i = 0; i < changed.length; i++) {
+      if (compact.palette[compact.data[i]] !== siteStates[site.data[i]]) {
+        changed[i] = 1;
+        changes++;
+      }
+    }
+    for (const be of ctx.blockEntities.values()) {
+      const i = compact.index(
+        be.x - compact.origin[0],
+        be.y - compact.origin[1],
+        be.z - compact.origin[2]
+      );
+      if (i >= 0 && i < changed.length && !changed[i]) {
+        changed[i] = 1;
+        changes++;
+      }
+    }
+    siteDiff = { changed, changes };
+  }
   const warnings = [...resolver.notes, ...ctx.warnings];
   for (const key of Object.keys(spec.palette ?? {})) {
     if (catalog.has(key)) {
@@ -4235,13 +8078,14 @@ function compileBuildSpec(input, options = {}) {
   }
   if (clipped > 0) {
     warnings.push(
-      `${clipped} block(s) fell outside the declared size ${spec.size?.x}\xD7${spec.size?.y}\xD7${spec.size?.z} and were dropped.`
+      site ? `${clipped} block(s) fell outside the site and were dropped: import a bigger area to build there.` : `${clipped} block(s) fell outside the declared size ${spec.size?.x}\xD7${spec.size?.y}\xD7${spec.size?.z} and were dropped.`
     );
   }
   if (ctx.outOfRangeWrites > 0)
     warnings.push(`${ctx.outOfRangeWrites} block(s) were beyond \xB130000 and were skipped.`);
   const counts = compact.counts();
-  if (counts.size === 0) warnings.push("The build is empty: no operation placed any block.");
+  if (!site && counts.size === 0)
+    warnings.push("The build is empty: no operation placed any block.");
   const anchor = spec.anchor ? [
     spec.anchor[0] - compact.origin[0],
     spec.anchor[1] - compact.origin[1],
@@ -4263,8 +8107,50 @@ function compileBuildSpec(input, options = {}) {
     blockCount: [...counts.values()].reduce((a, b) => a + b, 0),
     palette: [...counts.keys()].sort(),
     anchor,
-    compileMs: Math.round(performance.now() - started)
+    compileMs: Math.round(performance.now() - started),
+    ...circuit ? { circuit } : {},
+    ...siteDiff ? { site: siteDiff } : {}
   };
+}
+function loadSite(ctx, site) {
+  const unknown = /* @__PURE__ */ new Set();
+  const ids = site.palette.map((state, i2) => {
+    if (i2 === 0 || /^minecraft:(cave_|void_)?air$/.test(state)) return 0;
+    let n = ctx.catalog.normalize(state);
+    if (!n.ok) n = ctx.catalog.normalize(blockNameOf(state));
+    if (!n.ok) {
+      unknown.add(blockNameOf(state));
+      n = ctx.catalog.normalize("stone");
+    }
+    return n.ok ? ctx.palette.addRaw(n.name, n.props, 0) : 0;
+  });
+  if (unknown.size)
+    ctx.warnings.add(
+      `The site has blocks this version doesn't know, shown as stone: ${[...unknown].slice(0, 8).join(", ")}.`
+    );
+  const [sx, sy, sz] = site.size;
+  const [mx, my, mz] = site.min;
+  let i = 0;
+  for (let y = 0; y < sy; y++)
+    for (let z3 = 0; z3 < sz; z3++)
+      for (let x = 0; x < sx; x++, i++) {
+        const id = ids[site.data[i]];
+        if (id !== 0) ctx.volume.set(mx + x, my + y, mz + z3, id, 0);
+      }
+  ctx.siteBounds = { min: [mx, my, mz], max: [mx + sx - 1, my + sy - 1, mz + sz - 1] };
+  for (const be of site.blockEntities) {
+    const [x, y, z3] = [mx + be.pos[0], my + be.pos[1], mz + be.pos[2]];
+    const id = ids[site.data[be.pos[0] + sx * (be.pos[2] + sz * be.pos[1])]] ?? 0;
+    if (id === 0) continue;
+    ctx.siteEntities.set(`${x},${y},${z3}`, {
+      x,
+      y,
+      z: z3,
+      name: ctx.palette.get(id).name,
+      data: be.data
+    });
+  }
+  return ids.map((id) => ctx.palette.get(id).state);
 }
 function dedupeWarnings(list2) {
   const out = [...new Set(list2)];
@@ -4278,6 +8164,9 @@ function finalize(sparse, palette, spec, ctx) {
   if (spec.size) {
     min = [0, 0, 0];
     max = [spec.size.x - 1, spec.size.y - 1, spec.size.z - 1];
+  } else if (ctx.siteBounds) {
+    min = ctx.siteBounds.min;
+    max = ctx.siteBounds.max;
   } else {
     const b = sparse.bounds();
     if (!b) return { volume: new BlockVolume(1, 1, 1, [0, 0, 0], states), clipped: 0 };
@@ -4308,6 +8197,16 @@ function finalize(sparse, palette, spec, ctx) {
     prov[i] = p;
   });
   const blockEntities = [];
+  for (const [key, be] of ctx.siteEntities) {
+    if (ctx.blockEntities.has(key)) continue;
+    const lx = be.x - min[0];
+    const ly = be.y - min[1];
+    const lz = be.z - min[2];
+    if (lx < 0 || ly < 0 || lz < 0 || lx >= sx || ly >= sy || lz >= sz) continue;
+    const id = data[lx + sx * (lz + sz * ly)];
+    if (id === 0 || palette.get(id).name !== be.name) continue;
+    blockEntities.push({ id: `minecraft:${be.name}`, pos: [lx, ly, lz], data: be.data });
+  }
   for (const be of ctx.blockEntities.values()) {
     const lx = be.x - min[0];
     const ly = be.y - min[1];
@@ -4329,18 +8228,18 @@ var OperationRunner = class {
     this.scriptTimeoutMs = scriptTimeoutMs;
   }
   depth = 0;
-  run(op, path, trail) {
+  run(op, path2, trail) {
     const ctx = this.ctx;
-    const label = op.id ? `${path} (${op.id})` : path;
+    const label2 = op.id ? `${path2} (${op.id})` : path2;
     const prevWhere = ctx.where;
     const prevMask = ctx.mask;
-    ctx.where = op.id ? `${path} "${op.id}"` : path;
+    ctx.where = op.id ? `${path2} "${op.id}"` : path2;
     if (op.mask) ctx.mask = ctx.parseMask(op.mask);
     try {
       if (op.type === "group") {
         this.transformed(op, Transform.translate(...op.offset ?? [0, 0, 0]), () => {
           op.operations.forEach(
-            (child, i) => this.run(child, `${path}.operations[${i}]`, [...trail, label])
+            (child, i) => this.run(child, `${path2}.operations[${i}]`, [...trail, label2])
           );
         });
         return;
@@ -4353,17 +8252,17 @@ var OperationRunner = class {
           );
           return;
         }
-        this.placeComponent(op.component, comp, op, trail, label);
+        this.placeComponent(op.component, comp, op, trail, label2);
         return;
       }
-      ctx.enterProv([...trail, label].join(" > "));
+      ctx.enterProv([...trail, label2].join(" > "));
       this.leaf(op);
     } finally {
       ctx.where = prevWhere;
       ctx.mask = prevMask;
     }
   }
-  placeComponent(name, comp, op, trail, label) {
+  placeComponent(name, comp, op, trail, label2) {
     if (this.depth > 16) {
       this.ctx.error(`component "${name}" nests too deeply (recursive components?).`);
       return;
@@ -4374,7 +8273,7 @@ var OperationRunner = class {
         comp.operations.forEach(
           (child, i) => this.run(child, `components.${name}.operations[${i}]`, [
             ...trail,
-            `${label} place ${name}`
+            `${label2} place ${name}`
           ])
         );
       });
@@ -4398,13 +8297,48 @@ var OperationRunner = class {
     const step = op.repeat?.offset ?? [0, 0, 0];
     for (const sym of variants) {
       for (let i = 0; i < count; i++) {
-        const copy = sym.compose(Transform.translate(step[0] * i, step[1] * i, step[2] * i)).compose(local);
+        let copy = sym.compose(Transform.translate(step[0] * i, step[1] * i, step[2] * i)).compose(local);
+        if (op.ground) copy = this.onGround(copy, op.at?.[1] ?? 0);
         this.ctx.withTransform(copy, body);
       }
     }
   }
+  /** Shift a copy so its origin stands `dy` above the ground under it. */
+  onGround(copy, dy) {
+    const world = this.ctx.transform.compose(copy);
+    const g = this.ctx.groundAt(world.tx, world.tz);
+    if (g === null) {
+      this.ctx.warn("ground: true found no ground below; the copy kept its y.");
+      return copy;
+    }
+    return Transform.translate(0, g + 1 + dy - world.ty, 0).compose(copy);
+  }
+  /** Local y that stands `dy` above the ground at local x/z (null when there is no ground). */
+  groundY(x, z3, dy) {
+    const [wx, , wz] = this.ctx.toWorld(x, 0, z3);
+    const g = this.ctx.groundAt(wx, wz);
+    return g === null ? null : g + 1 + dy - this.ctx.transform.ty;
+  }
   leaf(op) {
     const ctx = this.ctx;
+    if ((op.type === "tree" || op.type === "blocks") && op.ground) {
+      let missing = 0;
+      if (op.type === "tree") {
+        const y = this.groundY(op.at[0], op.at[2], op.at[1]);
+        if (y === null) missing++;
+        tree(ctx, { ...op, at: [op.at[0], y ?? op.at[1], op.at[2]] });
+      } else {
+        const at = op.at.map(([x, y, z3]) => {
+          const gy = this.groundY(x, z3, y);
+          if (gy === null) missing++;
+          return [x, gy ?? y, z3];
+        });
+        blocks(ctx, { ...op, at });
+      }
+      if (missing)
+        ctx.warn(`ground: true found no ground under ${missing} position(s); they kept their y.`);
+      return;
+    }
     switch (op.type) {
       case "box":
         return box(ctx, op);
@@ -4429,7 +8363,14 @@ var OperationRunner = class {
       case "layers":
         return layers(ctx, op);
       case "terrain":
+        ctx.groundProvs.add(ctx.prov);
         return terrain(ctx, op);
+      case "flatten":
+        return flatten(ctx, op);
+      case "foundation":
+        return foundation(ctx, op);
+      case "path":
+        return path(ctx, op);
       case "tree":
         return tree(ctx, op);
       case "scatter":
@@ -4466,6 +8407,9 @@ var OperationRunner = class {
     const shape = (type) => (params) => runOp({ ...params, type });
     const api = {
       args,
+      globals: {
+        SITE: ctx.siteBounds ? { min: ctx.siteBounds.min, max: ctx.siteBounds.max } : null
+      },
       set: (x, y, z3, block) => {
         ctx.put(Math.round(x), Math.round(y), Math.round(z3), ctx.source(String(block)));
       },
@@ -4493,10 +8437,28 @@ var OperationRunner = class {
       randInt: (a, b) => a + Math.floor(rnd() * (b - a + 1)),
       pick: (list2) => list2[Math.floor(rnd() * list2.length)],
       chance: (p) => rnd() < p,
+      ground: (x, z3) => {
+        const [wx, , wz] = ctx.toWorld(Math.round(x), 0, Math.round(z3));
+        const g = ctx.groundAt(wx, wz);
+        return g === null ? null : g - ctx.transform.ty;
+      },
+      surface: (x, z3) => {
+        const [wx, , wz] = ctx.toWorld(Math.round(x), 0, Math.round(z3));
+        const g = ctx.surfaceAt(wx, wz);
+        return g === null ? null : g - ctx.transform.ty;
+      },
+      water: (x, z3) => {
+        const [wx, , wz] = ctx.toWorld(Math.round(x), 0, Math.round(z3));
+        const g = ctx.waterAt(wx, wz);
+        return g === null ? null : g - ctx.transform.ty;
+      },
+      flatten: shape("flatten"),
+      foundation: shape("foundation"),
+      path: shape("path"),
       noise: (x, y = 0, z3 = 0) => perlin.noise(x, y, z3),
       fbm: (x, y = 0, z3 = 0, octaves = 4) => perlin.fbm(x, y, z3, octaves),
-      log: (...parts) => {
-        if (logs++ < 20) ctx.warnings.add(`${where} log: ${parts.map(String).join(" ")}`);
+      log: (...parts2) => {
+        if (logs++ < 20) ctx.warnings.add(`${where} log: ${parts2.map(String).join(" ")}`);
       }
     };
     try {
@@ -4511,7 +8473,18 @@ var OperationRunner = class {
 
 // packages/block-compiler/src/nodeScriptRunner.ts
 import vm from "node:vm";
-var PRIMITIVE_CALLS = ["set", "get", "rand", "randInt", "chance", "noise", "fbm"];
+var PRIMITIVE_CALLS = [
+  "set",
+  "get",
+  "rand",
+  "randInt",
+  "chance",
+  "noise",
+  "fbm",
+  "ground",
+  "surface",
+  "water"
+];
 function describe(thrown) {
   try {
     const message = thrown && typeof thrown === "object" && "message" in thrown ? thrown.message : thrown;
@@ -4550,7 +8523,7 @@ var nodeScriptRunner = (code, api, timeoutMs) => {
   };
   const context = vm.createContext({}, { microtaskMode: "afterEvaluate" });
   const install = vm.runInContext(
-    `(function (bridge, FAIL, primitiveJson, namesJson, argsJson) {
+    `(function (bridge, FAIL, primitiveJson, namesJson, argsJson, globalsJson) {
       'use strict';
       const primitive = JSON.parse(primitiveJson);
       const call = (name, args) => {
@@ -4567,6 +8540,7 @@ var nodeScriptRunner = (code, api, timeoutMs) => {
       globalThis.pick = (list) => list[Math.floor(globalThis.rand() * list.length)];
       globalThis.log = (...parts) => call('log', parts.map(String));
       globalThis.args = JSON.parse(argsJson);
+      for (const [k, v] of Object.entries(JSON.parse(globalsJson))) globalThis[k] = v;
       delete globalThis.Atomics;
       delete globalThis.SharedArrayBuffer;
       delete globalThis.WebAssembly;
@@ -4581,7 +8555,8 @@ var nodeScriptRunner = (code, api, timeoutMs) => {
     FAIL,
     JSON.stringify(PRIMITIVE_CALLS),
     JSON.stringify(names),
-    JSON.stringify(api.args ?? {})
+    JSON.stringify(api.args ?? {}),
+    JSON.stringify(api.globals ?? {})
   );
   context.__source = code;
   const outcome = (() => {
@@ -4675,6 +8650,449 @@ function materialListCsv(items, displayName) {
 `;
 }
 
+// packages/formats/src/snbt.ts
+var TYPED_NUMBER = /^(-?\d+(?:\.\d+)?)([bslfdBSLFD])$/;
+var BARE_KEY = /^[A-Za-z0-9._+-]+$/;
+function quote(s) {
+  return `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n")}"`;
+}
+function jsonToSnbt(value) {
+  if (typeof value === "boolean") return value ? "1b" : "0b";
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) return "0";
+    return Number.isInteger(value) ? String(value) : `${value}d`;
+  }
+  if (typeof value === "string") return TYPED_NUMBER.test(value) ? value : quote(value);
+  if (Array.isArray(value)) {
+    const kind = value[0];
+    if (kind === "B;" || kind === "I;" || kind === "L;") {
+      const suffix = kind === "B;" ? "b" : kind === "L;" ? "L" : "";
+      const nums = value.slice(1).map((n) => `${String(n).replace(/[bBlL]$/, "")}${suffix}`);
+      return `[${kind}${nums.join(",")}]`;
+    }
+    return `[${value.map(jsonToSnbt).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    const parts2 = Object.entries(value).map(
+      ([k, v]) => `${BARE_KEY.test(k) ? k : quote(k)}:${jsonToSnbt(v)}`
+    );
+    return `{${parts2.join(",")}}`;
+  }
+  return '""';
+}
+
+// packages/formats/src/zip.ts
+import { deflateRawSync, inflateRawSync } from "node:zlib";
+var CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 3988292384 ^ c >>> 1 : c >>> 1;
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+function crc32(buf) {
+  let c = 4294967295;
+  for (let i = 0; i < buf.length; i++)
+    c = CRC_TABLE[(c ^ buf[i]) & 255] ^ c >>> 8;
+  return (c ^ 4294967295) >>> 0;
+}
+function writeZip(files) {
+  const locals = [];
+  const centrals = [];
+  let offset = 0;
+  const dosTime = 0;
+  const dosDate = 0 << 9 | 1 << 5 | 1;
+  for (const [path2, data] of files) {
+    const name = Buffer.from(path2, "utf8");
+    const deflated = deflateRawSync(data);
+    const stored = deflated.length >= data.length;
+    const body = stored ? data : deflated;
+    const crc = crc32(data);
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(67324752, 0);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt16LE(2048, 6);
+    local.writeUInt16LE(stored ? 0 : 8, 8);
+    local.writeUInt16LE(dosTime, 10);
+    local.writeUInt16LE(dosDate, 12);
+    local.writeUInt32LE(crc, 14);
+    local.writeUInt32LE(body.length, 18);
+    local.writeUInt32LE(data.length, 22);
+    local.writeUInt16LE(name.length, 26);
+    locals.push(local, name, body);
+    const central = Buffer.alloc(46);
+    central.writeUInt32LE(33639248, 0);
+    central.writeUInt16LE(20, 4);
+    central.writeUInt16LE(20, 6);
+    central.writeUInt16LE(2048, 8);
+    central.writeUInt16LE(stored ? 0 : 8, 10);
+    central.writeUInt16LE(dosTime, 12);
+    central.writeUInt16LE(dosDate, 14);
+    central.writeUInt32LE(crc, 16);
+    central.writeUInt32LE(body.length, 20);
+    central.writeUInt32LE(data.length, 24);
+    central.writeUInt16LE(name.length, 28);
+    central.writeUInt32LE(offset, 42);
+    centrals.push(central, name);
+    offset += 30 + name.length + body.length;
+  }
+  const centralSize = centrals.reduce((n, b) => n + b.length, 0);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(101010256, 0);
+  end.writeUInt16LE(files.size, 8);
+  end.writeUInt16LE(files.size, 10);
+  end.writeUInt32LE(centralSize, 12);
+  end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...locals, ...centrals, end]);
+}
+
+// packages/formats/src/datapack.ts
+var PACK_FORMATS = [
+  [1519, 4, 0],
+  [2225, 5, 0],
+  [2578, 6, 0],
+  [2724, 7, 0],
+  [2860, 8, 0],
+  [2975, 9, 0],
+  [3105, 10, 0],
+  [3337, 12, 0],
+  [3463, 15, 0],
+  [3578, 18, 0],
+  [3698, 26, 0],
+  [3837, 41, 0],
+  [3953, 48, 0],
+  [4080, 57, 0],
+  [4189, 61, 0],
+  [4325, 71, 0],
+  [4435, 80, 0],
+  [4438, 81, 0],
+  [4554, 88, 0],
+  [4671, 94, 1],
+  [4786, 101, 1],
+  [4903, 107, 1],
+  [5023, 121, 0]
+];
+function packFormatFor(dataVersion) {
+  let best = PACK_FORMATS[0];
+  for (const row of PACK_FORMATS) if (row[0] <= dataVersion) best = row;
+  return { major: best[1], minor: best[2] };
+}
+function datapacksAvailable(version) {
+  return !version.legacy && (version.dataVersion ?? 0) >= 1519;
+}
+var MAX_FILL = 32768;
+var BLOCKS_PER_TICK = 65536;
+var COMMANDS_PER_TICK = 2e3;
+function passOf(state) {
+  const c = terrainClass(blockNameOf(state));
+  if (c === "air") return "remove";
+  if (c === "liquid") return "liquid";
+  if (c === "detail") return "detail";
+  return "solid";
+}
+function boxes(cells) {
+  if (!cells.length) return [];
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let z0 = Infinity;
+  let x1 = -Infinity;
+  let z1 = -Infinity;
+  for (const c of cells) {
+    x0 = Math.min(x0, c.x);
+    y0 = Math.min(y0, c.y);
+    z0 = Math.min(z0, c.z);
+    x1 = Math.max(x1, c.x);
+    z1 = Math.max(z1, c.z);
+  }
+  const sx = x1 - x0 + 3;
+  const sz = z1 - z0 + 3;
+  const key = (x, y, z3) => x - x0 + 1 + sx * (z3 - z0 + 1 + sz * (y - y0 + 1));
+  const map = /* @__PURE__ */ new Map();
+  for (const c of cells) map.set(key(c.x, c.y, c.z), c);
+  const done = /* @__PURE__ */ new Set();
+  const sorted = [...cells].sort((a, b) => a.y - b.y || a.z - b.z || a.x - b.x);
+  const same = (x, y, z3, state) => {
+    const k = key(x, y, z3);
+    const c = map.get(k);
+    return !!c && !c.nbt && c.state === state && !done.has(k);
+  };
+  const out = [];
+  for (const c of sorted) {
+    const k = key(c.x, c.y, c.z);
+    if (done.has(k)) continue;
+    if (c.nbt) {
+      done.add(k);
+      out.push({
+        x0: c.x,
+        y0: c.y,
+        z0: c.z,
+        x1: c.x,
+        y1: c.y,
+        z1: c.z,
+        state: c.state,
+        nbt: c.nbt
+      });
+      continue;
+    }
+    let bx = c.x;
+    while (bx - c.x + 1 < MAX_FILL && same(bx + 1, c.y, c.z, c.state)) bx++;
+    const w = bx - c.x + 1;
+    let bz = c.z;
+    rows: while ((bz - c.z + 2) * w <= MAX_FILL) {
+      for (let x = c.x; x <= bx; x++) if (!same(x, c.y, bz + 1, c.state)) break rows;
+      bz++;
+    }
+    const area = w * (bz - c.z + 1);
+    let by = c.y;
+    layers: while ((by - c.y + 2) * area <= MAX_FILL) {
+      for (let z3 = c.z; z3 <= bz; z3++)
+        for (let x = c.x; x <= bx; x++) if (!same(x, by + 1, z3, c.state)) break layers;
+      by++;
+    }
+    for (let y = c.y; y <= by; y++)
+      for (let z3 = c.z; z3 <= bz; z3++) for (let x = c.x; x <= bx; x++) done.add(key(x, y, z3));
+    out.push({ x0: c.x, y0: c.y, z0: c.z, x1: bx, y1: by, z1: bz, state: c.state });
+  }
+  return out;
+}
+var absolute = (v) => String(v);
+var relative = (v) => v === 0 ? "~" : `~${v}`;
+function command(b, c) {
+  const state = b.nbt ? `${b.state}${jsonToSnbt(b.nbt)}` : b.state;
+  if (b.x0 === b.x1 && b.y0 === b.y1 && b.z0 === b.z1)
+    return `setblock ${c(b.x0)} ${c(b.y0)} ${c(b.z0)} ${state}`;
+  return `fill ${c(b.x0)} ${c(b.y0)} ${c(b.z0)} ${c(b.x1)} ${c(b.y1)} ${c(b.z1)} ${state}`;
+}
+function orderedCommands(cells, coord) {
+  const byPass = { remove: [], solid: [], detail: [], liquid: [] };
+  for (const c of cells) byPass[passOf(c.state)].push(c);
+  const out = [];
+  const emit = (list2) => {
+    for (const b of list2)
+      out.push({
+        cmd: command(b, coord),
+        blocks: (b.x1 - b.x0 + 1) * (b.y1 - b.y0 + 1) * (b.z1 - b.z0 + 1)
+      });
+  };
+  emit(boxes(byPass.remove).sort((a, b) => b.y1 - a.y1));
+  emit(boxes(byPass.solid).sort((a, b) => a.y0 - b.y0));
+  emit(boxes(byPass.detail).sort((a, b) => a.y0 - b.y0));
+  emit(boxes(byPass.liquid).sort((a, b) => a.y0 - b.y0));
+  return out;
+}
+function slug(name) {
+  return name.normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40) || "build";
+}
+function forceloadRects(changes, relativeToPlayer) {
+  let x0 = Infinity;
+  let z0 = Infinity;
+  let x1 = -Infinity;
+  let z1 = -Infinity;
+  for (const c of changes) {
+    x0 = Math.min(x0, c.pos[0]);
+    x1 = Math.max(x1, c.pos[0]);
+    z0 = Math.min(z0, c.pos[2]);
+    z1 = Math.max(z1, c.pos[2]);
+  }
+  const out = [];
+  if (relativeToPlayer) {
+    for (let x = x0; x <= x1; x += 240)
+      for (let z3 = z0; z3 <= z1; z3 += 240)
+        out.push([x, z3, Math.min(x + 239, x1), Math.min(z3 + 239, z1)]);
+    return out;
+  }
+  for (let cx = x0 >> 4; cx <= x1 >> 4; cx += 16)
+    for (let cz = z0 >> 4; cz <= z1 >> 4; cz += 16)
+      out.push([
+        cx * 16,
+        cz * 16,
+        Math.min(cx + 15, x1 >> 4) * 16 + 15,
+        Math.min(cz + 15, z1 >> 4) * 16 + 15
+      ]);
+  return out;
+}
+function datapackChangesFromVolume(volume, anchor) {
+  const nbt = new Map(
+    volume.blockEntities.map((be) => [`${be.pos[0]},${be.pos[1]},${be.pos[2]}`, be.data])
+  );
+  const out = [];
+  let i = 0;
+  for (let y = 0; y < volume.sizeY; y++)
+    for (let z3 = 0; z3 < volume.sizeZ; z3++)
+      for (let x = 0; x < volume.sizeX; x++, i++) {
+        const id = volume.data[i];
+        if (id === 0) continue;
+        const data = nbt.get(`${x},${y},${z3}`);
+        out.push({
+          pos: [x - anchor[0], y - anchor[1], z3 - anchor[2]],
+          state: volume.palette[id],
+          ...data ? { nbt: data } : {},
+          before: "minecraft:air"
+        });
+      }
+  return out;
+}
+function writeDatapack(input) {
+  const { version } = input;
+  if (!datapacksAvailable(version))
+    throw new Error("Data packs need Minecraft 1.13 or newer; use a .schematic with WorldEdit.");
+  const dv = version.dataVersion ?? 0;
+  const pack = packFormatFor(dv);
+  const singular = dv >= 3953;
+  const forceload = dv >= 1952;
+  const next = (fn, ticks) => forceload ? `schedule function ${fn} ${ticks}t` : `function ${fn}`;
+  const id = (input.id ? slug(input.id) : slug(input.name)) || "build";
+  const ns = "vibeschem";
+  const fnDir = `data/${ns}/${singular ? "function" : "functions"}/${id}`;
+  const fnId = `${ns}:${id}`;
+  const here = input.place.kind === "here";
+  const tag = `vibeschem_${id}`;
+  const markerType = dv >= 2724 ? "minecraft:marker" : "minecraft:armor_stand";
+  const marker = `@e[type=${markerType},tag=${tag},limit=1]`;
+  const prefix = input.place.kind === "here" ? `execute at ${marker} run ` : input.place.dimension === "minecraft:overworld" ? "" : `execute in ${input.place.dimension} run `;
+  const coord = here ? relative : absolute;
+  const warnings = [];
+  const files = /* @__PURE__ */ new Map();
+  const put = (path2, lines) => files.set(path2, Buffer.from(`${lines.join("\n")}
+`, "utf8"));
+  const say = (text2, color = "gold") => `tellraw @a ${JSON.stringify({ text: `[VibeSchem] ${text2}`, color })}`;
+  const rects = forceloadRects(input.changes, input.place.kind === "here");
+  let totalCommands = 0;
+  let totalTicks = 0;
+  const program = (kind) => {
+    const cells = input.changes.map(
+      (c) => kind === "build" ? {
+        x: c.pos[0],
+        y: c.pos[1],
+        z: c.pos[2],
+        state: c.state,
+        ...c.nbt ? { nbt: c.nbt } : {}
+      } : {
+        x: c.pos[0],
+        y: c.pos[1],
+        z: c.pos[2],
+        state: c.before,
+        ...c.beforeNbt ? { nbt: c.beforeNbt } : {}
+      }
+    );
+    const cmds = orderedCommands(cells, coord);
+    const parts2 = [];
+    let cur = [];
+    let blocks2 = 0;
+    for (const c of cmds) {
+      if (cur.length && (blocks2 + c.blocks > BLOCKS_PER_TICK || cur.length >= COMMANDS_PER_TICK)) {
+        parts2.push(cur);
+        cur = [];
+        blocks2 = 0;
+      }
+      cur.push(prefix + c.cmd);
+      blocks2 += c.blocks;
+    }
+    if (cur.length) parts2.push(cur);
+    const label2 = kind === "build" ? input.name : `${input.name} (undo)`;
+    const start = [
+      `# ${kind === "build" ? "Builds" : "Undoes"} "${input.name}" \u2014 made with VibeSchem`
+    ];
+    if (here && kind === "build") {
+      start.push(
+        `kill @e[type=${markerType},tag=${tag}]`,
+        `execute align xyz positioned ~0.5 ~ ~0.5 run summon ${markerType} ~ ~ ~ ${markerType === "minecraft:marker" ? `{Tags:["${tag}"]}` : `{Tags:["${tag}"],Marker:1b,Invisible:1b,NoGravity:1b,Invulnerable:1b}`}`
+      );
+    }
+    if (here && kind === "undo")
+      start.push(
+        `execute unless entity ${marker} run ${say("Nothing to undo: build it first with /function " + fnId + "/build.", "red")}`
+      );
+    start.push(
+      say(`${kind === "build" ? "Building" : "Undoing"} ${label2}: ${input.changes.length} blocks\u2026`)
+    );
+    if (forceload)
+      for (const [ax, az, bx, bz] of rects)
+        start.push(`${prefix}forceload add ${coord(ax)} ${coord(az)} ${coord(bx)} ${coord(bz)}`);
+    start.push(next(`${fnId}/${kind}_1`, 5));
+    put(`${fnDir}/${kind}.mcfunction`, start);
+    parts2.forEach((lines, i) => {
+      const n = i + 1;
+      const body = [...lines];
+      if (n < parts2.length) {
+        if (parts2.length > 4 && n % Math.max(1, Math.floor(parts2.length / 10)) === 0)
+          body.push(
+            `title @a actionbar ${JSON.stringify({ text: `VibeSchem ${Math.round(n / parts2.length * 100)}%`, color: "gold" })}`
+          );
+        body.push(next(`${fnId}/${kind}_${n + 1}`, 1));
+      } else {
+        if (forceload)
+          for (const [ax, az, bx, bz] of rects)
+            body.push(
+              `${prefix}forceload remove ${coord(ax)} ${coord(az)} ${coord(bx)} ${coord(bz)}`
+            );
+        body.push(say(kind === "build" ? `Done: ${label2}.` : `Undone: ${input.name}.`, "green"));
+        if (here && kind === "undo") body.push(`kill @e[type=${markerType},tag=${tag}]`);
+      }
+      put(`${fnDir}/${kind}_${n}.mcfunction`, body);
+    });
+    if (!parts2.length) put(`${fnDir}/${kind}_1.mcfunction`, [say("Nothing to change.", "gray")]);
+    totalCommands += cmds.length;
+    totalTicks = Math.max(totalTicks, parts2.length);
+  };
+  program("build");
+  program("undo");
+  if (input.place.kind === "world") {
+    const [cx, cy, cz] = input.place.center;
+    put(`${fnDir}/tp.mcfunction`, [`${prefix}tp @s ${cx} ${cy} ${cz}`]);
+  }
+  const description = `VibeSchem: ${input.name} \u2014 /function ${fnId}/build (undo: /function ${fnId}/undo)`;
+  const meta = { description };
+  if (pack.major >= 82) {
+    meta.min_format = [pack.major, pack.minor];
+    meta.max_format = [pack.major, pack.minor];
+  } else {
+    meta.pack_format = pack.major;
+  }
+  files.set("pack.mcmeta", Buffer.from(`${JSON.stringify({ pack: meta }, null, 2)}
+`, "utf8"));
+  files.set(
+    "README.txt",
+    Buffer.from(
+      [
+        `"${input.name}" as a vanilla data pack (no mods needed), made with VibeSchem.`,
+        "",
+        `1. Put this folder (or the .zip) in your world's "datapacks" folder.`,
+        `2. In the world (cheats on, or Open to LAN > Allow Cheats) type: /reload`,
+        here ? `3. Stand where it should go (that spot is the paste point) and type: /function ${fnId}/build` : `3. Stand near the build area and type: /function ${fnId}/build`,
+        here ? `   Remove it again: /function ${fnId}/undo` : `   Undo it any time (puts back what was there): /function ${fnId}/undo`,
+        ...here ? [] : [`   Go there: /function ${fnId}/tp`],
+        "",
+        `${input.changes.length} blocks, ${totalCommands} commands over ${totalTicks} ticks.`,
+        "Back up your world first if it matters to you.",
+        ""
+      ].join("\n"),
+      "utf8"
+    )
+  );
+  if (!forceload) {
+    warnings.push(
+      "Minecraft 1.13 has no /forceload: stand in the middle of the area so every chunk is loaded."
+    );
+    if (totalCommands > 6e4)
+      warnings.push(
+        "Over 60000 commands in one tick: raise the maxCommandChainLength game rule first."
+      );
+  } else if (rects.length > 8)
+    warnings.push("The area spans many chunks: the pack force-loads them while it builds.");
+  return {
+    files,
+    zip: writeZip(files),
+    folder: `vibeschem_${id}`,
+    functionId: fnId,
+    commands: totalCommands,
+    ticks: totalTicks,
+    warnings
+  };
+}
+
 // packages/formats/src/writers.ts
 import { gzipSync } from "node:zlib";
 
@@ -4703,6 +9121,25 @@ var compound = (v) => ({ t: "compound", v });
 var list = (elem, v) => ({ t: "list", elem, v });
 var intArray = (v) => ({ t: "intArray", v });
 var byteArray = (v) => ({ t: "byteArray", v });
+function encodeModifiedUtf8(s) {
+  let ascii = true;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c === 0 || c > 127) {
+      ascii = false;
+      break;
+    }
+  }
+  if (ascii) return Buffer.from(s, "latin1");
+  const out = [];
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c !== 0 && c <= 127) out.push(c);
+    else if (c <= 2047) out.push(192 | c >> 6, 128 | c & 63);
+    else out.push(224 | c >> 12, 128 | c >> 6 & 63, 128 | c & 63);
+  }
+  return Buffer.from(out);
+}
 var Writer = class {
   buf = Buffer.allocUnsafe(1 << 16);
   pos = 0;
@@ -4763,7 +9200,8 @@ var Writer = class {
     this.pos += v.length;
   }
   string(s) {
-    const b = Buffer.from(s, "utf8");
+    const b = encodeModifiedUtf8(s);
+    if (b.length > 65535) throw new Error("An NBT string is longer than 65535 bytes.");
     this.u16(b.length);
     this.bytes(b);
   }
@@ -4825,12 +9263,12 @@ function writeNbt(rootName, root) {
   payload(w, compound(root));
   return w.result();
 }
-var TYPED_NUMBER = /^(-?\d+(?:\.\d+)?)([bslfdBSLFD])$/;
+var TYPED_NUMBER2 = /^(-?\d+(?:\.\d+)?)([bslfdBSLFD])$/;
 function jsonToTag(value) {
   if (typeof value === "boolean") return byte(value ? 1 : 0);
   if (typeof value === "number") return Number.isInteger(value) ? int(value) : double(value);
   if (typeof value === "string") {
-    const m = TYPED_NUMBER.exec(value);
+    const m = TYPED_NUMBER2.exec(value);
     if (m) {
       const n = Number(m[1]);
       switch (m[2].toLowerCase()) {
@@ -4849,6 +9287,19 @@ function jsonToTag(value) {
     return str(value);
   }
   if (Array.isArray(value)) {
+    const kind = value[0];
+    if (kind === "B;" || kind === "I;" || kind === "L;") {
+      const nums = value.slice(1);
+      if (kind === "B;") return byteArray(Int8Array.from(nums.map((n) => Number(n))));
+      if (kind === "I;") return intArray(nums.map((n) => Number(n)));
+      const words = new Uint32Array(nums.length * 2);
+      nums.forEach((n, i) => {
+        const v = BigInt.asUintN(64, BigInt(String(n).replace(/[lL]$/, "")));
+        words[2 * i] = Number(v & 0xffffffffn);
+        words[2 * i + 1] = Number(v >> 32n);
+      });
+      return { t: "longArray", words };
+    }
     const items = value.map(jsonToTag);
     return list(items[0]?.t ?? "compound", items);
   }
@@ -4918,7 +9369,7 @@ function writeSpongeV2(input) {
     Width: short(volume.sizeX << 16 >> 16),
     Height: short(volume.sizeY << 16 >> 16),
     Length: short(volume.sizeZ << 16 >> 16),
-    Offset: intArray([0, 0, 0]),
+    Offset: intArray(input.worldMin ?? [0, 0, 0]),
     PaletteMax: int(volume.palette.length),
     Palette: compound(spongePalette(volume)),
     BlockData: byteArray(varintBlockData(volume.data)),
@@ -4939,7 +9390,15 @@ function writeSpongeV3(input) {
       Name: str(input.name),
       Author: str(input.author ?? AUTHOR),
       Date: long(Date.now()),
-      WorldEdit: compound({ Origin: intArray([0, 0, 0]) })
+      WorldEdit: compound({
+        Origin: intArray(
+          input.worldMin ? [
+            input.worldMin[0] + anchor[0],
+            input.worldMin[1] + anchor[1],
+            input.worldMin[2] + anchor[2]
+          ] : [0, 0, 0]
+        )
+      })
     }),
     Width: short(volume.sizeX << 16 >> 16),
     Height: short(volume.sizeY << 16 >> 16),
@@ -5025,9 +9484,9 @@ function writeMcEdit(input) {
     ...add ? { AddBlocks: byteArray(add) } : {},
     TileEntities: list("compound", tiles),
     Entities: list("compound", []),
-    WEOriginX: int(0),
-    WEOriginY: int(0),
-    WEOriginZ: int(0),
+    WEOriginX: int(input.worldMin?.[0] ?? 0),
+    WEOriginY: int(input.worldMin?.[1] ?? 0),
+    WEOriginZ: int(input.worldMin?.[2] ?? 0),
     WEOffsetX: int(-anchor[0]),
     WEOffsetY: int(-anchor[1]),
     WEOffsetZ: int(-anchor[2])
@@ -5110,16 +9569,24 @@ function writeLitematic(input) {
 }
 var STRUCTURE_BLOCK_LIMIT = 48;
 function writeStructure(input) {
-  const { volume } = input;
+  const { volume, mask: mask2 } = input;
   const blocks2 = [];
   const beByIndex = new Map(volume.blockEntities.map((be) => [volume.index(...be.pos), be]));
+  const remap = new Int32Array(volume.palette.length).fill(-1);
+  const palette = [];
+  const idOf = (p) => {
+    if (remap[p] === -1) remap[p] = palette.push(volume.palette[p]) - 1;
+    return remap[p];
+  };
+  if (!mask2) volume.palette.forEach((_, p) => idOf(p));
   let i = 0;
   for (let y = 0; y < volume.sizeY; y++) {
     for (let z3 = 0; z3 < volume.sizeZ; z3++) {
       for (let x = 0; x < volume.sizeX; x++, i++) {
+        if (mask2 && !mask2[i]) continue;
         const be = beByIndex.get(i);
         const entry = {
-          state: int(volume.data[i]),
+          state: int(idOf(volume.data[i])),
           pos: list("int", [int(x), int(y), int(z3)])
         };
         if (be) {
@@ -5133,7 +9600,7 @@ function writeStructure(input) {
   const root = {
     DataVersion: int(dataVersionOf(input.version)),
     size: list("int", [int(volume.sizeX), int(volume.sizeY), int(volume.sizeZ)]),
-    palette: list("compound", volume.palette.map(stateCompound)),
+    palette: list("compound", palette.map(stateCompound)),
     blocks: list("compound", blocks2),
     entities: list("compound", [])
   };
@@ -5146,6 +9613,614 @@ function writeStructure(input) {
   return { buffer: gzipSync(writeNbt("", root)), warnings };
 }
 
+// packages/formats/src/nbtRead.ts
+import { gunzipSync, inflateSync } from "node:zlib";
+var TYPES = [
+  null,
+  "byte",
+  "short",
+  "int",
+  "long",
+  "float",
+  "double",
+  "byteArray",
+  "string",
+  "list",
+  "compound",
+  "intArray",
+  "longArray"
+];
+function decodeModifiedUtf8(buf, start, end) {
+  let ascii = true;
+  for (let i2 = start; i2 < end; i2++) {
+    if (buf[i2] & 128) {
+      ascii = false;
+      break;
+    }
+  }
+  if (ascii) return buf.toString("latin1", start, end);
+  const units = [];
+  let i = start;
+  while (i < end) {
+    const a = buf[i++];
+    if (a < 128) units.push(a);
+    else if ((a & 224) === 192 && i < end) {
+      units.push((a & 31) << 6 | buf[i++] & 63);
+    } else if ((a & 240) === 224 && i + 1 < end) {
+      const b = buf[i++];
+      const c = buf[i++];
+      units.push((a & 15) << 12 | (b & 63) << 6 | c & 63);
+    } else if ((a & 248) === 240 && i + 2 < end) {
+      const cp2 = (a & 7) << 18 | (buf[i] & 63) << 12 | (buf[i + 1] & 63) << 6 | buf[i + 2] & 63;
+      i += 3;
+      const v = cp2 - 65536;
+      units.push(55296 + (v >> 10), 56320 + (v & 1023));
+    } else units.push(65533);
+  }
+  let s = "";
+  for (let k = 0; k < units.length; k += 8192)
+    s += String.fromCharCode(...units.slice(k, k + 8192));
+  return s;
+}
+var Reader = class {
+  constructor(buf) {
+    this.buf = buf;
+  }
+  pos = 0;
+  need(n) {
+    if (this.pos + n > this.buf.length) throw new Error("The NBT data ends too early.");
+  }
+  u8() {
+    this.need(1);
+    return this.buf.readUInt8(this.pos++);
+  }
+  i8() {
+    this.need(1);
+    return this.buf.readInt8(this.pos++);
+  }
+  i16() {
+    this.need(2);
+    const v = this.buf.readInt16BE(this.pos);
+    this.pos += 2;
+    return v;
+  }
+  u16() {
+    this.need(2);
+    const v = this.buf.readUInt16BE(this.pos);
+    this.pos += 2;
+    return v;
+  }
+  i32() {
+    this.need(4);
+    const v = this.buf.readInt32BE(this.pos);
+    this.pos += 4;
+    return v;
+  }
+  string() {
+    const n = this.u16();
+    this.need(n);
+    const s = decodeModifiedUtf8(this.buf, this.pos, this.pos + n);
+    this.pos += n;
+    return s;
+  }
+  payload(type, depth) {
+    if (depth > 512) throw new Error("The NBT data nests too deeply.");
+    const b = this.buf;
+    switch (type) {
+      case "byte":
+        return { t: "byte", v: this.i8() };
+      case "short":
+        return { t: "short", v: this.i16() };
+      case "int":
+        return { t: "int", v: this.i32() };
+      case "long": {
+        this.need(8);
+        const v = b.readBigInt64BE(this.pos);
+        this.pos += 8;
+        return { t: "long", v };
+      }
+      case "float": {
+        this.need(4);
+        const v = b.readFloatBE(this.pos);
+        this.pos += 4;
+        return { t: "float", v };
+      }
+      case "double": {
+        this.need(8);
+        const v = b.readDoubleBE(this.pos);
+        this.pos += 8;
+        return { t: "double", v };
+      }
+      case "string":
+        return { t: "string", v: this.string() };
+      case "byteArray": {
+        const n = this.i32();
+        this.need(n);
+        const v = new Int8Array(n);
+        v.set(new Int8Array(b.buffer, b.byteOffset + this.pos, n));
+        this.pos += n;
+        return { t: "byteArray", v };
+      }
+      case "intArray": {
+        const n = this.i32();
+        this.need(n * 4);
+        const v = new Int32Array(n);
+        for (let i = 0; i < n; i++) v[i] = b.readInt32BE(this.pos + i * 4);
+        this.pos += n * 4;
+        return { t: "intArray", v };
+      }
+      case "longArray": {
+        const n = this.i32();
+        this.need(n * 8);
+        const words = new Uint32Array(n * 2);
+        for (let i = 0; i < n; i++) {
+          words[2 * i + 1] = b.readUInt32BE(this.pos + i * 8);
+          words[2 * i] = b.readUInt32BE(this.pos + i * 8 + 4);
+        }
+        this.pos += n * 8;
+        return { t: "longArray", words };
+      }
+      case "list": {
+        const id = this.u8();
+        const n = this.i32();
+        const elem = TYPES[id] ?? "compound";
+        const v = [];
+        if (id !== 0) for (let i = 0; i < n; i++) v.push(this.payload(elem, depth + 1));
+        return { t: "list", elem, v };
+      }
+      case "compound": {
+        const v = {};
+        for (; ; ) {
+          const id = this.u8();
+          if (id === 0) break;
+          const type2 = TYPES[id];
+          if (!type2) throw new Error(`Unknown NBT tag type ${id}.`);
+          const name = this.string();
+          v[name] = this.payload(type2, depth + 1);
+        }
+        return { t: "compound", v };
+      }
+    }
+  }
+};
+function decompress(buf) {
+  if (buf.length >= 2 && buf[0] === 31 && buf[1] === 139) return gunzipSync(buf);
+  if (buf.length >= 2 && buf[0] === 120) return inflateSync(buf);
+  return buf;
+}
+function readNbt(input) {
+  const buf = decompress(input);
+  const r = new Reader(buf);
+  const type = r.u8();
+  if (type !== 10) throw new Error("Not an NBT file (the root is not a compound).");
+  const name = r.string();
+  const root = r.payload("compound", 0);
+  return { name, root: root.v };
+}
+function getCompound(c, key) {
+  const t = c?.[key];
+  return t?.t === "compound" ? t.v : void 0;
+}
+function getList(c, key) {
+  const t = c?.[key];
+  return t?.t === "list" ? t.v : [];
+}
+function getCompounds(c, key) {
+  return getList(c, key).flatMap((t) => t.t === "compound" ? [t.v] : []);
+}
+function getNumber(c, key) {
+  const t = c?.[key];
+  if (!t) return void 0;
+  if (t.t === "byte" || t.t === "short" || t.t === "int" || t.t === "float" || t.t === "double")
+    return t.v;
+  if (t.t === "long") return Number(t.v);
+  return void 0;
+}
+function getString(c, key) {
+  const t = c?.[key];
+  return t?.t === "string" ? t.v : void 0;
+}
+function getInts(c, key) {
+  const t = c?.[key];
+  if (t?.t === "intArray") return Array.from(t.v);
+  if (t?.t === "list") return t.v.map((x) => x.t === "int" ? x.v : 0);
+  return void 0;
+}
+function tagToJson(tag) {
+  switch (tag.t) {
+    case "byte":
+      return `${tag.v}b`;
+    case "short":
+      return `${tag.v}s`;
+    case "int":
+      return tag.v;
+    case "long":
+      return `${tag.v}L`;
+    case "float":
+      return `${tag.v}f`;
+    case "double":
+      return Number.isInteger(tag.v) ? `${tag.v}d` : tag.v;
+    case "string":
+      return tag.v;
+    case "byteArray":
+      return ["B;", ...Array.from(tag.v)];
+    case "intArray":
+      return ["I;", ...Array.from(tag.v)];
+    case "longArray": {
+      const out = ["L;"];
+      for (let i = 0; i < tag.words.length; i += 2) {
+        const v = BigInt.asIntN(
+          64,
+          BigInt(tag.words[i + 1]) << 32n | BigInt(tag.words[i])
+        );
+        out.push(`${v}`);
+      }
+      return out;
+    }
+    case "list":
+      return tag.v.map(tagToJson);
+    case "compound": {
+      const out = {};
+      for (const [k, v] of Object.entries(tag.v)) out[k] = tagToJson(v);
+      return out;
+    }
+  }
+}
+function compoundToJson(c) {
+  return tagToJson({ t: "compound", v: c });
+}
+
+// packages/formats/src/readers.ts
+var AIR3 = "minecraft:air";
+function canonicalState(name, props) {
+  const n = name.includes(":") ? name : `minecraft:${name}`;
+  const keys = Object.keys(props ?? {}).sort();
+  return keys.length ? `${n}[${keys.map((k) => `${k}=${props?.[k]}`).join(",")}]` : n;
+}
+function canonicalFromString(state) {
+  const br = state.indexOf("[");
+  if (br < 0) return canonicalState(state);
+  const props = {};
+  for (const pair of state.slice(br + 1, state.lastIndexOf("]")).split(",")) {
+    const eq = pair.indexOf("=");
+    if (eq > 0) props[pair.slice(0, eq).trim()] = pair.slice(eq + 1).trim();
+  }
+  return canonicalState(state.slice(0, br), props);
+}
+function stateOfCompound(c) {
+  const props = {};
+  for (const [k, v] of Object.entries(getCompound(c, "Properties") ?? {}))
+    if (v.t === "string") props[k] = v.v;
+  return canonicalState(getString(c, "Name") ?? AIR3, props);
+}
+function readVarints(bytes, count) {
+  const out = new Uint32Array(count);
+  let p = 0;
+  for (let i = 0; i < count; i++) {
+    let v = 0;
+    let shift = 0;
+    for (; ; ) {
+      if (p >= bytes.length) throw new Error("The block data ends too early.");
+      const b = bytes[p++] & 255;
+      v |= (b & 127) << shift;
+      if ((b & 128) === 0) break;
+      shift += 7;
+      if (shift > 28) throw new Error("Malformed block data.");
+    }
+    out[i] = v;
+  }
+  return out;
+}
+function withAirFirst(palette, raw) {
+  const out = [AIR3];
+  const index2 = /* @__PURE__ */ new Map([[AIR3, 0]]);
+  const remap = palette.map((s) => {
+    const st = /^minecraft:(cave_|void_)?air$/.test(s) ? AIR3 : s;
+    let id = index2.get(st);
+    if (id === void 0) {
+      id = out.length;
+      out.push(st);
+      index2.set(st, id);
+    }
+    return id;
+  });
+  if (out.length > 65535) throw new Error("Too many different block states (over 65535).");
+  const data = new Uint16Array(raw.length);
+  for (let i = 0; i < raw.length; i++) data[i] = remap[raw[i]] ?? 0;
+  return { palette: out, data };
+}
+function checkSize2(x, y, z3) {
+  if (x <= 0 || y <= 0 || z3 <= 0) throw new Error("The schematic is empty.");
+  if (x * y * z3 > 64e6)
+    throw new Error(`The schematic is too big to open (${x}\xD7${y}\xD7${z3}, over 64 million blocks).`);
+}
+function readSponge(root, name) {
+  const nested = getCompound(root, "Schematic");
+  const s = nested ?? root;
+  const version = getNumber(s, "Version") ?? 1;
+  const w = getNumber(s, "Width") ?? 0;
+  const h = getNumber(s, "Height") ?? 0;
+  const l = getNumber(s, "Length") ?? 0;
+  const sx = w & 65535;
+  const sy = h & 65535;
+  const sz = l & 65535;
+  checkSize2(sx, sy, sz);
+  const blocks2 = version >= 3 ? getCompound(s, "Blocks") : s;
+  const paletteTag = getCompound(blocks2, "Palette") ?? {};
+  const palette = [];
+  for (const [state, idx] of Object.entries(paletteTag))
+    if (idx.t === "int") palette[idx.v] = canonicalFromString(state);
+  for (let i = 0; i < palette.length; i++) palette[i] ??= AIR3;
+  const dataTag = version >= 3 ? blocks2?.Data : s.BlockData;
+  if (dataTag?.t !== "byteArray") throw new Error("The .schem file has no block data.");
+  const raw = readVarints(dataTag.v, sx * sy * sz);
+  const { palette: pal, data } = withAirFirst(palette, raw);
+  const beList = getCompounds(blocks2, version >= 3 ? "BlockEntities" : "BlockEntities").length ? getCompounds(blocks2, "BlockEntities") : getCompounds(s, "TileEntities");
+  const blockEntities = beList.flatMap((be) => {
+    const pos = getInts(be, "Pos");
+    if (!pos || pos.length < 3) return [];
+    const id = getString(be, "Id") ?? getString(be, "id") ?? "";
+    const inner = version >= 3 ? getCompound(be, "Data") ?? {} : { ...be };
+    delete inner.Pos;
+    delete inner.Id;
+    return [
+      {
+        id: id.includes(":") ? id : `minecraft:${id}`,
+        pos: [pos[0], pos[1], pos[2]],
+        data: compoundToJson(inner)
+      }
+    ];
+  });
+  const offset = getInts(s, "Offset") ?? [0, 0, 0];
+  let worldOrigin = null;
+  if (version >= 3) {
+    const origin = getInts(getCompound(getCompound(s, "Metadata"), "WorldEdit"), "Origin");
+    if (origin)
+      worldOrigin = [
+        (origin[0] ?? 0) + (offset[0] ?? 0),
+        (origin[1] ?? 0) + (offset[1] ?? 0),
+        (origin[2] ?? 0) + (offset[2] ?? 0)
+      ];
+  } else if (offset.some((v) => v !== 0)) {
+    worldOrigin = [offset[0] ?? 0, offset[1] ?? 0, offset[2] ?? 0];
+  }
+  return {
+    format: "sponge",
+    size: [sx, sy, sz],
+    palette: pal,
+    data,
+    blockEntities,
+    dataVersion: getNumber(s, "DataVersion") ?? null,
+    worldOrigin,
+    name: getString(getCompound(s, "Metadata"), "Name") ?? name,
+    warnings: []
+  };
+}
+function readMcEdit(root, name) {
+  const sx = getNumber(root, "Width") ?? 0;
+  const sy = getNumber(root, "Height") ?? 0;
+  const sz = getNumber(root, "Length") ?? 0;
+  checkSize2(sx, sy, sz);
+  const blocks2 = root.Blocks;
+  const meta = root.Data;
+  if (blocks2?.t !== "byteArray" || meta?.t !== "byteArray")
+    throw new Error("The .schematic file has no block data.");
+  const add = root.AddBlocks?.t === "byteArray" ? root.AddBlocks.v : null;
+  const n = sx * sy * sz;
+  const legacy = catalogData.legacyBlocks;
+  const palette = [];
+  const index2 = /* @__PURE__ */ new Map();
+  const raw = new Uint32Array(n);
+  const unknown = /* @__PURE__ */ new Set();
+  for (let i = 0; i < n; i++) {
+    let id = blocks2.v[i] & 255;
+    if (add) {
+      const a = add[i >> 1] & 255;
+      id |= ((i & 1) === 0 ? a & 15 : a >> 4) << 8;
+    }
+    const m = meta.v[i] & 15;
+    const key = id * 16 + m;
+    let p = index2.get(key);
+    if (p === void 0) {
+      const state = legacy[`${id}:${m}`] ?? legacy[`${id}:0`];
+      if (!state) unknown.add(id);
+      p = palette.length;
+      palette.push(state ? canonicalFromString(state) : AIR3);
+      index2.set(key, p);
+    }
+    raw[i] = p;
+  }
+  const { palette: pal, data } = withAirFirst(palette, raw);
+  const blockEntities = getCompounds(root, "TileEntities").flatMap((be) => {
+    const x = getNumber(be, "x");
+    const y = getNumber(be, "y");
+    const z3 = getNumber(be, "z");
+    if (x === void 0 || y === void 0 || z3 === void 0) return [];
+    const inner = { ...be };
+    for (const k of ["x", "y", "z", "id"]) delete inner[k];
+    return [
+      {
+        id: `minecraft:${(getString(be, "id") ?? "").replace(/^minecraft:/, "").toLowerCase()}`,
+        pos: [x, y, z3],
+        data: compoundToJson(inner)
+      }
+    ];
+  });
+  const ox = getNumber(root, "WEOriginX");
+  const oy = getNumber(root, "WEOriginY");
+  const oz = getNumber(root, "WEOriginZ");
+  return {
+    format: "mcedit",
+    size: [sx, sy, sz],
+    palette: pal,
+    data,
+    blockEntities,
+    dataVersion: null,
+    worldOrigin: ox !== void 0 && oy !== void 0 && oz !== void 0 && (ox || oy || oz) ? [ox, oy, oz] : null,
+    name,
+    warnings: unknown.size ? [`Unknown block ids left as air: ${[...unknown].slice(0, 12).join(", ")}.`] : []
+  };
+}
+function readLitematic(root, name) {
+  const regions = getCompound(root, "Regions") ?? {};
+  const parsed = [];
+  for (const tag of Object.values(regions)) {
+    if (tag.t !== "compound") continue;
+    const r = tag.v;
+    const pos = getCompound(r, "Position");
+    const size2 = getCompound(r, "Size");
+    const px = getNumber(pos, "x") ?? 0;
+    const py = getNumber(pos, "y") ?? 0;
+    const pz = getNumber(pos, "z") ?? 0;
+    const sx = getNumber(size2, "x") ?? 0;
+    const sy = getNumber(size2, "y") ?? 0;
+    const sz = getNumber(size2, "z") ?? 0;
+    const min = [
+      px + (sx < 0 ? sx + 1 : 0),
+      py + (sy < 0 ? sy + 1 : 0),
+      pz + (sz < 0 ? sz + 1 : 0)
+    ];
+    const abs = [Math.abs(sx), Math.abs(sy), Math.abs(sz)];
+    checkSize2(...abs);
+    const palette2 = getCompounds(r, "BlockStatePalette").map(stateOfCompound);
+    const bits = Math.max(2, Math.ceil(Math.log2(Math.max(2, palette2.length))));
+    const states = r.BlockStates?.t === "longArray" ? r.BlockStates.words : new Uint32Array(0);
+    parsed.push({ min, size: abs, palette: palette2, states, bits, tiles: getCompounds(r, "TileEntities") });
+  }
+  if (!parsed.length) throw new Error("The .litematic file has no regions.");
+  const lo = [0, 1, 2].map((a) => Math.min(...parsed.map((p) => p.min[a])));
+  const hi = [0, 1, 2].map(
+    (a) => Math.max(...parsed.map((p) => p.min[a] + p.size[a]))
+  );
+  const size = [
+    hi[0] - lo[0],
+    hi[1] - lo[1],
+    hi[2] - lo[2]
+  ];
+  checkSize2(...size);
+  const palette = [AIR3];
+  const pIndex = /* @__PURE__ */ new Map([[AIR3, 0]]);
+  const data = new Uint16Array(size[0] * size[1] * size[2]);
+  const blockEntities = [];
+  for (const r of parsed) {
+    const ids = r.palette.map((s) => {
+      const st = /^minecraft:(cave_|void_)?air$/.test(s) ? AIR3 : s;
+      let id = pIndex.get(st);
+      if (id === void 0) {
+        id = palette.length;
+        palette.push(st);
+        pIndex.set(st, id);
+      }
+      return id;
+    });
+    const [rx, ry, rz] = r.size;
+    const mask2 = (1 << r.bits) - 1;
+    let i = 0;
+    for (let y = 0; y < ry; y++)
+      for (let z3 = 0; z3 < rz; z3++)
+        for (let x = 0; x < rx; x++, i++) {
+          const bit = i * r.bits;
+          const w = bit >>> 5;
+          const off = bit & 31;
+          let v = (r.states[w] ?? 0) >>> off;
+          if (off + r.bits > 32) v |= (r.states[w + 1] ?? 0) << 32 - off;
+          const pi = v & mask2;
+          const id = ids[pi] ?? 0;
+          if (id === 0) continue;
+          const gx = x + r.min[0] - lo[0];
+          const gy = y + r.min[1] - lo[1];
+          const gz = z3 + r.min[2] - lo[2];
+          data[gx + size[0] * (gz + size[2] * gy)] = id;
+        }
+    for (const be of r.tiles) {
+      const x = getNumber(be, "x");
+      const y = getNumber(be, "y");
+      const z3 = getNumber(be, "z");
+      if (x === void 0 || y === void 0 || z3 === void 0) continue;
+      const inner = { ...be };
+      for (const k of ["x", "y", "z", "id"]) delete inner[k];
+      const gx = x + r.min[0] - lo[0];
+      const gy = y + r.min[1] - lo[1];
+      const gz = z3 + r.min[2] - lo[2];
+      const state = palette[data[gx + size[0] * (gz + size[2] * gy)]] ?? AIR3;
+      blockEntities.push({
+        id: getString(be, "id") ?? state.replace(/\[.*$/, ""),
+        pos: [gx, gy, gz],
+        data: compoundToJson(inner)
+      });
+    }
+  }
+  return {
+    format: "litematica",
+    size,
+    palette,
+    data,
+    blockEntities,
+    dataVersion: getNumber(root, "MinecraftDataVersion") ?? null,
+    worldOrigin: null,
+    name: getString(getCompound(root, "Metadata"), "Name") ?? name,
+    warnings: parsed.length > 1 ? [`${parsed.length} regions were merged into one volume.`] : []
+  };
+}
+function readStructure(root, name) {
+  const size = getInts(root, "size") ?? [];
+  const sx = size[0] ?? 0;
+  const sy = size[1] ?? 0;
+  const sz = size[2] ?? 0;
+  checkSize2(sx, sy, sz);
+  const palettes = getList(root, "palettes");
+  const paletteTags = palettes.length && palettes[0]?.t === "list" ? palettes[0].v : getList(root, "palette");
+  const palette = paletteTags.flatMap((t) => t.t === "compound" ? [stateOfCompound(t.v)] : []);
+  const raw = new Uint32Array(sx * sy * sz);
+  const air = palette.length;
+  palette.push(AIR3);
+  raw.fill(air);
+  const blockEntities = [];
+  for (const b of getCompounds(root, "blocks")) {
+    const pos = getInts(b, "pos");
+    const state = getNumber(b, "state");
+    if (!pos || state === void 0) continue;
+    const [x = 0, y = 0, z3 = 0] = pos;
+    if (x < 0 || y < 0 || z3 < 0 || x >= sx || y >= sy || z3 >= sz) continue;
+    raw[x + sx * (z3 + sz * y)] = state;
+    const nbt = getCompound(b, "nbt");
+    if (nbt) {
+      const inner = { ...nbt };
+      delete inner.id;
+      blockEntities.push({
+        id: getString(nbt, "id") ?? (palette[state] ?? AIR3).replace(/\[.*$/, ""),
+        pos: [x, y, z3],
+        data: compoundToJson(inner)
+      });
+    }
+  }
+  const { palette: pal, data } = withAirFirst(palette, raw);
+  return {
+    format: "structure",
+    size: [sx, sy, sz],
+    palette: pal,
+    data,
+    blockEntities,
+    dataVersion: getNumber(root, "DataVersion") ?? null,
+    worldOrigin: null,
+    name,
+    warnings: []
+  };
+}
+function readSchematic(buf, filename = "") {
+  const { root } = readNbt(buf);
+  const base = filename.replace(/^.*[\\/]/, "").replace(/\.[^.]+$/, "") || null;
+  if (getCompound(root, "Regions") && root.MinecraftDataVersion !== void 0)
+    return readLitematic(root, base);
+  if (getCompound(root, "Schematic")?.Version !== void 0 || root.Palette || root.BlockData)
+    return readSponge(root, base);
+  if (root.Blocks?.t === "byteArray") return readMcEdit(root, base);
+  if (root.size && (root.palette || root.palettes) && root.blocks) return readStructure(root, base);
+  throw new Error(
+    "Unrecognised schematic: expected WorldEdit .schem, MCEdit .schematic, Litematica .litematic or a structure .nbt."
+  );
+}
+
 // packages/formats/src/index.ts
 var FORMAT_EXTENSIONS = {
   schem: ".schem",
@@ -5153,6 +10228,7 @@ var FORMAT_EXTENSIONS = {
   schematic: ".schematic",
   litematic: ".litematic",
   nbt: ".nbt",
+  datapack: ".zip",
   materials: ".csv"
 };
 function formatsFor(version) {
@@ -5181,6 +10257,12 @@ function formatsFor(version) {
     ),
     info("litematic", !legacy, false, "Litematica exports here target 1.13+."),
     info("nbt", !legacy, false, "Structure files with modern block states need 1.13+."),
+    info(
+      "datapack",
+      datapacksAvailable(version),
+      false,
+      "Data packs need Minecraft 1.13+; use the .schematic with WorldEdit."
+    ),
     info("materials", true, false)
   ];
 }
@@ -5205,6 +10287,25 @@ function exportBuild(format, input) {
       return { ...writeLitematic(input), filename, mime: "application/octet-stream" };
     case "nbt":
       return { ...writeStructure(input), filename, mime: "application/octet-stream" };
+    case "datapack": {
+      const pack = writeDatapack({
+        name: input.name,
+        version: input.version,
+        ...input.datapack ?? {
+          place: { kind: "here" },
+          changes: datapackChangesFromVolume(input.volume, input.anchor)
+        }
+      });
+      return {
+        buffer: pack.zip,
+        filename: `${pack.folder}.zip`,
+        mime: "application/zip",
+        warnings: [
+          `In the game: put the .zip in the world's datapacks folder, /reload, then /function ${pack.functionId}/build (undo: /function ${pack.functionId}/undo).`,
+          ...pack.warnings
+        ]
+      };
+    }
     case "materials": {
       const cat = getCatalog(input.version);
       const csv = materialListCsv(materialList(input.volume), (item) => cat.displayName(item));
@@ -5216,6 +10317,989 @@ function exportBuild(format, input) {
       };
     }
   }
+}
+
+// packages/world/src/chunk.ts
+var AIR4 = "minecraft:air";
+var NO_SPAN_DATA_VERSION = 2529;
+var MIN_WRITE_DATA_VERSION = 1952;
+function unpackIndices(words, bits, count, spanning) {
+  const out = new Uint16Array(count);
+  if (bits <= 0) return out;
+  const mask2 = (1 << bits) - 1;
+  const perLong = Math.floor(64 / bits);
+  for (let i = 0; i < count; i++) {
+    const g = spanning ? i * bits : Math.floor(i / perLong) * 64 + i % perLong * bits;
+    const w = g >>> 5;
+    const o = g & 31;
+    let v = (words[w] ?? 0) >>> o;
+    if (o + bits > 32) v |= (words[w + 1] ?? 0) << 32 - o;
+    out[i] = v & mask2;
+  }
+  return out;
+}
+function packIndices(values, bits, spanning) {
+  const perLong = Math.floor(64 / bits);
+  const longs = spanning ? Math.ceil(values.length * bits / 64) : Math.ceil(values.length / perLong);
+  const words = new Uint32Array(longs * 2);
+  for (let i = 0; i < values.length; i++) {
+    const v = values[i];
+    if (v === 0) continue;
+    const g = spanning ? i * bits : Math.floor(i / perLong) * 64 + i % perLong * bits;
+    const w = g >>> 5;
+    const o = g & 31;
+    words[w] = (words[w] | v << o) >>> 0;
+    if (o + bits > 32) words[w + 1] = (words[w + 1] | v >>> 32 - o) >>> 0;
+  }
+  return words;
+}
+function stateBits(paletteSize) {
+  return Math.max(4, Math.ceil(Math.log2(Math.max(2, paletteSize))));
+}
+function statesOf(paletteTags) {
+  return paletteTags.map((t) => {
+    if (t.t !== "compound") return AIR4;
+    const props = {};
+    for (const [k, v] of Object.entries(getCompound(t.v, "Properties") ?? {}))
+      if (v.t === "string") props[k] = v.v;
+    const name = getString(t.v, "Name") ?? AIR4;
+    return /^minecraft:(cave_|void_)?air$/.test(name) ? AIR4 : canonicalState(name, props);
+  });
+}
+function nibble(arr, i) {
+  if (!arr) return 0;
+  return arr[i >> 1] >> (i & 1) * 4 & 15;
+}
+var legacyStates = null;
+function legacyState(id, meta) {
+  if (!legacyStates) {
+    legacyStates = /* @__PURE__ */ new Map();
+    for (const [key, state] of Object.entries(catalogData.legacyBlocks)) {
+      const [i, m] = key.split(":").map(Number);
+      legacyStates.set(i * 16 + m, canonicalFromString(state));
+    }
+  }
+  return legacyStates.get(id * 16 + meta) ?? legacyStates.get(id * 16) ?? null;
+}
+var COMPLETE = /* @__PURE__ */ new Set(["full", "fullchunk", "postprocessed"]);
+function decodeChunk(nbt) {
+  const { name, root } = readNbt(nbt);
+  const dataVersion = getNumber(root, "DataVersion") ?? 0;
+  const level = getCompound(root, "Level");
+  const sectionsRoot = level ?? root;
+  const sectionTags = getCompounds(sectionsRoot, level ? "Sections" : "sections");
+  const isLegacy = !!level && sectionTags.some((s) => s.Blocks?.t === "byteArray");
+  const format = level ? isLegacy ? "legacy" : "level" : "flat";
+  const statusRaw = (getString(sectionsRoot, "Status") ?? "").replace(/^minecraft:/, "");
+  const complete = format === "legacy" ? getNumber(level, "TerrainPopulated") === 1 : COMPLETE.has(statusRaw) || statusRaw === "" && format !== "flat";
+  const sections = /* @__PURE__ */ new Map();
+  const unknown = /* @__PURE__ */ new Set();
+  const spanning = dataVersion < NO_SPAN_DATA_VERSION;
+  for (const s of sectionTags) {
+    const y = getNumber(s, "Y");
+    if (y === void 0) continue;
+    if (format === "flat") {
+      const bs = getCompound(s, "block_states");
+      if (!bs) continue;
+      const palette = statesOf(getList(bs, "palette"));
+      if (!palette.length) continue;
+      const data = bs.data?.t === "longArray" ? bs.data.words : null;
+      const blocks2 = palette.length === 1 || !data ? new Uint16Array(4096) : unpackIndices(data, stateBits(palette.length), 4096, false);
+      sections.set(y, { y, palette, blocks: blocks2 });
+    } else if (format === "level") {
+      const paletteTags = getList(s, "Palette");
+      if (!paletteTags.length) continue;
+      const palette = statesOf(paletteTags);
+      const data = s.BlockStates?.t === "longArray" ? s.BlockStates.words : null;
+      const blocks2 = data ? unpackIndices(data, stateBits(palette.length), 4096, spanning) : new Uint16Array(4096);
+      sections.set(y, { y, palette, blocks: blocks2 });
+    } else {
+      const ids = s.Blocks?.t === "byteArray" ? s.Blocks.v : null;
+      if (!ids) continue;
+      const meta = s.Data?.t === "byteArray" ? s.Data.v : null;
+      const add = s.Add?.t === "byteArray" ? s.Add.v : null;
+      const palette = [AIR4];
+      const index2 = /* @__PURE__ */ new Map([[AIR4, 0]]);
+      const blocks2 = new Uint16Array(4096);
+      for (let i = 0; i < 4096; i++) {
+        const id = ids[i] & 255 | nibble(add, i) << 8;
+        if (id === 0) continue;
+        const state = legacyState(id, nibble(meta, i));
+        if (!state) {
+          unknown.add(id);
+          continue;
+        }
+        let p = index2.get(state);
+        if (p === void 0) {
+          p = palette.length;
+          palette.push(state);
+          index2.set(state, p);
+        }
+        blocks2[i] = p;
+      }
+      sections.set(y, { y, palette, blocks: blocks2 });
+    }
+  }
+  const cx = getNumber(sectionsRoot, "xPos") ?? 0;
+  const cz = getNumber(sectionsRoot, "zPos") ?? 0;
+  const blockEntities = getCompounds(sectionsRoot, level ? "TileEntities" : "block_entities");
+  return {
+    cx,
+    cz,
+    dataVersion,
+    format,
+    complete,
+    sections,
+    blockEntities,
+    rootName: name,
+    root,
+    unknownIds: [...unknown]
+  };
+}
+function stateTag(state) {
+  const br = state.indexOf("[");
+  const name = br < 0 ? state : state.slice(0, br);
+  if (br < 0) return compound({ Name: str(name) });
+  const props = {};
+  for (const pair of state.slice(br + 1, -1).split(",")) {
+    const eq = pair.indexOf("=");
+    if (eq > 0) props[pair.slice(0, eq)] = str(pair.slice(eq + 1));
+  }
+  return compound({ Name: str(name), Properties: compound(props) });
+}
+function posOf(c) {
+  const x = getNumber(c, "x");
+  const y = getNumber(c, "y");
+  const z3 = getNumber(c, "z");
+  return x === void 0 || y === void 0 || z3 === void 0 ? null : `${x},${y},${z3}`;
+}
+function applyChanges(chunk, changes) {
+  if (chunk.format === "legacy" || chunk.dataVersion < MIN_WRITE_DATA_VERSION)
+    throw new Error(
+      "This part of the world was saved by Minecraft 1.13 or older: open it once in 1.14+ first."
+    );
+  const flat = chunk.format === "flat";
+  const holder = flat ? chunk.root : getCompound(chunk.root, "Level");
+  const sectionKey = flat ? "sections" : "Sections";
+  const sectionList = holder[sectionKey];
+  const sectionTags = sectionList?.t === "list" ? sectionList.v.flatMap((t) => t.t === "compound" ? [t.v] : []) : [];
+  const tagByY = /* @__PURE__ */ new Map();
+  for (const s of sectionTags) {
+    const y = getNumber(s, "Y");
+    if (y !== void 0) tagByY.set(y, s);
+  }
+  const touched = /* @__PURE__ */ new Set();
+  const changedPos = /* @__PURE__ */ new Set();
+  const newEntities = [];
+  for (const c of changes) {
+    const sy = c.y >> 4;
+    let sec = chunk.sections.get(sy);
+    if (!sec) {
+      sec = { y: sy, palette: [AIR4], blocks: new Uint16Array(4096) };
+      chunk.sections.set(sy, sec);
+    }
+    let p = sec.palette.indexOf(c.state);
+    if (p < 0) p = sec.palette.push(c.state) - 1;
+    sec.blocks[(c.y & 15) << 8 | (c.z & 15) << 4 | c.x & 15] = p;
+    touched.add(sy);
+    changedPos.add(`${c.x},${c.y},${c.z}`);
+    if (c.nbt) {
+      const data = jsonToTag(c.nbt);
+      const id = c.state.replace(/\[.*$/, "");
+      newEntities.push({
+        ...data.t === "compound" ? data.v : {},
+        id: str(typeof c.nbt.id === "string" ? c.nbt.id : id),
+        x: { t: "int", v: c.x },
+        y: { t: "int", v: c.y },
+        z: { t: "int", v: c.z },
+        keepPacked: { t: "byte", v: 0 }
+      });
+    }
+  }
+  const spanning = chunk.dataVersion < NO_SPAN_DATA_VERSION;
+  for (const sy of touched) {
+    const sec = chunk.sections.get(sy);
+    const used = new Uint8Array(sec.palette.length);
+    for (let i = 0; i < 4096; i++) used[sec.blocks[i]] = 1;
+    const remap = new Uint16Array(sec.palette.length);
+    const palette = [];
+    for (let i = 0; i < sec.palette.length; i++) {
+      if (!used[i]) continue;
+      remap[i] = palette.length;
+      palette.push(sec.palette[i]);
+    }
+    const blocks2 = new Uint16Array(4096);
+    for (let i = 0; i < 4096; i++) blocks2[i] = remap[sec.blocks[i]];
+    sec.palette = palette;
+    sec.blocks = blocks2;
+    let tag = tagByY.get(sy);
+    if (!tag) {
+      tag = { Y: { t: "byte", v: sy } };
+      if (flat) {
+        const near = [...tagByY.entries()].sort(
+          (a, b) => Math.abs(a[0] - sy) - Math.abs(b[0] - sy)
+        )[0];
+        const biomes = near ? getCompound(near[1], "biomes") : void 0;
+        tag.biomes = compound(biomes ?? { palette: list("string", [str("minecraft:plains")]) });
+      }
+      tagByY.set(sy, tag);
+      sectionTags.push(tag);
+    }
+    const paletteTag = list("compound", palette.map(stateTag));
+    const words = packIndices(blocks2, stateBits(palette.length), flat ? false : spanning);
+    if (flat) {
+      tag.block_states = compound(
+        palette.length === 1 ? { palette: paletteTag } : { palette: paletteTag, data: { t: "longArray", words } }
+      );
+    } else {
+      tag.Palette = paletteTag;
+      tag.BlockStates = { t: "longArray", words };
+    }
+    delete tag.BlockLight;
+    delete tag.SkyLight;
+  }
+  sectionTags.sort((a, b) => (getNumber(a, "Y") ?? 0) - (getNumber(b, "Y") ?? 0));
+  holder[sectionKey] = list(
+    "compound",
+    sectionTags.map((v) => compound(v))
+  );
+  const beKey = flat ? "block_entities" : "TileEntities";
+  const kept = getCompounds(holder, beKey).filter((be) => {
+    const p = posOf(be);
+    return !p || !changedPos.has(p);
+  });
+  holder[beKey] = list(
+    "compound",
+    [...kept, ...newEntities].map((v) => compound(v))
+  );
+  for (const key of flat ? ["block_ticks", "fluid_ticks"] : ["TileTicks", "LiquidTicks"]) {
+    if (holder[key]?.t !== "list") continue;
+    const ticks = getCompounds(holder, key).filter((t) => {
+      const p = posOf(t);
+      return !p || !changedPos.has(p);
+    });
+    holder[key] = list(
+      "compound",
+      ticks.map((v) => compound(v))
+    );
+  }
+  holder.isLightOn = { t: "byte", v: 0 };
+  holder.Heightmaps = compound({});
+  return writeNbt(chunk.rootName, chunk.root);
+}
+
+// packages/world/src/region.ts
+import { deflateSync, gunzipSync as gunzipSync2, inflateSync as inflateSync2 } from "node:zlib";
+
+// packages/world/src/lz4.ts
+var MAGIC = Buffer.from("LZ4Block", "latin1");
+var HEADER = MAGIC.length + 1 + 4 + 4 + 4;
+function decodeBlock(src, start, end, out, op) {
+  let ip = start;
+  while (ip < end) {
+    const token = src[ip++];
+    let lit = token >>> 4;
+    if (lit === 15) {
+      let b;
+      do {
+        b = src[ip++];
+        lit += b;
+      } while (b === 255 && ip < end);
+    }
+    if (ip + lit > end || op + lit > out.length) throw new Error("Corrupt LZ4 data.");
+    src.copy(out, op, ip, ip + lit);
+    ip += lit;
+    op += lit;
+    if (ip >= end) break;
+    const offset = src[ip] | src[ip + 1] << 8;
+    ip += 2;
+    if (offset === 0 || offset > op) throw new Error("Corrupt LZ4 data.");
+    let len = token & 15;
+    if (len === 15) {
+      let b;
+      do {
+        b = src[ip++];
+        len += b;
+      } while (b === 255 && ip < end);
+    }
+    len += 4;
+    if (op + len > out.length) throw new Error("Corrupt LZ4 data.");
+    let from = op - offset;
+    for (let i = 0; i < len; i++) out[op++] = out[from++];
+  }
+  return op;
+}
+function lz4BlockStreamDecode(src) {
+  const parts2 = [];
+  let p = 0;
+  while (p + HEADER <= src.length) {
+    if (!src.subarray(p, p + MAGIC.length).equals(MAGIC))
+      throw new Error("Not an LZ4Block stream.");
+    const token = src[p + MAGIC.length];
+    const compressed = src.readInt32LE(p + MAGIC.length + 1);
+    const original = src.readInt32LE(p + MAGIC.length + 5);
+    p += HEADER;
+    if (original === 0) break;
+    if (compressed < 0 || original < 0 || p + compressed > src.length)
+      throw new Error("Corrupt LZ4 data.");
+    const method = token & 240;
+    if (method === 16) {
+      parts2.push(Buffer.from(src.subarray(p, p + compressed)));
+    } else if (method === 32) {
+      const out = Buffer.alloc(original);
+      const n = decodeBlock(src, p, p + compressed, out, 0);
+      if (n !== original) throw new Error("Corrupt LZ4 data.");
+      parts2.push(out);
+    } else {
+      throw new Error("Unknown LZ4 block method.");
+    }
+    p += compressed;
+  }
+  return Buffer.concat(parts2);
+}
+
+// packages/world/src/region.ts
+var SECTOR = 4096;
+var EXTERNAL = 128;
+function decompressChunk(type, payload2) {
+  switch (type & 127) {
+    case 1:
+      return gunzipSync2(payload2);
+    case 2:
+      return inflateSync2(payload2);
+    case 3:
+      return payload2;
+    case 4:
+      return lz4BlockStreamDecode(payload2);
+    default:
+      throw new Error(`Unsupported chunk compression ${type & 127}.`);
+  }
+}
+var RegionFile = class _RegionFile {
+  constructor(rx, rz) {
+    this.rx = rx;
+    this.rz = rz;
+  }
+  chunks = new Array(1024).fill(null);
+  static index(cx, cz) {
+    return (cx & 31) + (cz & 31) * 32;
+  }
+  /** Parse a region file; `external(cx, cz)` reads an oversized chunk's c.X.Z.mcc. */
+  static parse(buf, rx, rz, external) {
+    const region = new _RegionFile(rx, rz);
+    if (buf.length < 2 * SECTOR) return region;
+    for (let i = 0; i < 1024; i++) {
+      const loc = buf.readUInt32BE(i * 4);
+      const offset = loc >>> 8;
+      const count = loc & 255;
+      if (offset < 2 || count === 0) continue;
+      const start = offset * SECTOR;
+      if (start + 5 > buf.length) continue;
+      const length = buf.readUInt32BE(start);
+      if (length < 1 || start + 4 + length > buf.length) continue;
+      const type = buf[start + 4];
+      let payload2 = buf.subarray(start + 5, start + 4 + length);
+      if (type & EXTERNAL) {
+        const cx = rx * 32 + (i & 31);
+        const cz = rz * 32 + (i >> 5);
+        payload2 = external?.(cx, cz) ?? null;
+        if (!payload2) continue;
+      }
+      region.chunks[i] = { type, payload: payload2, timestamp: buf.readUInt32BE(SECTOR + i * 4) };
+    }
+    return region;
+  }
+  has(cx, cz) {
+    return this.chunks[_RegionFile.index(cx, cz)] !== null;
+  }
+  /** The chunk's NBT bytes, uncompressed, or null when it was never generated. */
+  read(cx, cz) {
+    const c = this.chunks[_RegionFile.index(cx, cz)];
+    return c ? decompressChunk(c.type, c.payload) : null;
+  }
+  write(cx, cz, nbt, timestamp = Math.floor(Date.now() / 1e3)) {
+    this.chunks[_RegionFile.index(cx, cz)] = { type: 2, payload: deflateSync(nbt), timestamp };
+  }
+  /** The region file, plus the .mcc files of chunks too big for 255 sectors (by file name). */
+  serialize() {
+    const header = Buffer.alloc(2 * SECTOR);
+    const bodies = [];
+    const external = /* @__PURE__ */ new Map();
+    let sector = 2;
+    for (let i = 0; i < 1024; i++) {
+      const c = this.chunks[i];
+      if (!c) continue;
+      let type = c.type & 127;
+      let payload2 = c.payload;
+      if (Math.ceil((payload2.length + 5) / SECTOR) > 255) {
+        external.set(`c.${this.rx * 32 + (i & 31)}.${this.rz * 32 + (i >> 5)}.mcc`, payload2);
+        type |= EXTERNAL;
+        payload2 = Buffer.alloc(0);
+      }
+      const sectors = Math.ceil((payload2.length + 5) / SECTOR);
+      const body = Buffer.alloc(sectors * SECTOR);
+      body.writeUInt32BE(payload2.length + 1, 0);
+      body[4] = type;
+      payload2.copy(body, 5);
+      header.writeUInt32BE((sector << 8 | sectors) >>> 0, i * 4);
+      header.writeUInt32BE(c.timestamp >>> 0, SECTOR + i * 4);
+      bodies.push(body);
+      sector += sectors;
+    }
+    return { region: Buffer.concat([header, ...bodies]), external };
+  }
+};
+
+// packages/world/src/saves.ts
+import { createHash as createHash2 } from "node:crypto";
+import { existsSync as existsSync4, readdirSync, readFileSync as readFileSync3, statSync } from "node:fs";
+import { homedir as homedir2 } from "node:os";
+import { basename, delimiter, join as join4, resolve } from "node:path";
+var OVERWORLD = "minecraft:overworld";
+var LEGACY_DIMENSIONS = {
+  "minecraft:overworld": "",
+  "minecraft:the_nether": "DIM-1",
+  "minecraft:the_end": "DIM1"
+};
+var DIMENSION_IDS = {
+  0: OVERWORLD,
+  [-1]: "minecraft:the_nether",
+  1: "minecraft:the_end"
+};
+function worldId(path2) {
+  return createHash2("sha1").update(resolve(path2)).digest("hex").slice(0, 12);
+}
+function dirs(path2) {
+  try {
+    return readdirSync(path2, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => join4(path2, d.name));
+  } catch {
+    return [];
+  }
+}
+function findSavesFolders(minecraftDir2) {
+  const home = homedir2();
+  const appData = process.env.APPDATA ?? (process.platform === "darwin" ? join4(home, "Library", "Application Support") : join4(home, "AppData", "Roaming"));
+  const dataHome = process.env.XDG_DATA_HOME ?? join4(home, ".local", "share");
+  const support = process.platform === "darwin" ? join4(home, "Library", "Application Support") : null;
+  const out = [];
+  const add = (path2, launcher) => {
+    if (existsSync4(path2) && !out.some((s) => resolve(s.path) === resolve(path2)))
+      out.push({ path: path2, launcher });
+  };
+  for (const extra of (process.env.MSL_SAVES ?? "").split(delimiter).filter(Boolean))
+    add(extra, "Custom");
+  if (minecraftDir2) add(join4(minecraftDir2, "saves"), "Minecraft Launcher");
+  add(join4(home, ".minecraft", "saves"), "Minecraft Launcher");
+  add(
+    join4(home, ".var", "app", "com.mojang.Minecraft", ".minecraft", "saves"),
+    "Minecraft Launcher"
+  );
+  const instanceRoots = [];
+  for (const base of [appData, dataHome, support].filter((p) => !!p)) {
+    instanceRoots.push([join4(base, "PrismLauncher", "instances"), "Prism Launcher"]);
+    instanceRoots.push([join4(base, "MultiMC", "instances"), "MultiMC"]);
+    instanceRoots.push([join4(base, "ModrinthApp", "profiles"), "Modrinth"]);
+    instanceRoots.push([join4(base, "com.modrinth.theseus", "profiles"), "Modrinth"]);
+  }
+  instanceRoots.push([join4(home, "curseforge", "minecraft", "Instances"), "CurseForge"]);
+  instanceRoots.push([
+    join4(home, "Documents", "curseforge", "minecraft", "Instances"),
+    "CurseForge"
+  ]);
+  for (const [root, launcher] of instanceRoots) {
+    for (const inst of dirs(root)) {
+      const name = basename(inst);
+      for (const sub of [".minecraft", "minecraft", ""])
+        add(join4(inst, sub, "saves"), `${launcher}: ${name}`);
+    }
+  }
+  return out;
+}
+function readLevelDat(worldDir) {
+  for (const file of ["level.dat", "level.dat_old"]) {
+    try {
+      const root = readNbt(readFileSync3(join4(worldDir, file))).root;
+      return getCompound(root, "Data") ?? null;
+    } catch {
+    }
+  }
+  return null;
+}
+function dimensionName(c, key) {
+  const t = c?.[key];
+  if (t?.t === "string") return t.v.includes(":") ? t.v : `minecraft:${t.v}`;
+  const n = getNumber(c, key);
+  return n === void 0 ? OVERWORLD : DIMENSION_IDS[n] ?? OVERWORLD;
+}
+function playerOf(c) {
+  const pos = getList(c, "Pos").map((t) => t.t === "double" || t.t === "float" ? t.v : 0);
+  if (pos.length < 3) return null;
+  return {
+    pos: [Math.floor(pos[0]), Math.floor(pos[1]), Math.floor(pos[2])],
+    dimension: dimensionName(c, "Dimension")
+  };
+}
+function findPlayer(worldDir, data) {
+  const inLevel = playerOf(getCompound(data, "Player"));
+  if (inLevel) return inLevel;
+  let newest = null;
+  for (const dir of ["players/data", "players", "playerdata"]) {
+    const full = join4(worldDir, dir);
+    let names;
+    try {
+      names = readdirSync(full);
+    } catch {
+      continue;
+    }
+    for (const n of names) {
+      if (!n.endsWith(".dat")) continue;
+      try {
+        const mtime = statSync(join4(full, n)).mtimeMs;
+        if (!newest || mtime > newest.mtime) newest = { file: join4(full, n), mtime };
+      } catch {
+      }
+    }
+  }
+  if (!newest) return null;
+  try {
+    return playerOf(readNbt(readFileSync3(newest.file)).root);
+  } catch {
+    return null;
+  }
+}
+function hasRegions(dir) {
+  try {
+    return readdirSync(dir).some((n) => n.endsWith(".mca") || n.endsWith(".mcr"));
+  } catch {
+    return false;
+  }
+}
+function regionDirs(worldDir, dimension) {
+  const [ns, path2] = dimension.includes(":") ? dimension.split(":", 2) : ["minecraft", dimension];
+  const out = [join4(worldDir, "dimensions", ns, path2, "region")];
+  const legacy = LEGACY_DIMENSIONS[dimension];
+  if (legacy !== void 0) out.push(join4(worldDir, legacy, "region"));
+  return out;
+}
+function regionDir(worldDir, dimension) {
+  return regionDirs(worldDir, dimension).find(hasRegions) ?? null;
+}
+function listDimensions(worldDir) {
+  const found = /* @__PURE__ */ new Set();
+  for (const dim of Object.keys(LEGACY_DIMENSIONS)) if (regionDir(worldDir, dim)) found.add(dim);
+  for (const nsDir of dirs(join4(worldDir, "dimensions")))
+    for (const dimDir of dirs(nsDir))
+      if (hasRegions(join4(dimDir, "region"))) found.add(`${basename(nsDir)}:${basename(dimDir)}`);
+  return [...found];
+}
+var GAME_MODES = ["survival", "creative", "adventure", "spectator"];
+function readWorld(worldDir, launcher = "Folder") {
+  const data = readLevelDat(worldDir);
+  if (!data) return null;
+  const version = getString(getCompound(data, "Version"), "Name") ?? null;
+  const spawnPos = getCompound(data, "spawn")?.pos;
+  let spawn2 = null;
+  if (spawnPos?.t === "intArray" && spawnPos.v.length >= 3)
+    spawn2 = [spawnPos.v[0], spawnPos.v[1], spawnPos.v[2]];
+  else {
+    const sx = getNumber(data, "SpawnX");
+    const sy = getNumber(data, "SpawnY");
+    const sz = getNumber(data, "SpawnZ");
+    if (sx !== void 0 && sy !== void 0 && sz !== void 0) spawn2 = [sx, sy, sz];
+  }
+  const mode = getNumber(data, "GameType");
+  return {
+    id: worldId(worldDir),
+    path: resolve(worldDir),
+    folder: basename(worldDir),
+    name: getString(data, "LevelName") ?? basename(worldDir),
+    launcher,
+    version,
+    dataVersion: getNumber(data, "DataVersion") ?? null,
+    lastPlayed: getNumber(data, "LastPlayed") ?? null,
+    gameMode: mode !== void 0 ? GAME_MODES[mode] ?? null : null,
+    hardcore: getNumber(data, "hardcore") === 1,
+    cheats: getNumber(data, "allowCommands") === 1,
+    player: findPlayer(worldDir, data),
+    spawn: spawn2,
+    dimensions: listDimensions(worldDir),
+    hasIcon: existsSync4(join4(worldDir, "icon.png"))
+  };
+}
+function listWorlds(minecraftDir2) {
+  const out = [];
+  for (const saves of findSavesFolders(minecraftDir2)) {
+    for (const dir of dirs(saves.path)) {
+      if (!existsSync4(join4(dir, "level.dat"))) continue;
+      const w = readWorld(dir, saves.launcher);
+      if (w) out.push(w);
+    }
+  }
+  return out.sort((a, b) => (b.lastPlayed ?? 0) - (a.lastPlayed ?? 0));
+}
+
+// packages/world/src/site.ts
+import { existsSync as existsSync5, readFileSync as readFileSync4 } from "node:fs";
+import { join as join5 } from "node:path";
+var MAX_SITE_RADIUS = 128;
+var classCache = /* @__PURE__ */ new Map();
+function classOf(state) {
+  let c = classCache.get(state);
+  if (c === void 0) {
+    c = terrainClass(blockNameOf(state));
+    classCache.set(state, c);
+  }
+  return c;
+}
+function columnHeights(palette, data, size) {
+  const [sx, sy, sz] = size;
+  const classes = palette.map(classOf);
+  const n = sx * sz;
+  const ground = new Int16Array(n).fill(-1);
+  const top = new Int16Array(n).fill(-1);
+  const water = new Int16Array(n).fill(-1);
+  for (let z3 = 0; z3 < sz; z3++) {
+    for (let x = 0; x < sx; x++) {
+      const col = x + sx * z3;
+      for (let y = sy - 1; y >= 0; y--) {
+        const c = classes[data[x + sx * (z3 + sz * y)]];
+        if (c === "air") continue;
+        if (top[col] === -1) top[col] = y;
+        if (c === "liquid" && water[col] === -1) water[col] = y;
+        if (c === "ground") {
+          ground[col] = y;
+          break;
+        }
+      }
+    }
+  }
+  return { ground, top, water };
+}
+function median(values) {
+  if (!values.length) return 0;
+  const s = [...values].sort((a, b) => a - b);
+  return s[Math.floor(s.length / 2)];
+}
+function blockEntityId(raw) {
+  if (raw.includes(":")) return raw;
+  return `minecraft:${raw.replace(/([a-z])([A-Z])/g, "$1_$2").toLowerCase()}`;
+}
+function readWorldSite(worldDir, options) {
+  const dimension = options.dimension ?? OVERWORLD;
+  const radius = Math.round(options.radius);
+  if (!(radius >= 4 && radius <= MAX_SITE_RADIUS))
+    throw new Error(`The radius must be between 4 and ${MAX_SITE_RADIUS} blocks.`);
+  const dir = regionDir(worldDir, dimension);
+  if (!dir) throw new Error(`This world has no saved ${dimension} chunks.`);
+  const [cxw, czw] = [
+    Math.floor(options.center[0]),
+    Math.floor(options.center[options.center.length - 1])
+  ];
+  const x0 = cxw - radius;
+  const x1 = cxw + radius;
+  const z0 = czw - radius;
+  const z1 = czw + radius;
+  const regions = /* @__PURE__ */ new Map();
+  const regionAt = (rx, rz) => {
+    const key = `${rx},${rz}`;
+    if (!regions.has(key)) {
+      const file = join5(dir, `r.${rx}.${rz}.mca`);
+      regions.set(
+        key,
+        existsSync5(file) ? RegionFile.parse(readFileSync4(file), rx, rz, (cx, cz) => {
+          const mcc = join5(dir, `c.${cx}.${cz}.mcc`);
+          return existsSync5(mcc) ? readFileSync4(mcc) : null;
+        }) : null
+      );
+    }
+    return regions.get(key) ?? null;
+  };
+  const chunks = /* @__PURE__ */ new Map();
+  let missing = 0;
+  let incomplete = 0;
+  let oldFormat = 0;
+  let unreadable = 0;
+  const unknownIds = /* @__PURE__ */ new Set();
+  let minDataVersion = Infinity;
+  let maxDataVersion = 0;
+  let bottom = Infinity;
+  let topLimit = -Infinity;
+  for (let cx = x0 >> 4; cx <= x1 >> 4; cx++) {
+    for (let cz = z0 >> 4; cz <= z1 >> 4; cz++) {
+      const region = regionAt(cx >> 5, cz >> 5);
+      let bytes = null;
+      try {
+        bytes = region?.read(cx, cz) ?? null;
+      } catch {
+        unreadable++;
+        continue;
+      }
+      if (!bytes) {
+        missing++;
+        continue;
+      }
+      let chunk;
+      try {
+        chunk = decodeChunk(bytes);
+      } catch {
+        unreadable++;
+        continue;
+      }
+      if (!chunk.complete) incomplete++;
+      if (chunk.format === "legacy" || chunk.dataVersion < MIN_WRITE_DATA_VERSION) oldFormat++;
+      chunk.unknownIds.forEach((id) => unknownIds.add(id));
+      minDataVersion = Math.min(minDataVersion, chunk.dataVersion);
+      maxDataVersion = Math.max(maxDataVersion, chunk.dataVersion);
+      for (const y of chunk.sections.keys()) {
+        bottom = Math.min(bottom, y * 16);
+        topLimit = Math.max(topLimit, y * 16 + 15);
+      }
+      chunks.set(`${cx},${cz}`, chunk);
+    }
+  }
+  if (!chunks.size)
+    throw new Error(
+      `No saved chunks around ${cxw}, ${czw} in ${dimension}: walk there in the game, then save and quit.`
+    );
+  const sx = x1 - x0 + 1;
+  const sz = z1 - z0 + 1;
+  const groundCol = new Int32Array(sx * sz).fill(-1e5);
+  const topCol = new Int32Array(sx * sz).fill(-1e5);
+  for (const chunk of chunks.values()) {
+    const ys = [...chunk.sections.keys()].sort((a, b) => b - a);
+    for (let lz = 0; lz < 16; lz++) {
+      const wz = chunk.cz * 16 + lz;
+      if (wz < z0 || wz > z1) continue;
+      for (let lx = 0; lx < 16; lx++) {
+        const wx = chunk.cx * 16 + lx;
+        if (wx < x0 || wx > x1) continue;
+        const col = wx - x0 + sx * (wz - z0);
+        scan: for (const sy2 of ys) {
+          const s = chunk.sections.get(sy2);
+          if (!s) continue;
+          for (let y = 15; y >= 0; y--) {
+            const state = s.palette[s.blocks[y << 8 | lz << 4 | lx]] ?? AIR4;
+            const c = classOf(state);
+            if (c === "air") continue;
+            if (topCol[col] === -1e5) topCol[col] = sy2 * 16 + y;
+            if (c === "ground") {
+              groundCol[col] = sy2 * 16 + y;
+              break scan;
+            }
+          }
+        }
+      }
+    }
+  }
+  const grounds = [...groundCol].filter((g) => g > -1e5);
+  let minGround = Infinity;
+  let maxGround = -Infinity;
+  for (const g of grounds) {
+    if (g < minGround) minGround = g;
+    if (g > maxGround) maxGround = g;
+  }
+  if (!grounds.length) minGround = maxGround = bottom;
+  let maxTop = maxGround;
+  for (const t of topCol) if (t > maxTop) maxTop = t;
+  const y0 = Math.max(bottom, minGround - (options.below ?? 12));
+  const y1 = Math.min(topLimit, Math.max(maxTop + 1, maxGround + (options.above ?? 64)));
+  const sy = y1 - y0 + 1;
+  const palette = [AIR4];
+  const index2 = /* @__PURE__ */ new Map([[AIR4, 0]]);
+  const data = new Uint16Array(sx * sy * sz);
+  const blockEntities = [];
+  for (const chunk of chunks.values()) {
+    for (const s of chunk.sections.values()) {
+      const by = s.y * 16;
+      if (by + 15 < y0 || by > y1) continue;
+      const ids = s.palette.map((state) => {
+        let id = index2.get(state);
+        if (id === void 0) {
+          id = palette.length;
+          if (id >= 65535) throw new Error("This area has too many different blocks to read.");
+          palette.push(state);
+          index2.set(state, id);
+        }
+        return id;
+      });
+      for (let i = 0; i < 4096; i++) {
+        const id = ids[s.blocks[i]];
+        if (id === 0) continue;
+        const wy = by + (i >> 8);
+        const wz = chunk.cz * 16 + (i >> 4 & 15);
+        const wx = chunk.cx * 16 + (i & 15);
+        if (wy < y0 || wy > y1 || wz < z0 || wz > z1 || wx < x0 || wx > x1) continue;
+        data[wx - x0 + sx * (wz - z0 + sz * (wy - y0))] = id;
+      }
+    }
+    for (const be of chunk.blockEntities) {
+      const x = getNumber(be, "x");
+      const y = getNumber(be, "y");
+      const z3 = getNumber(be, "z");
+      if (x === void 0 || y === void 0 || z3 === void 0) continue;
+      if (x < x0 || x > x1 || y < y0 || y > y1 || z3 < z0 || z3 > z1) continue;
+      const inner = { ...be };
+      for (const k of ["x", "y", "z", "id", "keepPacked"]) delete inner[k];
+      blockEntities.push({
+        id: blockEntityId(getString(be, "id") ?? ""),
+        pos: [x - x0, y - y0, z3 - z0],
+        data: compoundToJson(inner)
+      });
+    }
+  }
+  const centerCol = cxw - x0 + sx * (czw - z0);
+  const centerGround = groundCol[centerCol] ?? -1e5;
+  const originY = options.center.length === 3 ? Math.floor(options.center[1]) : (centerGround > -1e5 ? centerGround : median(grounds)) + 1;
+  const version = versionForDataVersion(maxDataVersion || null);
+  const warnings = [];
+  if (missing)
+    warnings.push(
+      `${missing} chunk(s) in the area were never generated or saved and read as empty air: walk there in the game first, or pick a smaller radius.`
+    );
+  if (incomplete)
+    warnings.push(
+      `${incomplete} chunk(s) at the edge are not fully generated (no trees or structures yet).`
+    );
+  if (unreadable) warnings.push(`${unreadable} chunk(s) could not be read and were left as air.`);
+  if (unknownIds.size)
+    warnings.push(
+      `Unknown (modded?) block ids read as air: ${[...unknownIds].slice(0, 10).join(", ")}.`
+    );
+  if (minDataVersion !== maxDataVersion && minDataVersion !== Infinity)
+    warnings.push(
+      "Some chunks were last saved by an older Minecraft version; the game upgrades them when you walk there."
+    );
+  return {
+    version: version.id,
+    dataVersion: maxDataVersion || null,
+    worldMin: [x0, y0, z0],
+    size: [sx, sy, sz],
+    palette,
+    data,
+    blockEntities,
+    origin: [cxw, originY, czw],
+    writable: !missing && !incomplete && !oldFormat && !unreadable,
+    warnings
+  };
+}
+function siteFromSchematic(v) {
+  const [sx, sy, sz] = v.size;
+  const heights = columnHeights(v.palette, v.data, v.size);
+  const cx = Math.floor(sx / 2);
+  const cz = Math.floor(sz / 2);
+  const centerGround = heights.ground[cx + sx * cz] ?? -1;
+  const grounds = [...heights.ground].filter((g) => g >= 0);
+  const groundY = centerGround >= 0 ? centerGround : grounds.length ? median(grounds) : -1;
+  const worldMin = v.worldOrigin ?? [0, 0, 0];
+  const version = v.dataVersion ? versionForDataVersion(v.dataVersion) : versionForDataVersion(v.format === "mcedit" ? 1343 : null);
+  const warnings = [...v.warnings];
+  if (!v.worldOrigin)
+    warnings.push(
+      "The file does not say where it was copied from: coordinates are relative to its corner."
+    );
+  return {
+    version: version.id,
+    dataVersion: v.dataVersion,
+    worldMin,
+    size: [sx, sy, sz],
+    palette: v.palette,
+    data: v.data,
+    blockEntities: v.blockEntities,
+    origin: [worldMin[0] + cx, worldMin[1] + groundY + 1, worldMin[2] + cz],
+    writable: false,
+    warnings
+  };
+}
+
+// packages/world/src/writeWorld.ts
+import { existsSync as existsSync6, readFileSync as readFileSync5, renameSync as renameSync2, writeFileSync as writeFileSync3 } from "node:fs";
+import { cp } from "node:fs/promises";
+import { gunzipSync as gunzipSync3, gzipSync as gzipSync2 } from "node:zlib";
+import { basename as basename2, dirname, join as join6 } from "node:path";
+function safeFolderName(name) {
+  return name.replace(/[\\/:*?"<>|]/g, "_").replace(new RegExp("\\p{Cc}", "gu"), "_").replace(/^\.+/, "").trim().slice(0, 80) || "World";
+}
+function writeAtomic(file, data) {
+  const tmp = `${file}.vibeschem-tmp`;
+  writeFileSync3(tmp, data);
+  renameSync2(tmp, file);
+}
+async function copyWorld(worldDir, newName) {
+  const parent = dirname(worldDir);
+  const base = safeFolderName(newName);
+  let folder = base;
+  for (let i = 2; existsSync6(join6(parent, folder)); i++) folder = `${base} (${i})`;
+  const dest = join6(parent, folder);
+  await cp(worldDir, dest, {
+    recursive: true,
+    errorOnExist: true,
+    force: false,
+    filter: (src) => basename2(src) !== "session.lock" && !src.endsWith(".vibeschem-tmp")
+  });
+  const levelFile = join6(dest, "level.dat");
+  const raw = readFileSync5(levelFile);
+  const gz = raw[0] === 31 && raw[1] === 139;
+  const { name: rootName, root } = readNbt(gz ? gunzipSync3(raw) : raw);
+  const data = getCompound(root, "Data");
+  if (data) data.LevelName = str(newName);
+  const bytes = writeNbt(rootName, root);
+  writeAtomic(levelFile, gz ? gzipSync2(bytes) : bytes);
+  return { path: dest, folder, name: newName };
+}
+function writeBlocks(worldDir, dimension, changes) {
+  const dir = regionDir(worldDir, dimension);
+  if (!dir) throw new Error(`This world has no saved ${dimension} chunks.`);
+  const byRegion = /* @__PURE__ */ new Map();
+  for (const c of changes) {
+    const cx = c.x >> 4;
+    const cz = c.z >> 4;
+    const rkey = `${cx >> 5},${cz >> 5}`;
+    let chunks = byRegion.get(rkey);
+    if (!chunks) byRegion.set(rkey, chunks = /* @__PURE__ */ new Map());
+    const ckey = `${cx},${cz}`;
+    let list2 = chunks.get(ckey);
+    if (!list2) chunks.set(ckey, list2 = []);
+    list2.push(c);
+  }
+  const external = (cx, cz) => {
+    const f = join6(dir, `c.${cx}.${cz}.mcc`);
+    return existsSync6(f) ? readFileSync5(f) : null;
+  };
+  const plans = [];
+  for (const [rkey, chunks] of byRegion) {
+    const [rx, rz] = rkey.split(",").map(Number);
+    const file = join6(dir, `r.${rx}.${rz}.mca`);
+    if (!existsSync6(file))
+      throw new Error(`Part of the area was never generated (region ${rx}, ${rz}).`);
+    const region = RegionFile.parse(readFileSync5(file), rx, rz, external);
+    const out = [];
+    for (const [ckey, list2] of chunks) {
+      const [cx, cz] = ckey.split(",").map(Number);
+      const bytes = region.read(cx, cz);
+      if (!bytes)
+        throw new Error(`Chunk ${cx}, ${cz} was never generated: walk there in the game first.`);
+      const chunk = decodeChunk(bytes);
+      if (!chunk.complete)
+        throw new Error(
+          `Chunk ${cx}, ${cz} is not fully generated yet: walk there in the game first.`
+        );
+      if (chunk.format === "legacy" || chunk.dataVersion < MIN_WRITE_DATA_VERSION)
+        throw new Error(
+          `Chunk ${cx}, ${cz} was saved by Minecraft 1.13 or older; writing worlds needs 1.14+.`
+        );
+      out.push({ cx, cz, nbt: applyChanges(chunk, list2) });
+    }
+    plans.push({ file, region, chunks: out });
+  }
+  let chunkCount = 0;
+  for (const plan of plans) {
+    for (const c of plan.chunks) plan.region.write(c.cx, c.cz, c.nbt);
+    chunkCount += plan.chunks.length;
+    const { region, external: mcc } = plan.region.serialize();
+    for (const [name, data] of mcc) writeAtomic(join6(dir, name), data);
+    writeAtomic(plan.file, region);
+  }
+  return { chunks: chunkCount, regions: plans.length, blocks: changes.length };
 }
 
 // apps/server/src/assets/augment.ts
@@ -5515,11 +11599,381 @@ function applyEdits(input, edits) {
         Object.assign(spec, edit.set);
         break;
       }
+      case "circuit": {
+        if (edit.set === null) {
+          delete spec.circuit;
+          break;
+        }
+        const c = { ...spec.circuit ?? {} };
+        for (const key of ["inputs", "outputs"]) {
+          const patch = edit.set[key];
+          if (!patch) continue;
+          const merged = { ...c[key] ?? {} };
+          for (const [name, io] of Object.entries(patch)) {
+            if (io === null) delete merged[name];
+            else merged[name] = io;
+          }
+          c[key] = merged;
+        }
+        if (edit.set.tests) {
+          const tests = [...c.tests ?? []];
+          for (const t of edit.set.tests) {
+            const k = tests.findIndex((x) => x.name === t.name);
+            if ("remove" in t) {
+              if (k < 0) throw new EditError(`circuit: no test named "${t.name}" to remove.`);
+              tests.splice(k, 1);
+            } else if (k >= 0) tests[k] = t;
+            else tests.push(t);
+          }
+          c.tests = tests;
+        }
+        if (edit.set.settleTicks !== void 0) {
+          if (edit.set.settleTicks === null) delete c.settleTicks;
+          else c.settleTicks = edit.set.settleTicks;
+        }
+        spec.circuit = c;
+        break;
+      }
       default:
         throw new EditError(`Unknown edit op "${edit.op}".`);
     }
   }
   return spec;
+}
+
+// apps/server/src/core/SiteStore.ts
+import { randomBytes } from "node:crypto";
+import {
+  existsSync as existsSync7,
+  mkdirSync as mkdirSync2,
+  readdirSync as readdirSync2,
+  readFileSync as readFileSync6,
+  renameSync as renameSync3,
+  writeFileSync as writeFileSync4
+} from "node:fs";
+import { join as join7 } from "node:path";
+import { gunzipSync as gunzipSync4, gzipSync as gzipSync3 } from "node:zlib";
+var ID = /^site_[a-z0-9]{8,32}$/;
+var SiteStore = class {
+  root = appDir("sites");
+  cache = null;
+  save(volume, source, name) {
+    const id = `site_${randomBytes(6).toString("hex")}`;
+    const dir = join7(this.root, id);
+    mkdirSync2(dir, { recursive: true });
+    let blocks2 = 0;
+    for (let i = 0; i < volume.data.length; i++) if (volume.data[i] !== 0) blocks2++;
+    const info = {
+      id,
+      name,
+      kind: source.kind,
+      version: volume.version,
+      size: volume.size,
+      worldMin: volume.worldMin,
+      origin: volume.origin,
+      writable: volume.writable && source.kind === "world",
+      blocks: blocks2,
+      createdAt: Date.now(),
+      ...source.kind === "world" ? { world: source.worldName, dimension: source.dimension } : { file: source.filename }
+    };
+    const file = {
+      info,
+      source,
+      version: volume.version,
+      dataVersion: volume.dataVersion,
+      worldMin: volume.worldMin,
+      size: volume.size,
+      origin: volume.origin,
+      writable: info.writable,
+      warnings: volume.warnings,
+      palette: volume.palette,
+      blockEntities: volume.blockEntities
+    };
+    const data = volume.data;
+    writeFileSync4(
+      join7(dir, "blocks.bin"),
+      gzipSync3(Buffer.from(data.buffer, data.byteOffset, data.byteLength), { level: 6 })
+    );
+    writeFileSync4(join7(dir, "site.json.tmp"), JSON.stringify(file));
+    renameSync3(join7(dir, "site.json.tmp"), join7(dir, "site.json"));
+    const site = { ...volume, writable: info.writable, info, source };
+    this.cache = { id, site };
+    return site;
+  }
+  get(id) {
+    if (!ID.test(id)) return null;
+    if (this.cache?.id === id) return this.cache.site;
+    const dir = join7(this.root, id);
+    if (!existsSync7(join7(dir, "site.json"))) return null;
+    const file = JSON.parse(readFileSync6(join7(dir, "site.json"), "utf8"));
+    const raw = gunzipSync4(readFileSync6(join7(dir, "blocks.bin")));
+    const data = new Uint16Array(raw.length / 2);
+    for (let i = 0; i < data.length; i++) data[i] = raw.readUInt16LE(i * 2);
+    const site = {
+      version: file.version,
+      dataVersion: file.dataVersion,
+      worldMin: file.worldMin,
+      size: file.size,
+      palette: file.palette,
+      data,
+      blockEntities: file.blockEntities,
+      origin: file.origin,
+      writable: file.writable,
+      warnings: file.warnings,
+      info: file.info,
+      source: file.source
+    };
+    this.cache = { id, site };
+    return site;
+  }
+  list() {
+    const out = [];
+    for (const id of existsSync7(this.root) ? readdirSync2(this.root) : []) {
+      if (!ID.test(id)) continue;
+      try {
+        const file = JSON.parse(readFileSync6(join7(this.root, id, "site.json"), "utf8"));
+        out.push(file.info);
+      } catch {
+      }
+    }
+    return out.sort((a, b) => b.createdAt - a.createdAt);
+  }
+};
+
+// apps/server/src/core/sites.ts
+function specMin(site) {
+  return [
+    site.worldMin[0] - site.origin[0],
+    site.worldMin[1] - site.origin[1],
+    site.worldMin[2] - site.origin[2]
+  ];
+}
+function toCompileSite(site) {
+  return {
+    version: site.version,
+    min: specMin(site),
+    size: site.size,
+    palette: site.palette,
+    data: site.data,
+    blockEntities: site.blockEntities
+  };
+}
+var NATURAL = /^(stone|granite|diorite|andesite|deepslate|tuff|calcite|dripstone_block|pointed_dripstone|dirt|coarse_dirt|rooted_dirt|podzol|mycelium|grass_block|mud|clay|gravel|sand|red_sand|sandstone|red_sandstone|terracotta|.+_terracotta|snow|snow_block|powder_snow|ice|packed_ice|blue_ice|water|lava|bedrock|obsidian|magma_block|netherrack|soul_sand|soul_soil|basalt|blackstone|end_stone|moss_block|moss_carpet|.+_ore|raw_.+_block|amethyst_block|budding_amethyst|.+amethyst_bud|amethyst_cluster|.+_log|.+_wood|.+_leaves|.+_stem|.+_hyphae|.+_mushroom_block|mushroom_stem|vine|.+_vines|.+_vines_plant|cave_vines.*|glow_lichen|short_grass|grass|tall_grass|fern|large_fern|dead_bush|bush|firefly_bush|.+_dry_grass|.+_sapling|.+_tulip|dandelion|poppy|blue_orchid|allium|azure_bluet|oxeye_daisy|cornflower|lily_of_the_valley|torchflower|sunflower|lilac|rose_bush|peony|pink_petals|wildflowers|leaf_litter|sugar_cane|kelp|kelp_plant|seagrass|tall_seagrass|lily_pad|cactus|pumpkin|melon|sweet_berry_bush|bamboo|cocoa|brown_mushroom|red_mushroom|bee_nest|mangrove_roots|muddy_mangrove_roots|hanging_roots|spore_blossom|azalea|flowering_azalea|big_dripleaf.*|small_dripleaf|sculk.*|cobweb|bubble_column|crimson_.+|warped_.+|nether_.+|.+coral.*|sea_pickle|infested_.+|suspicious_.+|packed_mud|cave_air|void_air|air)$/;
+function terrainReport(site, view, opts = {}) {
+  const [sx, sy, sz] = site.size;
+  const min = specMin(site);
+  const h = columnHeights(view.palette, view.data, site.size);
+  const classes = view.palette.map((s) => terrainClass(blockNameOf(s)));
+  const tree2 = new Uint8Array(sx * sz);
+  const tops = /* @__PURE__ */ new Map();
+  const unnatural = /* @__PURE__ */ new Map();
+  let ux0 = Infinity;
+  let ux1 = -Infinity;
+  let uz0 = Infinity;
+  let uz1 = -Infinity;
+  let trees = 0;
+  const treeKinds = /* @__PURE__ */ new Set();
+  for (let z3 = 0; z3 < sz; z3++)
+    for (let x = 0; x < sx; x++) {
+      const col = x + sx * z3;
+      const g = h.ground[col];
+      const t = h.top[col];
+      if (t > g) {
+        for (let y = g + 1; y <= t; y++)
+          if (classes[view.data[x + sx * (z3 + sz * y)]] === "tree") {
+            tree2[col] = 1;
+            break;
+          }
+      }
+      if (g >= 0) {
+        const name = blockNameOf(
+          view.palette[view.data[x + sx * (z3 + sz * g)]]
+        );
+        const above = g + 1 < sy ? view.palette[view.data[x + sx * (z3 + sz * (g + 1))]] : "";
+        const key = h.water[col] > g ? "water" : name;
+        tops.set(key, (tops.get(key) ?? 0) + 1);
+        const aboveName = above ? blockNameOf(above) : "";
+        if (/_(log|stem)$/.test(aboveName)) {
+          trees++;
+          treeKinds.add(aboveName);
+        }
+      }
+    }
+  for (let i = 0; i < view.data.length; i++) {
+    const id = view.data[i];
+    if (id === 0) continue;
+    const name = blockNameOf(view.palette[id]);
+    if (NATURAL.test(name)) continue;
+    unnatural.set(name, (unnatural.get(name) ?? 0) + 1);
+    const x = i % sx;
+    const z3 = Math.floor(i / sx) % sz;
+    ux0 = Math.min(ux0, x);
+    ux1 = Math.max(ux1, x);
+    uz0 = Math.min(uz0, z3);
+    uz1 = Math.max(uz1, z3);
+  }
+  const groundSpec = (col) => h.ground[col] + min[1];
+  const grounds = [];
+  let waterCols = 0;
+  for (let col = 0; col < sx * sz; col++) {
+    if (h.ground[col] >= 0) grounds.push(groundSpec(col));
+    if (h.water[col] > h.ground[col]) waterCols++;
+  }
+  const sorted = [...grounds].sort((a, b) => a - b);
+  const median2 = sorted[Math.floor(sorted.length / 2)] ?? 0;
+  const centerCol = -min[0] + sx * -min[2];
+  const columns = sx * sz;
+  const pct = (n) => `${Math.round(n / columns * 100)}%`;
+  const lines = [];
+  const src = site.source.kind === "world" ? `world "${site.source.worldName}" (${site.source.dimension})` : `schematic ${site.source.filename}`;
+  lines.push(
+    `Site ${site.info.id} "${site.info.name}" \xB7 ${src} \xB7 Minecraft ${site.version}${site.writable ? "" : " \xB7 read-only (exports only)"}`
+  );
+  lines.push(
+    `Coordinates: BuildSpec (0,0,0) = world (${site.origin.join(", ")}); world = spec + (${site.origin.join(", ")}). y = 0 is the block above the ground at the centre.`
+  );
+  lines.push(
+    `Area (spec): x ${min[0]}..${min[0] + sx - 1}, y ${min[1]}..${min[1] + sy - 1}, z ${min[2]}..${min[2] + sz - 1} (${sx}\xD7${sy}\xD7${sz}). Blocks outside it can't be built.`
+  );
+  if (sorted.length)
+    lines.push(
+      `Ground (spec y of the top ground block): lowest ${sorted[0]}, highest ${sorted[sorted.length - 1]}, median ${median2}; at the centre ${h.ground[centerCol] >= 0 ? groundSpec(centerCol) : "none"}.`
+    );
+  const topList = [...tops.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([n, c]) => `${n} ${pct(c)}`).join(", ");
+  lines.push(
+    `Surface: ${topList || "\u2014"}${waterCols ? ` \xB7 water over ${pct(waterCols)} of the area` : ""}.`
+  );
+  lines.push(
+    `Trees: ${trees}${treeKinds.size ? ` (${[...treeKinds].slice(0, 5).join(", ")})` : ""}.`
+  );
+  if (unnatural.size) {
+    const list2 = [...unnatural.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([n, c]) => `${n} \xD7${c}`).join(", ");
+    lines.push(
+      `Not natural (existing builds, paths, villages?): ${list2} \u2014 within x ${ux0 + min[0]}..${ux1 + min[0]}, z ${uz0 + min[2]}..${uz1 + min[2]}.`
+    );
+  }
+  const grid = { sx, sz, ground: h.ground, water: h.water, tree: tree2 };
+  const spots = flatSpots(grid);
+  if (spots.length)
+    lines.push(
+      `Flattest open spots (height varies \u22641, no water or trees): ${spots.map(
+        (s) => `${s.w}\xD7${s.w} centred at (${s.x + min[0]}, ${s.y + min[1] + 1}, ${s.z + min[2]})`
+      ).join("; ")}.`
+    );
+  let x0 = 0;
+  let x1 = sx - 1;
+  let z0 = 0;
+  let z1 = sz - 1;
+  if (opts.from && opts.to) {
+    x0 = Math.max(0, Math.min(opts.from[0], opts.to[0]) - min[0]);
+    x1 = Math.min(sx - 1, Math.max(opts.from[0], opts.to[0]) - min[0]);
+    z0 = Math.max(0, Math.min(opts.from[2], opts.to[2]) - min[2]);
+    z1 = Math.min(sz - 1, Math.max(opts.from[2], opts.to[2]) - min[2]);
+  }
+  const span = Math.max(x1 - x0 + 1, z1 - z0 + 1);
+  const step = Math.max(1, opts.step ?? Math.ceil(span / 24));
+  const header = ["       x"];
+  for (let x = x0; x <= x1; x += step) header.push(String(x + min[0]).padStart(5));
+  lines.push("");
+  lines.push(
+    `Height map: spec y of the ground every ${step} block(s); rows z north\u2192south, columns x west\u2192east; ~ water above, T tree.`
+  );
+  lines.push(header.join(""));
+  for (let z3 = z0; z3 <= z1; z3 += step) {
+    let row = `z${String(z3 + min[2]).padStart(5)}  `;
+    for (let x = x0; x <= x1; x += step) {
+      const col = x + sx * z3;
+      const g = h.ground[col];
+      const mark = h.water[col] > g ? "~" : tree2[col] ? "T" : " ";
+      row += (g >= 0 ? `${g + min[1]}${mark}` : `?${mark}`).padStart(5);
+    }
+    lines.push(row);
+  }
+  if (site.warnings.length) lines.push("", `Notes: ${site.warnings.join(" ")}`);
+  return lines.join("\n");
+}
+function flatSpots(g) {
+  const out = [];
+  const overlaps = (x, z3, w) => out.some((o) => Math.abs(o.x - x) * 2 < o.w + w && Math.abs(o.z - z3) * 2 < o.w + w);
+  for (const w of [31, 21, 15, 9]) {
+    if (w > g.sx || w > g.sz) continue;
+    const half = Math.floor(w / 2);
+    const stride = Math.max(1, Math.floor(w / 4));
+    let best = null;
+    for (let cz = half; cz < g.sz - half; cz += stride)
+      for (let cx = half; cx < g.sx - half; cx += stride) {
+        if (overlaps(cx, cz, w)) continue;
+        let lo = Infinity;
+        let hi = -Infinity;
+        let ok = true;
+        for (let z3 = cz - half; z3 <= cz + half && ok; z3++)
+          for (let x = cx - half; x <= cx + half; x++) {
+            const col = x + g.sx * z3;
+            const y = g.ground[col];
+            if (y < 0 || g.water[col] > y || g.tree[col]) {
+              ok = false;
+              break;
+            }
+            if (y < lo) lo = y;
+            if (y > hi) hi = y;
+          }
+        if (!ok || hi - lo > 1) continue;
+        const d = Math.hypot(cx - g.sx / 2, cz - g.sz / 2);
+        if (!best || d < best.score) best = { x: cx, z: cz, y: hi, score: d };
+      }
+    if (best) out.push({ x: best.x, y: best.y, z: best.z, w });
+    if (out.length >= 3) break;
+  }
+  return out;
+}
+function siteChanges(result, site) {
+  const v = result.volume;
+  const changed = result.site?.changed;
+  if (!changed) return [];
+  const beAfter = new Map(v.blockEntities.map((be) => [v.index(...be.pos), be.data]));
+  const beBefore = new Map(
+    site.blockEntities.map((be) => [
+      be.pos[0] + site.size[0] * (be.pos[2] + site.size[2] * be.pos[1]),
+      be.data
+    ])
+  );
+  const out = [];
+  let i = 0;
+  for (let y = 0; y < v.sizeY; y++)
+    for (let z3 = 0; z3 < v.sizeZ; z3++)
+      for (let x = 0; x < v.sizeX; x++, i++) {
+        if (!changed[i]) continue;
+        const after = beAfter.get(i);
+        const before = beBefore.get(i);
+        out.push({
+          pos: [site.worldMin[0] + x, site.worldMin[1] + y, site.worldMin[2] + z3],
+          state: v.palette[v.data[i]],
+          ...after ? { nbt: after } : {},
+          before: site.palette[site.data[i]],
+          ...before ? { beforeNbt: before } : {}
+        });
+      }
+  return out;
+}
+function changedBounds(result) {
+  const v = result.volume;
+  const changed = result.site?.changed;
+  if (!changed) return null;
+  const lo = [Infinity, Infinity, Infinity];
+  const hi = [-Infinity, -Infinity, -Infinity];
+  let i = 0;
+  for (let y = 0; y < v.sizeY; y++)
+    for (let z3 = 0; z3 < v.sizeZ; z3++)
+      for (let x = 0; x < v.sizeX; x++, i++) {
+        if (!changed[i]) continue;
+        if (x < lo[0]) lo[0] = x;
+        if (y < lo[1]) lo[1] = y;
+        if (z3 < lo[2]) lo[2] = z3;
+        if (x > hi[0]) hi[0] = x;
+        if (y > hi[1]) hi[1] = y;
+        if (z3 > hi[2]) hi[2] = z3;
+      }
+  return lo[0] === Infinity ? null : { lo, hi };
 }
 
 // apps/server/src/core/BuildService.ts
@@ -5530,17 +11984,21 @@ var UserError = class extends Error {
   }
 };
 var augmented = /* @__PURE__ */ new Set();
+var VIEWER_RECONNECT_MS = 4e3;
 var BuildService = class {
-  constructor(store, assets, hub, capture, config) {
+  constructor(store, assets, hub, capture, config, sites = new SiteStore()) {
     this.store = store;
     this.assets = assets;
     this.hub = hub;
     this.capture = capture;
     this.config = config;
+    this.sites = sites;
   }
   current = null;
   volumeCache = null;
+  changesCache = null;
   feedbackSeq = 0;
+  worldPaths = /* @__PURE__ */ new Map();
   /** Reopen the last project so the viewer shows it right away. */
   async init() {
     const id = this.store.currentId ?? this.store.list()[0]?.id;
@@ -5560,8 +12018,16 @@ var BuildService = class {
       } catch {
       }
     }
+    const siteId = spec?.site?.id;
+    const site = typeof siteId === "string" ? this.sites.get(siteId) : null;
     try {
-      return { ok: true, result: compileBuildSpec(spec, { scriptRunner: nodeScriptRunner }) };
+      return {
+        ok: true,
+        result: compileBuildSpec(spec, {
+          scriptRunner: nodeScriptRunner,
+          ...site ? { site: toCompileSite(site) } : {}
+        })
+      };
     } catch (error) {
       if (error instanceof BuildSpecError) return { ok: false, errors: error.errors };
       throw error;
@@ -5577,6 +12043,7 @@ var BuildService = class {
     };
     this.current = build;
     this.volumeCache = null;
+    this.changesCache = null;
     this.store.currentId = project.id;
     this.hub.broadcast({
       type: "build",
@@ -5587,8 +12054,8 @@ var BuildService = class {
     void this.assets.ensure(build.assetVersion).catch(() => void 0);
     return build;
   }
-  async commit(spec, label, newProject) {
-    this.hub.broadcast({ type: "compiling", label });
+  async commit(spec, label2, newProject) {
+    this.hub.broadcast({ type: "compiling", label: label2 });
     const compiled = await this.compile(spec);
     if (!compiled.ok) {
       this.hub.broadcast({ type: "build-error", errors: compiled.errors });
@@ -5597,7 +12064,7 @@ var BuildService = class {
     const result = compiled.result;
     const project = newProject || !this.current ? this.store.create(spec.name, spec.minecraftVersion) : this.current.project;
     const record = this.store.addVersion(project.id, {
-      label,
+      label: label2,
       createdAt: Date.now(),
       spec: result.spec,
       blockCount: result.blockCount,
@@ -5674,8 +12141,26 @@ var BuildService = class {
       blockCount: b.result.blockCount,
       warnings: b.result.warnings,
       compileMs: b.result.compileMs,
-      createdAt: b.record.createdAt
+      createdAt: b.record.createdAt,
+      ...(() => {
+        const site = this.currentSite();
+        return site && b.result.site ? { site: { ...site.info, changes: b.result.site.changes } } : {};
+      })()
     };
+  }
+  /** The site the current build stands on, if any. */
+  currentSite() {
+    const id = this.current?.record.spec.site?.id;
+    return id ? this.sites.get(id) : null;
+  }
+  /** Gzipped Uint8 mask (YZX) of the cells the build changes on its site. */
+  changesGz() {
+    const b = this.requireCurrent();
+    const changed = b.result.site?.changed;
+    if (!changed) throw new UserError("This build is not on a site.", 404);
+    if (this.changesCache?.buildId !== b.buildId)
+      this.changesCache = { buildId: b.buildId, gz: gzipSync4(Buffer.from(changed), { level: 4 }) };
+    return this.changesCache.gz;
   }
   /** Gzipped Uint16 palette indices (YZX), cached per build. */
   volumeGz() {
@@ -5684,7 +12169,7 @@ var BuildService = class {
       const data = b.result.volume.data;
       this.volumeCache = {
         buildId: b.buildId,
-        gz: gzipSync2(Buffer.from(data.buffer, data.byteOffset, data.byteLength), { level: 4 })
+        gz: gzipSync4(Buffer.from(data.buffer, data.byteOffset, data.byteLength), { level: 4 })
       };
     }
     return this.volumeCache.gz;
@@ -5842,13 +12327,266 @@ ${body}`;
   }
   export(format) {
     const b = this.requireCurrent();
-    return exportBuild(format, {
+    const base = {
       name: b.record.spec.name,
-      volume: b.result.volume,
       version: b.result.version,
-      anchor: b.result.anchor,
       ...b.record.spec.description ? { description: b.record.spec.description } : {}
+    };
+    const site = this.currentSite();
+    if (format === "datapack") return this.datapackExport(this.datapack());
+    if (!site || !b.result.site)
+      return exportBuild(format, { ...base, volume: b.result.volume, anchor: b.result.anchor });
+    const bounds = changedBounds(b.result);
+    if (!bounds)
+      throw new UserError("Nothing on the site has changed yet: there is nothing to export.");
+    let volume = b.result.volume.crop(bounds.lo, bounds.hi);
+    const mask2 = cropMask(b.result, bounds);
+    if (format === "materials") {
+      const data = volume.data.map((id, i) => mask2[i] ? id : 0);
+      volume = new BlockVolume(
+        volume.sizeX,
+        volume.sizeY,
+        volume.sizeZ,
+        volume.origin,
+        volume.palette,
+        data,
+        volume.prov,
+        volume.blockEntities
+      );
+    }
+    const anchor = [-volume.origin[0], -volume.origin[1], -volume.origin[2]];
+    const worldMin = [
+      site.origin[0] + volume.origin[0],
+      site.origin[1] + volume.origin[1],
+      site.origin[2] + volume.origin[2]
+    ];
+    const out = exportBuild(format, {
+      ...base,
+      volume,
+      anchor,
+      worldMin,
+      ...format === "nbt" ? { mask: mask2 } : {}
     });
+    const where = `world ${worldMin.join(" ")}`;
+    const hint = {
+      schem: `WorldEdit: //schem load ${out.filename.replace(/\.schem$/, "")} then //paste -o puts it back at ${where} (its first corner).`,
+      schem3: `WorldEdit: //schem load ${out.filename.replace(/\.schem$/, "")} then //paste -o puts it back at ${where} (its first corner).`,
+      schematic: `WorldEdit: //schematic load ${out.filename.replace(/\.schematic$/, "")} then //paste -o puts it back at ${where}.`,
+      litematic: `Litematica: place the schematic with its origin at ${where}, paste with "Replace: All".`,
+      nbt: `Only the changed blocks are in the file. /place template <its id> ${worldMin.join(" ")} (1.19+) or a structure block at ${where}.`
+    };
+    return {
+      ...out,
+      warnings: [...hint[format] ? [hint[format]] : [], ...out.warnings]
+    };
+  }
+  /** The current build as a vanilla data pack: on a site at its world position, else where you stand. */
+  datapack() {
+    const b = this.requireCurrent();
+    return this.datapackWithId(`${b.record.spec.name}_v${b.record.n}`);
+  }
+  datapackExport(pack) {
+    return {
+      buffer: pack.zip,
+      filename: `${pack.folder}.zip`,
+      mime: "application/zip",
+      warnings: [
+        `In the game: put the .zip in the world's datapacks folder, /reload, then /function ${pack.functionId}/build (undo: /function ${pack.functionId}/undo).`,
+        ...pack.warnings
+      ]
+    };
+  }
+  /**
+   * Write the data pack into a world's datapacks folder (the site's world, or `worldId`). Only
+   * adds a new folder: nothing in the world changes until the player runs the function.
+   */
+  installDatapack(worldId2) {
+    const site = this.currentSite();
+    let worldPath;
+    if (worldId2) worldPath = this.worldPath(worldId2);
+    else if (site?.source.kind === "world") worldPath = site.source.worldPath;
+    if (!worldPath)
+      throw new UserError(
+        "Which world? Pass a world id from the worlds list (or build on a site)."
+      );
+    if (!existsSync8(join8(worldPath, "level.dat")))
+      throw new UserError(`The world folder ${worldPath} is gone.`, 404);
+    let pack = this.datapack();
+    const base = pack.folder;
+    let folder = base;
+    for (let n = 2; existsSync8(join8(worldPath, "datapacks", folder)); n++) {
+      folder = `${base}_${n}`;
+      const b = this.requireCurrent();
+      pack = this.datapackWithId(`${b.record.spec.name}_v${b.record.n}_${n}`);
+    }
+    const dest = join8(worldPath, "datapacks", folder);
+    for (const [path2, data] of pack.files) {
+      const file = join8(dest, ...path2.split("/"));
+      mkdirSync3(dirname2(file), { recursive: true });
+      writeFileSync5(file, data, { flag: "wx" });
+    }
+    const world = readWorld(worldPath)?.name ?? worldPath;
+    return { path: dest, world, functionId: pack.functionId, warnings: pack.warnings };
+  }
+  datapackWithId(id) {
+    const b = this.requireCurrent();
+    const site = this.currentSite();
+    if (site && b.result.site) {
+      if (!b.result.site.changes)
+        throw new UserError("Nothing on the site has changed yet: there is nothing to export.");
+      return writeDatapack({
+        name: b.record.spec.name,
+        version: b.result.version,
+        id,
+        place: {
+          kind: "world",
+          dimension: site.source.kind === "world" ? site.source.dimension : OVERWORLD,
+          center: site.origin
+        },
+        changes: siteChanges(b.result, site)
+      });
+    }
+    return writeDatapack({
+      name: b.record.spec.name,
+      version: b.result.version,
+      id,
+      place: { kind: "here" },
+      changes: datapackChanges(b.result)
+    });
+  }
+  /**
+   * A copy of the site's world with the build in it, next to the original in the saves folder.
+   * The original world is only read.
+   */
+  async exportWorldCopy(name) {
+    const b = this.requireCurrent();
+    const site = this.currentSite();
+    if (!site || !b.result.site || site.source.kind !== "world")
+      throw new UserError(
+        "Only a build on a site imported from a world can be written into a world copy."
+      );
+    if (!site.writable)
+      throw new UserError(
+        "This part of the world can't be written back (not fully generated, or saved before Minecraft 1.14): use a schematic or the data pack instead."
+      );
+    const source = site.source;
+    if (!existsSync8(join8(source.worldPath, "level.dat")))
+      throw new UserError(`The world folder ${source.worldPath} is gone.`, 404);
+    const changes = siteChanges(b.result, site);
+    if (!changes.length) throw new UserError("Nothing on the site has changed yet.");
+    const spec = b.record.spec.name;
+    const fallback = spec.startsWith(source.worldName) ? `${source.worldName} (VibeSchem v${b.record.n})` : `${source.worldName} + ${spec}`;
+    const copy = await copyWorld(source.worldPath, (name ?? fallback).slice(0, 80));
+    const report = writeBlocks(
+      copy.path,
+      source.dimension,
+      changes.map((c) => ({
+        x: c.pos[0],
+        y: c.pos[1],
+        z: c.pos[2],
+        state: c.state,
+        ...c.nbt ? { nbt: c.nbt } : {}
+      }))
+    );
+    return { ...copy, chunks: report.chunks, blocks: report.blocks };
+  }
+  // ---------------------------------------------------------------- sites
+  /** Worlds in the player's saves folders (official launcher, Prism, MultiMC, CurseForge, Modrinth). */
+  worlds() {
+    const list2 = listWorlds(minecraftDir());
+    this.worldPaths = new Map(list2.map((w) => [w.id, w.path]));
+    return list2.map(worldInfo);
+  }
+  worldIcon(id) {
+    const path2 = this.worldPath(id);
+    const icon = join8(path2, "icon.png");
+    return existsSync8(icon) ? readFileSync7(icon) : null;
+  }
+  /** A world id from worlds(), a world name, or (for the MCP tool) a world folder path. */
+  worldPath(ref, allowPath = false) {
+    if (!this.worldPaths.has(ref)) this.worlds();
+    const byId = this.worldPaths.get(ref);
+    if (byId) return byId;
+    const all = listWorlds(minecraftDir());
+    const byName = all.filter(
+      (w) => w.name.toLowerCase() === ref.toLowerCase() || w.folder === ref
+    );
+    if (byName.length === 1) return byName[0].path;
+    if (byName.length > 1)
+      throw new UserError(
+        `Several worlds are called "${ref}": ${byName.map((w) => `${w.id} (${w.launcher})`).join(", ")}. Use the id.`
+      );
+    if (allowPath && isAbsolute(ref) && existsSync8(join8(ref, "level.dat"))) return resolve2(ref);
+    throw new UserError(`No world "${ref}" in the saves folders. Call worlds to list them.`, 404);
+  }
+  /** Read part of a world and start a new project on it. */
+  async importWorldSite(opts) {
+    const path2 = this.worldPath(opts.world, opts.allowPath ?? false);
+    const world = readWorld(path2);
+    if (!world) throw new UserError(`${path2} is not a Minecraft world (no level.dat).`);
+    const dimension = opts.dimension ?? (opts.center ? void 0 : world.player?.dimension) ?? (world.dimensions.includes(OVERWORLD) ? OVERWORLD : world.dimensions[0]) ?? OVERWORLD;
+    const fromPlayer = world.player && world.player.dimension === dimension ? world.player.pos : null;
+    const c = opts.center ?? fromPlayer ?? world.spawn ?? [0, 0];
+    const center = c.length >= 3 ? [c[0], c[1], c[2]] : [c[0] ?? 0, c[c.length - 1] ?? 0];
+    const radius = Math.min(MAX_SITE_RADIUS, Math.max(4, Math.round(opts.radius ?? 48)));
+    let site;
+    try {
+      site = readWorldSite(path2, {
+        center: opts.center ? center : [center[0], center[center.length - 1]],
+        radius,
+        dimension,
+        ...opts.below !== void 0 ? { below: opts.below } : {},
+        ...opts.above !== void 0 ? { above: opts.above } : {}
+      });
+    } catch (error) {
+      throw new UserError(error instanceof Error ? error.message : String(error));
+    }
+    const name = opts.name ?? `${world.name} @ ${site.origin[0]}, ${site.origin[2]}`;
+    const stored = this.sites.save(
+      site,
+      { kind: "world", worldPath: path2, worldName: world.name, dimension, center, radius },
+      name
+    );
+    const outcome = await this.commit(
+      { name, minecraftVersion: site.version, site: { id: stored.info.id }, operations: [] },
+      "Imported site",
+      true
+    );
+    return { site: stored, outcome };
+  }
+  /** A schematic file as the site, in a new project. */
+  async importSchematicSite(buffer, filename, name) {
+    let site;
+    try {
+      site = siteFromSchematic(readSchematic(buffer, filename));
+    } catch (error) {
+      throw new UserError(error instanceof Error ? error.message : String(error));
+    }
+    const title = name ?? filename.replace(/^.*[\\/]/, "").replace(/\.[^.]+$/, "");
+    const stored = this.sites.save(site, { kind: "schematic", filename }, title);
+    const outcome = await this.commit(
+      { name: title, minecraftVersion: site.version, site: { id: stored.info.id }, operations: [] },
+      "Imported schematic",
+      true
+    );
+    return { site: stored, outcome };
+  }
+  importSchematicFile(path2, name) {
+    if (!existsSync8(path2)) throw new UserError(`No file at ${path2}.`, 404);
+    return this.importSchematicSite(readFileSync7(path2), path2, name);
+  }
+  siteList() {
+    return this.sites.list();
+  }
+  /** The terrain report of the current build's site (as it is now, after the build's changes). */
+  terrain(opts = {}) {
+    const b = this.requireCurrent();
+    const site = this.currentSite();
+    if (!site || !b.result.site)
+      throw new UserError(
+        "The current build is not on a site. Import one first: import_site (a world area) or import a schematic."
+      );
+    return terrainReport(site, b.result.volume, opts);
   }
   exportTargets() {
     const mc = minecraftDir();
@@ -5856,20 +12594,20 @@ ${body}`;
       {
         id: "worldedit",
         label: "WorldEdit (single player)",
-        path: join4(mc, "config", "worldedit", "schematics"),
-        exists: existsSync4(join4(mc, "config", "worldedit"))
+        path: join8(mc, "config", "worldedit", "schematics"),
+        exists: existsSync8(join8(mc, "config", "worldedit"))
       },
       {
         id: "litematica",
         label: "Litematica",
-        path: join4(mc, "schematics"),
-        exists: existsSync4(join4(mc, "schematics")) || existsSync4(join4(mc, "config", "litematica"))
+        path: join8(mc, "schematics"),
+        exists: existsSync8(join8(mc, "schematics")) || existsSync8(join8(mc, "config", "litematica"))
       },
       {
         id: "downloads",
         label: "Downloads",
-        path: join4(homedir2(), "Downloads"),
-        exists: existsSync4(join4(homedir2(), "Downloads"))
+        path: join8(homedir3(), "Downloads"),
+        exists: existsSync8(join8(homedir3(), "Downloads"))
       }
     ];
   }
@@ -5877,13 +12615,13 @@ ${body}`;
     const target = this.exportTargets().find((t) => t.id === targetId);
     if (!target) throw new UserError(`Unknown destination "${targetId}".`);
     const out = this.export(format);
-    mkdirSync2(target.path, { recursive: true });
+    mkdirSync3(target.path, { recursive: true });
     const ext = extname(out.filename);
     const stem = out.filename.slice(0, out.filename.length - ext.length);
-    let path = join4(target.path, out.filename);
-    for (let n = 2; existsSync4(path); n++) path = join4(target.path, `${stem} (${n})${ext}`);
-    writeFileSync3(path, out.buffer, { flag: "wx" });
-    return { path, warnings: out.warnings };
+    let path2 = join8(target.path, out.filename);
+    for (let n = 2; existsSync8(path2); n++) path2 = join8(target.path, `${stem} (${n})${ext}`);
+    writeFileSync5(path2, out.buffer, { flag: "wx" });
+    return { path: path2, warnings: out.warnings };
   }
   // ---------------------------------------------------------------- rendering
   colorSource() {
@@ -5896,13 +12634,21 @@ ${body}`;
       return c ? { top: hex(c.top), side: hex(c.side) } : defaultColors(state);
     };
   }
+  /**
+   * Make sure the user has a viewer, reusing the tab that is already open: a tab left open from
+   * an earlier session reconnects by itself within a few seconds, so a new tab opens only when
+   * none comes back.
+   */
+  async showViewer(waitMs = 15e3) {
+    if (this.hub.count > 0) return true;
+    if (await this.hub.waitForClient(VIEWER_RECONNECT_MS)) return true;
+    openViewer(`${this.config.baseUrl}/`);
+    return this.hub.waitForClient(waitMs);
+  }
   /** Real textured views from the open viewer; flat-colour fallback when there is none. */
   async render(opts) {
     const b = this.requireCurrent();
-    if (this.hub.count === 0) {
-      openViewer(`${this.config.baseUrl}/`);
-      await this.hub.waitForClient(15e3);
-    }
+    await this.showViewer();
     if (this.hub.count > 0) {
       try {
         const images = await this.capture.request({
@@ -5954,20 +12700,160 @@ ${body}`;
     }
     this.hub.broadcast({ type: "projects" });
   }
+  // ---------------------------------------------------------------- redstone
+  /** What the viewer's simulator needs to run the same simulation as the server. */
+  simInfo() {
+    const b = this.requireCurrent();
+    const catalog = getCatalog(b.result.version);
+    return {
+      buildId: b.buildId,
+      version: b.result.version.id,
+      fullCubes: catalogData.fullCubes.filter((n) => catalog.has(n)),
+      defaults: {
+        piston_head: catalog.defaultProps("piston_head"),
+        moving_piston: catalog.defaultProps("moving_piston")
+      },
+      circuit: b.result.spec.circuit ?? null,
+      blockEntities: b.result.volume.blockEntities.map((be) => ({ pos: be.pos, data: be.data }))
+    };
+  }
+  /**
+   * Run redstone tests on the current build: the stored ones, or ones given here (with extra
+   * inputs/outputs for this run). `locations` reruns everything at other world positions, where
+   * dust and pistons update their neighbours in another order, to catch location-dependent
+   * circuits. `show` plays one test live in the viewer.
+   */
+  simulate(opts) {
+    const b = this.requireCurrent();
+    const stored = b.result.spec.circuit ?? {};
+    const errors = [];
+    const parseIo = (map, kind) => {
+      const out = {};
+      for (const [name, io] of Object.entries(map ?? {})) {
+        const r = circuitIoSchema.safeParse(io);
+        if (r.success) out[name] = r.data;
+        else
+          errors.push(
+            `${kind}.${name}: ${r.error.issues.map((i) => `${i.path.join(".") || "value"} ${i.message}`).join("; ")}`
+          );
+      }
+      return out;
+    };
+    const circuit = {
+      ...stored,
+      inputs: { ...stored.inputs, ...parseIo(opts.inputs, "inputs") },
+      outputs: { ...stored.outputs, ...parseIo(opts.outputs, "outputs") }
+    };
+    let tests = [];
+    if (opts.tests) {
+      opts.tests.forEach((t, k) => {
+        const r = circuitTestSchema.safeParse(t);
+        if (r.success) tests.push(r.data);
+        else
+          errors.push(
+            `tests[${k}]: ${r.error.issues.map((i) => `${i.path.join(".") || "test"}: ${i.message}`).join("; ")}`
+          );
+      });
+    } else {
+      tests = stored.tests ?? [];
+      if (opts.only?.length) {
+        const missing = opts.only.filter((n2) => !tests.some((t) => t.name === n2));
+        if (missing.length)
+          errors.push(`No stored test named ${missing.map((n2) => `"${n2}"`).join(", ")}.`);
+        tests = tests.filter((t) => opts.only?.includes(t.name));
+      }
+    }
+    if (errors.length) return { text: `Not run:
+- ${errors.join("\n- ")}`, ok: false };
+    const catalog = getCatalog(b.result.version);
+    const volume = b.result.volume;
+    const run = (offset) => runCircuit(
+      worldFor(volume, catalog, offset ? { offset } : {}),
+      circuit,
+      volume.origin,
+      {
+        tests
+      }
+    ).report;
+    const report = run();
+    const lines = [formatReport(report)];
+    if (tests.length === 0)
+      lines.push(
+        'No tests: give `tests` here, or store them in the spec under circuit.tests (edit_build {op:"circuit"}).'
+      );
+    const values = this.circuitValues(circuit);
+    if (values) lines.push(`At rest: ${values}`);
+    let ok = report.errors.length === 0 && report.tests.every((t) => t.ok);
+    const n = Math.min(16, Math.max(1, opts.locations ?? 1));
+    if (n > 1) {
+      const differing = /* @__PURE__ */ new Set();
+      for (let k = 1; k < n; k++) {
+        const other = run([k * 7, 64 + k, k * 3]);
+        other.tests.forEach((t, j) => {
+          const base = report.tests[j];
+          if (base && base.ok !== t.ok) differing.add(t.name);
+        });
+      }
+      lines.push(
+        differing.size ? `\u26A0 Location-dependent: ${[...differing].join(", ")} pass at some world positions and fail at others (update order). Make the design independent of it.` : `Same results at ${n} world positions.`
+      );
+      if (differing.size) ok = false;
+    }
+    if (opts.show) {
+      const test = tests.find((t) => t.name === opts.show);
+      if (!test) lines.push(`show: no test named "${opts.show}".`);
+      else {
+        this.hub.broadcast({
+          type: "sim",
+          buildId: b.buildId,
+          test,
+          circuit
+        });
+        lines.push(
+          this.hub.count > 0 ? `Playing "${test.name}" in the viewer.` : "No viewer is open to play it in."
+        );
+      }
+    }
+    return { text: lines.join("\n"), ok };
+  }
+  /** "A=0, B=0, S=0" for the circuit's named I/O at rest, or null without any. */
+  circuitValues(circuit) {
+    const b = this.requireCurrent();
+    const names = [...Object.keys(circuit.inputs ?? {}), ...Object.keys(circuit.outputs ?? {})];
+    if (!names.length) return null;
+    const { circuit: c } = runCircuit(
+      worldFor(b.result.volume, getCatalog(b.result.version)),
+      { inputs: circuit.inputs, outputs: circuit.outputs },
+      b.result.volume.origin,
+      { tests: [] }
+    );
+    if (c.errors.length) return null;
+    return Object.entries(c.values()).map(([k, v]) => `${k}=${v}`).join(", ");
+  }
   /** Compact text summary used in tool results. */
   summary(build) {
     const v = build.result.volume;
-    const counts = [...v.counts().entries()];
+    const changed = build.result.site?.changed;
+    const counts = changed ? [...changedCounts(v, changed).entries()] : [...v.counts().entries()];
     const byName = /* @__PURE__ */ new Map();
     for (const [s, n] of counts) byName.set(blockNameOf(s), (byName.get(blockNameOf(s)) ?? 0) + n);
     const top = [...byName.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12).map(([name, n]) => `${name} \xD7${n.toLocaleString("en-US")}`).join(", ");
     const lines = [
       `Build "${build.record.spec.name}" v${build.record.n} (project ${build.project.id}) \xB7 Minecraft ${build.result.version.id} \xB7 ${v.sizeX}\xD7${v.sizeY}\xD7${v.sizeZ} (origin ${v.origin.join(",")}) \xB7 ${build.result.blockCount.toLocaleString("en-US")} blocks \xB7 ${byName.size} block types \xB7 compiled in ${build.result.compileMs} ms`,
-      `Top materials: ${top || "\u2014"}`
+      `${changed ? "Blocks the build places" : "Top materials"}: ${top || "\u2014"}`
     ];
     if (build.result.warnings.length)
       lines.push(`Warnings:
 - ${build.result.warnings.join("\n- ")}`);
+    if (build.result.circuit) lines.push(`Redstone \u2014 ${formatReport(build.result.circuit)}`);
+    const siteId = build.record.spec.site?.id;
+    const site = siteId ? this.sites.get(siteId) : null;
+    if (site && build.result.site) {
+      const where = site.source.kind === "world" ? `world "${site.source.worldName}" (${site.source.dimension})` : `schematic ${site.source.filename}`;
+      lines.push(
+        `Site ${site.info.id}: ${where}, spec (0,0,0) = world (${site.origin.join(", ")}). ${build.result.site.changes.toLocaleString("en-US")} blocks differ from the site. The terrain tool maps the ground.`
+      );
+    }
     const open = this.feedback().filter((f) => f.status === "open").length;
     if (open)
       lines.push(`${open} open feedback note(s) from the user in the viewer: call get_feedback.`);
@@ -5975,6 +12861,66 @@ ${body}`;
     return lines.join("\n");
   }
 };
+function worldInfo(w) {
+  return {
+    id: w.id,
+    name: w.name,
+    folder: w.folder,
+    launcher: w.launcher,
+    version: w.version,
+    lastPlayed: w.lastPlayed,
+    gameMode: w.gameMode,
+    player: w.player,
+    spawn: w.spawn,
+    dimensions: w.dimensions,
+    hasIcon: w.hasIcon,
+    supported: w.dimensions.length > 0
+  };
+}
+function datapackChanges(result) {
+  const v = result.volume;
+  const nbt = new Map(v.blockEntities.map((be) => [v.index(...be.pos), be.data]));
+  const out = [];
+  let i = 0;
+  for (let y = 0; y < v.sizeY; y++)
+    for (let z3 = 0; z3 < v.sizeZ; z3++)
+      for (let x = 0; x < v.sizeX; x++, i++) {
+        const id = v.data[i];
+        if (id === 0) continue;
+        const data = nbt.get(i);
+        out.push({
+          pos: [x - result.anchor[0], y - result.anchor[1], z3 - result.anchor[2]],
+          state: v.palette[id],
+          ...data ? { nbt: data } : {},
+          before: "minecraft:air"
+        });
+      }
+  return out;
+}
+function cropMask(result, bounds) {
+  const v = result.volume;
+  const changed = result.site?.changed;
+  const [x0, y0, z0] = bounds.lo;
+  const [x1, y1, z1] = bounds.hi;
+  const sx = x1 - x0 + 1;
+  const out = new Uint8Array(sx * (y1 - y0 + 1) * (z1 - z0 + 1));
+  let i = 0;
+  for (let y = y0; y <= y1; y++)
+    for (let z3 = z0; z3 <= z1; z3++) {
+      const from = v.index(x0, y, z3);
+      out.set(changed.subarray(from, from + sx), i);
+      i += sx;
+    }
+  return out;
+}
+function changedCounts(v, changed) {
+  const byId = new Uint32Array(v.palette.length);
+  for (let i = 0; i < v.data.length; i++) if (changed[i]) byId[v.data[i]]++;
+  const out = /* @__PURE__ */ new Map();
+  for (let id = 1; id < byId.length; id++)
+    if (byId[id]) out.set(v.palette[id], byId[id]);
+  return out;
+}
 
 // apps/server/src/core/CaptureBroker.ts
 var CaptureBroker = class {
@@ -5987,12 +12933,12 @@ var CaptureBroker = class {
     const client = this.hub.best();
     if (!client) throw new Error("No viewer is open.");
     const requestId = `cap${++this.seq}`;
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve3, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(requestId);
         reject(new Error("The viewer did not answer in time."));
       }, timeoutMs);
-      this.pending.set(requestId, { resolve, reject, timer });
+      this.pending.set(requestId, { resolve: resolve3, reject, timer });
       this.hub.send(client, { type: "capture", request: { ...req, requestId } });
     });
   }
@@ -6057,11 +13003,11 @@ var EventHub = class {
   /** Resolve when a viewer connects (or after timeoutMs). */
   waitForClient(timeoutMs) {
     if (this.clients.size > 0) return Promise.resolve(true);
-    return new Promise((resolve) => {
-      const timer = setTimeout(() => resolve(this.clients.size > 0), timeoutMs);
+    return new Promise((resolve3) => {
+      const timer = setTimeout(() => resolve3(this.clients.size > 0), timeoutMs);
       this.waiters.push(() => {
         clearTimeout(timer);
-        resolve(true);
+        resolve3(true);
       });
     });
   }
@@ -6072,39 +13018,39 @@ var EventHub = class {
 
 // apps/server/src/core/ProjectStore.ts
 import {
-  existsSync as existsSync5,
-  mkdirSync as mkdirSync3,
-  readdirSync,
-  readFileSync as readFileSync3,
-  renameSync as renameSync2,
-  writeFileSync as writeFileSync4
+  existsSync as existsSync9,
+  mkdirSync as mkdirSync4,
+  readdirSync as readdirSync3,
+  readFileSync as readFileSync8,
+  renameSync as renameSync4,
+  writeFileSync as writeFileSync6
 } from "node:fs";
-import { join as join5 } from "node:path";
-function slug(name) {
+import { join as join9 } from "node:path";
+function slug2(name) {
   const s = name.normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40);
   return s || "build";
 }
-function writeJson(path, value) {
-  writeFileSync4(`${path}.tmp`, JSON.stringify(value, null, 1));
-  renameSync2(`${path}.tmp`, path);
+function writeJson(path2, value) {
+  writeFileSync6(`${path2}.tmp`, JSON.stringify(value, null, 1));
+  renameSync4(`${path2}.tmp`, path2);
 }
 var ProjectStore = class {
   root = appDir("projects");
   dir(id) {
-    return join5(this.root, id);
+    return join9(this.root, id);
   }
   read(id) {
-    const file = join5(this.dir(id), "project.json");
-    if (!existsSync5(file)) throw new Error(`Project not found: ${id}`);
-    return JSON.parse(readFileSync3(file, "utf8"));
+    const file = join9(this.dir(id), "project.json");
+    if (!existsSync9(file)) throw new Error(`Project not found: ${id}`);
+    return JSON.parse(readFileSync8(file, "utf8"));
   }
   write(p) {
-    writeJson(join5(this.dir(p.id), "project.json"), p);
+    writeJson(join9(this.dir(p.id), "project.json"), p);
   }
   list() {
-    if (!existsSync5(this.root)) return [];
+    if (!existsSync9(this.root)) return [];
     const out = [];
-    for (const id of readdirSync(this.root)) {
+    for (const id of readdirSync3(this.root)) {
       try {
         const { history: _history, ...info } = this.read(id);
         out.push(info);
@@ -6118,13 +13064,13 @@ var ProjectStore = class {
     return info;
   }
   exists(id) {
-    return existsSync5(join5(this.dir(id), "project.json"));
+    return existsSync9(join9(this.dir(id), "project.json"));
   }
   create(name, minecraftVersion) {
-    const base = slug(name);
+    const base = slug2(name);
     let id = base;
-    for (let i = 2; existsSync5(this.dir(id)); i++) id = `${base}-${i}`;
-    mkdirSync3(join5(this.dir(id), "versions"), { recursive: true });
+    for (let i = 2; existsSync9(this.dir(id)); i++) id = `${base}-${i}`;
+    mkdirSync4(join9(this.dir(id), "versions"), { recursive: true });
     const now = Date.now();
     const p = {
       id,
@@ -6143,9 +13089,9 @@ var ProjectStore = class {
     return this.read(id).history;
   }
   getVersion(id, n) {
-    const file = join5(this.dir(id), "versions", `${String(n).padStart(4, "0")}.json`);
-    if (!existsSync5(file)) throw new Error(`Version ${n} of ${id} not found.`);
-    return JSON.parse(readFileSync3(file, "utf8"));
+    const file = join9(this.dir(id), "versions", `${String(n).padStart(4, "0")}.json`);
+    if (!existsSync9(file)) throw new Error(`Version ${n} of ${id} not found.`);
+    return JSON.parse(readFileSync8(file, "utf8"));
   }
   latestVersion(id) {
     const p = this.read(id);
@@ -6156,7 +13102,7 @@ var ProjectStore = class {
     const p = this.read(id);
     const n = (p.history[p.history.length - 1]?.n ?? 0) + 1;
     const full = { ...record, n };
-    writeJson(join5(this.dir(id), "versions", `${String(n).padStart(4, "0")}.json`), full);
+    writeJson(join9(this.dir(id), "versions", `${String(n).padStart(4, "0")}.json`), full);
     const { spec: _spec, ...summary } = full;
     p.history.push(summary);
     p.versions = p.history.length;
@@ -6176,36 +13122,44 @@ var ProjectStore = class {
   /** Moves the project to <home>/trash (recoverable by hand). */
   remove(id) {
     const trash = appDir("trash");
-    renameSync2(this.dir(id), join5(trash, `${id}-${Date.now()}`));
+    renameSync4(this.dir(id), join9(trash, `${id}-${Date.now()}`));
   }
   feedback(id) {
-    const file = join5(this.dir(id), "feedback.json");
-    if (!existsSync5(file)) return [];
-    return JSON.parse(readFileSync3(file, "utf8"));
+    const file = join9(this.dir(id), "feedback.json");
+    if (!existsSync9(file)) return [];
+    return JSON.parse(readFileSync8(file, "utf8"));
   }
   saveFeedback(id, items) {
-    writeJson(join5(this.dir(id), "feedback.json"), items);
+    writeJson(join9(this.dir(id), "feedback.json"), items);
   }
   get currentId() {
-    const file = join5(appHome(), "state.json");
-    if (!existsSync5(file)) return null;
+    const file = join9(appHome(), "state.json");
+    if (!existsSync9(file)) return null;
     try {
-      const id = JSON.parse(readFileSync3(file, "utf8")).current ?? null;
+      const id = JSON.parse(readFileSync8(file, "utf8")).current ?? null;
       return id && this.exists(id) ? id : null;
     } catch {
       return null;
     }
   }
   set currentId(id) {
-    writeJson(join5(appHome(), "state.json"), { current: id });
+    writeJson(join9(appHome(), "state.json"), { current: id });
   }
 };
 
 // apps/server/src/http/server.ts
-import { existsSync as existsSync6 } from "node:fs";
+import { existsSync as existsSync10 } from "node:fs";
 import fastifyStatic from "@fastify/static";
 import Fastify from "fastify";
-var FORMATS = /* @__PURE__ */ new Set(["schem", "schem3", "schematic", "litematic", "nbt", "materials"]);
+var FORMATS = /* @__PURE__ */ new Set([
+  "schem",
+  "schem3",
+  "schematic",
+  "litematic",
+  "nbt",
+  "datapack",
+  "materials"
+]);
 function vec(q, ...keys) {
   const v = keys.map((k) => Number.parseInt(q[k] ?? "", 10));
   if (v.some((n) => Number.isNaN(n))) throw new UserError(`Query needs ${keys.join(", ")}.`);
@@ -6246,6 +13200,7 @@ async function createHttpServer({
       connection: "keep-alive",
       "x-accel-buffering": "no"
     });
+    res.write("retry: 1000\n\n");
     const client = hub.add(res);
     hub.send(client, {
       type: "hello",
@@ -6265,20 +13220,20 @@ async function createHttpServer({
   });
   app.get("/api/build", async () => ({ build: builds.header() }));
   app.post("/api/build", async (req, reply) => {
-    const { spec, newProject, label } = req.body ?? {};
+    const { spec, newProject, label: label2 } = req.body ?? {};
     const out = await builds.create(spec ?? req.body, {
       newProject: newProject ?? true,
-      ...label ? { label } : {}
+      ...label2 ? { label: label2 } : {}
     });
     if (!out.ok) return reply.status(422).send({ ok: false, errors: out.errors });
     return { ok: true, summary: builds.summary(out.build), build: builds.header() };
   });
   app.post("/api/build/edit", async (req, reply) => {
-    const { edits, patch, label } = req.body ?? {};
+    const { edits, patch, label: label2 } = req.body ?? {};
     const out = await builds.edit({
       ...edits ? { edits } : {},
       ...patch ? { patch } : {},
-      ...label ? { label } : {}
+      ...label2 ? { label: label2 } : {}
     });
     if (!out.ok) return reply.status(422).send({ ok: false, errors: out.errors });
     return { ok: true, summary: builds.summary(out.build), build: builds.header() };
@@ -6305,7 +13260,19 @@ async function createHttpServer({
     "/api/build/inspect",
     async (req) => builds.inspectAt(vec(req.query, "x", "y", "z"))
   );
+  app.get("/api/build/changes", async (req, reply) => {
+    const { buildId } = req.query;
+    const cur = builds.requireCurrent();
+    if (buildId && buildId !== cur.buildId)
+      throw new UserError("That build is no longer current.", 409);
+    return reply.header("content-type", "application/octet-stream").header("content-encoding", "gzip").header("cache-control", "no-store").send(builds.changesGz());
+  });
+  app.get("/api/build/terrain", async (req, reply) => {
+    const { step } = req.query;
+    return reply.header("content-type", "text/plain; charset=utf-8").send(builds.terrain(step ? { step: Number(step) } : {}));
+  });
   app.get("/api/build/spec", async () => builds.requireCurrent().record.spec);
+  app.get("/api/build/sim", async () => builds.simInfo());
   app.post("/api/build/version", async (req, reply) => {
     const { version, apply } = req.body ?? {};
     if (!version) throw new UserError('Missing "version".');
@@ -6349,6 +13316,40 @@ async function createHttpServer({
     builds.remove(id);
     return { ok: true };
   });
+  app.get("/api/worlds", async () => builds.worlds());
+  app.get("/api/worlds/:id/icon.png", async (req, reply) => {
+    const { id } = req.params;
+    const icon = builds.worldIcon(id);
+    if (!icon) return reply.status(404).send({ error: "No icon." });
+    return reply.header("content-type", "image/png").header("cache-control", "max-age=3600").send(icon);
+  });
+  app.get("/api/sites", async () => builds.siteList());
+  app.post("/api/sites/import", async (req, reply) => {
+    const body = req.body ?? {};
+    if (!body.world) throw new UserError('Missing "world".');
+    const center = Array.isArray(body.center) ? body.center.filter((n) => Number.isFinite(n)).map((n) => Math.floor(n)) : void 0;
+    const { site, outcome } = await builds.importWorldSite({
+      world: body.world,
+      ...center && center.length >= 2 ? { center } : {},
+      ...body.radius ? { radius: Number(body.radius) } : {},
+      ...body.dimension ? { dimension: body.dimension } : {},
+      ...body.name ? { name: body.name } : {}
+    });
+    if (!outcome.ok) return reply.status(422).send({ ok: false, errors: outcome.errors });
+    return { ok: true, site: site.info, warnings: site.warnings, build: builds.header() };
+  });
+  app.post("/api/sites/import-file", async (req, reply) => {
+    const body = req.body ?? {};
+    if (!body.filename || !body.data) throw new UserError('Missing "filename" or "data".');
+    const buffer = Buffer.from(body.data.replace(/^data:[^,]*,/, ""), "base64");
+    const { site, outcome } = await builds.importSchematicSite(
+      buffer,
+      body.filename.replace(/^.*[\\/]/, ""),
+      body.name
+    );
+    if (!outcome.ok) return reply.status(422).send({ ok: false, errors: outcome.errors });
+    return { ok: true, site: site.info, warnings: site.warnings, build: builds.header() };
+  });
   app.get("/api/feedback", async () => builds.feedback());
   app.post("/api/feedback", async (req) => {
     const body = req.body ?? {};
@@ -6380,6 +13381,14 @@ async function createHttpServer({
     if (!FORMATS.has(format)) throw new UserError(`Unknown format "${format}".`);
     return builds.saveExport(format, target ?? "downloads");
   });
+  app.post("/api/export/world", async (req) => {
+    const { name } = req.body ?? {};
+    return builds.exportWorldCopy(name?.trim() || void 0);
+  });
+  app.post("/api/export/datapack/install", async (req) => {
+    const { world } = req.body ?? {};
+    return builds.installDatapack(world || void 0);
+  });
   app.get("/api/assets/:version/status", async (req) => {
     const { version } = req.params;
     return assets.getStatus(version);
@@ -6409,7 +13418,7 @@ async function createHttpServer({
     }));
     return { ok: capture.fulfill(requestId, images ?? null, body.error) };
   });
-  if (existsSync6(config.webDist)) {
+  if (existsSync10(config.webDist)) {
     await app.register(fastifyStatic, { root: config.webDist, prefix: "/" });
     app.setNotFoundHandler((req, reply) => {
       if (req.method === "GET" && !req.url.startsWith("/api")) return reply.sendFile("index.html");
@@ -6421,8 +13430,8 @@ async function createHttpServer({
 }
 
 // apps/server/src/mcp/server.ts
-import { existsSync as existsSync7, readdirSync as readdirSync2, readFileSync as readFileSync4 } from "node:fs";
-import { join as join6 } from "node:path";
+import { existsSync as existsSync11, readdirSync as readdirSync4, readFileSync as readFileSync9 } from "node:fs";
+import { join as join10 } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z as z2 } from "zod";
@@ -6436,6 +13445,10 @@ New build:
 
 Changes: when the user asks to change something, call get_feedback first \u2014 they can pin notes on blocks in the viewer, and each note says which operation placed that block. Edit with edit_build by operation id, then resolve_feedback with a one-line reply.
 
+Redstone: VibeSchem simulates Minecraft Java redstone faithfully for the build's version (game ticks, update order, quasi-connectivity, pistons, torch burnout). For any circuit, read read_guide("redstone"), declare named inputs/outputs and tests in the spec's "circuit" section \u2014 they run on every build like unit tests, and the summary reports them \u2014 and use simulate to try scenarios, measure delays and catch location-dependent designs. Never hand over a circuit whose tests fail.
+
+Building on the player's world: the player can give you a world (or a schematic) and a point to build at. worlds lists their saved worlds; import_site reads an area (centre + radius, default where they stand) into a new project and returns a terrain report: ground heights, water, trees, flat spots, existing builds. Read read_guide("terrain"), then build on it with edit_build (the spec already has "site"): flatten plots with blending, foundations down to the ground, paths that follow it, ground:true to stand trees and components on it, ground()/surface() in scripts. Coordinates are relative to the chosen point. Exports go back to the same world coordinates: a copy of the world with the build in it (export_build format "world"), a vanilla data pack with /fill commands and undo (no mods), or schematics for //paste -o.
+
 Rules: minecraftVersion is strict \u2014 only blocks that exist in that version are accepted; errors suggest alternatives and list_blocks checks availability. Coordinates: +X east, +Y up, +Z south (north = -Z); y=0 is ground level. Give every operation a short "id".`;
 var GUIDE_TOPICS = [
   "workflow",
@@ -6446,8 +13459,10 @@ var GUIDE_TOPICS = [
   "palettes",
   "details",
   "landscape",
+  "terrain",
   "scripts",
   "versions",
+  "redstone",
   "examples"
 ];
 var vec32 = z2.array(z2.number().int()).length(3).describe("[x, y, z]");
@@ -6495,11 +13510,10 @@ function buildMcpServer({ builds, config }) {
         content.push({ type: "image", data: img.png.toString("base64"), mimeType: "image/png" });
       if (r.note) content.push(text(r.note));
     } else {
-      openViewerIfClosed();
+      void builds.showViewer();
     }
     return { content };
   };
-  const openViewerIfClosed = () => openViewer(`${config.baseUrl}/`);
   server.registerTool(
     "read_guide",
     {
@@ -6509,12 +13523,12 @@ function buildMcpServer({ builds, config }) {
       annotations: { readOnlyHint: true, openWorldHint: false }
     },
     async ({ topic }) => guarded(async () => {
-      const file = join6(config.guidesDir, `${topic}.md`);
-      if (!existsSync7(file)) {
-        const have = existsSync7(config.guidesDir) ? readdirSync2(config.guidesDir).join(", ") : "none";
+      const file = join10(config.guidesDir, `${topic}.md`);
+      if (!existsSync11(file)) {
+        const have = existsSync11(config.guidesDir) ? readdirSync4(config.guidesDir).join(", ") : "none";
         return errorResult(`Guide "${topic}" not found (available: ${have}).`);
       }
-      return { content: [text(readFileSync4(file, "utf8"))] };
+      return { content: [text(readFileSync9(file, "utf8"))] };
     })
   );
   server.registerTool(
@@ -6527,7 +13541,7 @@ function buildMcpServer({ builds, config }) {
         idempotentHint: false,
         openWorldHint: true
       },
-      description: 'Build a Minecraft structure in VibeSchem: compile a BuildSpec and show it in the live 3D viewer (opens the browser if needed). Returns a summary and a rendered preview image. Starts a new project (with its own version history) unless newProject is false, which replaces the current build as a new version. Errors (unknown blocks for the version, bad fields) come back as a list to fix. BuildSpec: {name, minecraftVersion, palette?, components?, operations:[{type, id, \u2026}]}; operation types: box, line, cylinder, cone, sphere, dome, polygon, roof, arch, blocks, layers, terrain, tree, scatter, replace, group, place, script \u2014 see read_guide("spec").',
+      description: 'Build a Minecraft structure in VibeSchem: compile a BuildSpec and show it in the live 3D viewer (opens the browser if needed). Returns a summary and a rendered preview image. Starts a new project (with its own version history) unless newProject is false, which replaces the current build as a new version. Errors (unknown blocks for the version, bad fields) come back as a list to fix. BuildSpec: {name, minecraftVersion, palette?, components?, operations:[{type, id, \u2026}], circuit?}; operation types: box, line, cylinder, cone, sphere, dome, polygon, roof, arch, blocks, layers, terrain, tree, scatter, replace, flatten, foundation, path, group, place, script \u2014 see read_guide("spec"). site = build on an area imported with import_site (see read_guide("terrain")). circuit = named redstone inputs/outputs + tests, run by the simulator on every build \u2014 see read_guide("redstone").',
       inputSchema: {
         spec: z2.record(z2.string(), z2.unknown()).describe("The BuildSpec object."),
         newProject: z2.boolean().optional().describe("Default true. false = new version of the current project."),
@@ -6535,11 +13549,11 @@ function buildMcpServer({ builds, config }) {
         preview: z2.boolean().optional().describe("Return a rendered image (default true).")
       }
     },
-    async ({ spec, newProject, label, preview }) => guarded(
+    async ({ spec, newProject, label: label2, preview }) => guarded(
       async () => outcome(
         await builds.create(spec, {
           newProject: newProject ?? true,
-          ...label ? { label } : {}
+          ...label2 ? { label: label2 } : {}
         }),
         preview ?? true
       )
@@ -6555,7 +13569,7 @@ function buildMcpServer({ builds, config }) {
         idempotentHint: false,
         openWorldHint: true
       },
-      description: 'Change the current VibeSchem Minecraft build without resending it; saved as a new version. "edits" (preferred) target operations by id: {op:"add", operations, after?|before?|into?: id} \xB7 {op:"replace", id, with} \xB7 {op:"update", id, set:{field: value|null}} \xB7 {op:"remove", ids} \xB7 {op:"palette", set:{key: entry|null}} \xB7 {op:"component", name, set} \xB7 {op:"meta", set:{name?, minecraftVersion?, anchor?, \u2026}}. "patch" accepts RFC 6902 JSON Patch on the spec for anything else.',
+      description: 'Change the current VibeSchem Minecraft build without resending it; saved as a new version. "edits" (preferred) target operations by id: {op:"add", operations, after?|before?|into?: id} \xB7 {op:"replace", id, with} \xB7 {op:"update", id, set:{field: value|null}} \xB7 {op:"remove", ids} \xB7 {op:"palette", set:{key: entry|null}} \xB7 {op:"component", name, set} \xB7 {op:"meta", set:{name?, minecraftVersion?, anchor?, \u2026}} \xB7 {op:"circuit", set:{inputs?, outputs?: {name: io|null}, tests?: [test | {name, remove:true}], settleTicks?}} (redstone I/O and tests, merged by name). "patch" accepts RFC 6902 JSON Patch on the spec for anything else.',
       inputSchema: {
         edits: z2.array(z2.object({ op: z2.string() }).passthrough()).optional(),
         patch: z2.array(z2.object({ op: z2.string(), path: z2.string() }).passthrough()).optional(),
@@ -6563,12 +13577,12 @@ function buildMcpServer({ builds, config }) {
         preview: z2.boolean().optional().describe("Return a rendered image (default true).")
       }
     },
-    async ({ edits, patch, label, preview }) => guarded(
+    async ({ edits, patch, label: label2, preview }) => guarded(
       async () => outcome(
         await builds.edit({
           ...edits ? { edits } : {},
           ...patch ? { patch } : {},
-          ...label ? { label } : {}
+          ...label2 ? { label: label2 } : {}
         }),
         preview ?? true
       )
@@ -6641,14 +13655,14 @@ function buildMcpServer({ builds, config }) {
       const lines = items.map((f) => {
         const where = f.region ? `region ${f.region.from.join(",")} \u2192 ${f.region.to.join(",")}` : f.pos ? `at ${f.pos.join(",")}` : "whole build";
         const num = open.indexOf(f) + 1;
-        const parts = [
+        const parts2 = [
           `${num ? `#${num} ` : ""}[${f.id}] (${f.status}, v${f.n ?? "?"}) ${where}: "${f.text}"`
         ];
-        if (f.block) parts.push(`   block: ${f.block.replace("minecraft:", "")}`);
-        if (f.source) parts.push(`   placed by: ${f.source}`);
-        if (f.targetVersion) parts.push(`   wants Minecraft ${f.targetVersion}`);
-        if (f.reply) parts.push(`   your reply: ${f.reply}`);
-        return parts.join("\n");
+        if (f.block) parts2.push(`   block: ${f.block.replace("minecraft:", "")}`);
+        if (f.source) parts2.push(`   placed by: ${f.source}`);
+        if (f.targetVersion) parts2.push(`   wants Minecraft ${f.targetVersion}`);
+        if (f.reply) parts2.push(`   your reply: ${f.reply}`);
+        return parts2.join("\n");
       });
       const content = [text(lines.join("\n"))];
       const pinned = open.filter((f) => f.pos || f.region);
@@ -6767,6 +13781,102 @@ placed by: ${hit.source}` : ""}`
     })
   );
   server.registerTool(
+    "worlds",
+    {
+      title: "List Minecraft worlds",
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      description: "The player's Minecraft Java worlds on this computer (official launcher, Prism, MultiMC, CurseForge, Modrinth): id, name, version, where the player stands, dimensions. Use an id with import_site. Worlds are only read.",
+      inputSchema: {}
+    },
+    async () => guarded(async () => {
+      const list2 = builds.worlds();
+      if (!list2.length)
+        return {
+          content: [
+            text(
+              "No Minecraft worlds found in the usual saves folders. Ask the player for the world folder path (import_site accepts it), or for a schematic file."
+            )
+          ]
+        };
+      const lines = list2.slice(0, 40).map((w) => {
+        const played = w.lastPlayed ? new Date(w.lastPlayed).toISOString().slice(0, 10) : "?";
+        const pos = w.player ? `player at ${w.player.pos.join(" ")} (${w.player.dimension.replace("minecraft:", "")})` : "player position unknown";
+        return `- ${w.id} "${w.name}" \xB7 ${w.version ?? "unknown version"} \xB7 ${w.gameMode ?? ""} \xB7 last played ${played} \xB7 ${pos} \xB7 ${w.launcher}`;
+      });
+      return {
+        content: [text(`${list2.length} world(s), most recent first:
+${lines.join("\n")}`)]
+      };
+    })
+  );
+  server.registerTool(
+    "import_site",
+    {
+      title: "Import a site to build on",
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true
+      },
+      description: "Read an area of the player's Minecraft world (or a schematic file) and start a new project on it, shown in the viewer: then build on the real terrain with edit_build. world: id or name from worlds, or a world folder path. center: [x, z] or [x, y, z] in world coordinates (default: where the player stands); radius: half-size of the square area (default 48, max 128). Or file: a .schem/.schematic/.litematic/.nbt path. The world is only read. Returns the terrain report (as the terrain tool) and a preview.",
+      inputSchema: {
+        world: z2.string().optional(),
+        center: z2.array(z2.number()).min(2).max(3).optional().describe("[x, z] or [x, y, z], world coordinates"),
+        radius: z2.number().int().min(4).max(128).optional(),
+        dimension: z2.string().optional().describe("minecraft:overworld (default: the player's), minecraft:the_nether, \u2026"),
+        file: z2.string().optional().describe("A schematic file to use as the site instead of a world."),
+        name: z2.string().optional()
+      }
+    },
+    async ({ world, center, radius, dimension, file, name }) => guarded(async () => {
+      if (!world && !file) return errorResult('Give "world" (see worlds) or "file".');
+      const { site, outcome: out } = file ? await builds.importSchematicFile(file, name) : await builds.importWorldSite({
+        world,
+        ...center ? { center } : {},
+        ...radius ? { radius } : {},
+        ...dimension ? { dimension } : {},
+        ...name ? { name } : {},
+        allowPath: true
+      });
+      if (!out.ok) return errorResult(out.errors.join("\n"));
+      const content = [
+        text(
+          `${builds.terrain()}
+
+The project "${out.build.record.spec.name}" (site ${site.info.id}) is open in the viewer. Add operations with edit_build ({op:"add"}); keep "site" and minecraftVersion ${site.version} in the spec.`
+        )
+      ];
+      const r = await builds.render({ views: ["iso"], size: 760 });
+      for (const img of r.images)
+        content.push({ type: "image", data: img.png.toString("base64"), mimeType: "image/png" });
+      return { content };
+    })
+  );
+  server.registerTool(
+    "terrain",
+    {
+      title: "Terrain report",
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      description: "The ground of the current site as it is now: height map in spec coordinates (y of the top ground block), water, trees, flattest open spots, existing builds, and how spec coordinates map to the world. from/to zoom into a region; step sets the map spacing.",
+      inputSchema: {
+        from: vec32.optional(),
+        to: vec32.optional(),
+        step: z2.number().int().min(1).max(32).optional()
+      }
+    },
+    async ({ from, to, step }) => guarded(async () => ({
+      content: [
+        text(
+          builds.terrain({
+            ...step ? { step } : {},
+            ...from && to ? { from, to } : {}
+          })
+        )
+      ]
+    }))
+  );
+  server.registerTool(
     "export_build",
     {
       title: "Export build",
@@ -6776,13 +13886,48 @@ placed by: ${hit.source}` : ""}`
         idempotentHint: false,
         openWorldHint: false
       },
-      description: "Export the current VibeSchem build as a Minecraft schematic. Formats: schem (Sponge v2, WorldEdit 7+/FAWE, 1.13+, default), schem3 (Sponge v3, WorldEdit 7.3+), schematic (MCEdit, WorldEdit 6 for 1.8\u20131.12), litematic (Litematica), nbt (vanilla structure block / /place template), materials (CSV shopping list). saveTo writes the file straight into the player's Minecraft folder: worldedit (config/worldedit/schematics, single player), litematica (schematics/) or downloads, under a new name if that file already exists (never overwrites). Without saveTo returns a download link. The viewer has an Export button too.",
+      description: "Export the current VibeSchem build for Minecraft. Formats: schem (Sponge v2, WorldEdit 7+/FAWE, 1.13+, default), schem3 (Sponge v3, WorldEdit 7.3+), schematic (MCEdit, WorldEdit 6 for 1.8\u20131.12), litematic (Litematica), nbt (vanilla structure block / /place template), datapack (vanilla commands, no mods: /function \u2026/build builds it where the player stands \u2014 or, on a site, at its world position \u2014 and \u2026/undo removes it), materials (CSV shopping list), world (builds on a site imported from a world only: a new copy of that world with the build in it; the original is never changed). On a site the schematics hold only the changed area and keep its world position (WorldEdit //paste -o). saveTo writes the file straight into the player's Minecraft folder: worldedit (config/worldedit/schematics, single player), litematica (schematics/) or downloads, under a new name if that file already exists (never overwrites); saveTo world (datapack only) installs the pack into a world's datapacks folder. Without saveTo returns a download link. The viewer has an Export button too.",
       inputSchema: {
-        format: z2.enum(["schem", "schem3", "schematic", "litematic", "nbt", "materials"]).optional(),
-        saveTo: z2.enum(["worldedit", "litematica", "downloads"]).optional()
+        format: z2.enum([
+          "schem",
+          "schem3",
+          "schematic",
+          "litematic",
+          "nbt",
+          "datapack",
+          "materials",
+          "world"
+        ]).optional(),
+        saveTo: z2.enum(["worldedit", "litematica", "downloads", "world"]).optional(),
+        world: z2.string().optional().describe(
+          `datapack + saveTo "world": the world id (from worlds) to install it in; default the site's world.`
+        ),
+        name: z2.string().optional().describe('format "world": name of the new world copy.')
       }
     },
-    async ({ format, saveTo }) => guarded(async () => {
+    async ({ format, saveTo, world, name }) => guarded(async () => {
+      if (format === "world") {
+        const copy = await builds.exportWorldCopy(name);
+        return {
+          content: [
+            text(
+              `Created the world "${copy.name}" (folder ${copy.path}) with the build in it: ${copy.blocks.toLocaleString("en-US")} blocks in ${copy.chunks} chunks. The original world is untouched. The player opens "${copy.name}" from Singleplayer; light is recomputed when the area loads.`
+            )
+          ]
+        };
+      }
+      if (format === "datapack" && saveTo === "world") {
+        const inst = builds.installDatapack(world);
+        return {
+          content: [
+            text(
+              `Installed the data pack in "${inst.world}" (${inst.path}). In that world (cheats on): /reload, then /function ${inst.functionId}/build \u2014 undo with /function ${inst.functionId}/undo.${inst.warnings.length ? `
+Notes: ${inst.warnings.join(" ")}` : ""}`
+            )
+          ]
+        };
+      }
+      if (saveTo === "world") return errorResult('saveTo "world" is for format "datapack".');
       const formats = builds.formats();
       const fmt = format ?? formats.find((f) => f.recommended)?.id ?? "schem";
       if (saveTo) {
@@ -6889,6 +14034,39 @@ Can also save directly to: ${targets.join(", ")}` : "")
       return { content: [text("Done.")] };
     })
   );
+  server.registerTool(
+    "simulate",
+    {
+      title: "Test the redstone",
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      description: "Run the current VibeSchem build's redstone in a simulator that follows Minecraft Java's own mechanics for the build's version: game ticks (20/s; repeater delay 1 = 2 ticks), neighbour and shape updates in the game's order, scheduled-tick priorities, quasi-connectivity, pistons with slime/honey and 0-tick spitting, observers, comparators reading containers, torch burnout. Runs the stored tests (spec.circuit.tests) or the `tests` given here, and reports pass/fail per test with failing cases, latencies (\"expect \u2026 within\"), measured clock periods, traces of signal changes, and problems such as torches burning out or blocks popping off. `inputs`/`outputs` add or override named I/O for this run only. `locations` (2\u201316) re-runs at other world positions, where dust and pistons update in another order, to catch location-dependent designs. `show` plays one test live in the user's viewer. Test format and step reference: read_guide(\"redstone\").",
+      inputSchema: {
+        tests: z2.array(z2.record(z2.string(), z2.unknown())).optional().describe(
+          "Tests to run instead of the stored ones: {name, steps:[{set:{A:1}}, {wait:4}, {expect:{L:1}, within:10}, \u2026], forAll?:{A:[0,15]}, samples?, trace?:[names]}."
+        ),
+        only: z2.array(z2.string()).optional().describe("Run only these stored tests (by name)."),
+        inputs: z2.record(z2.string(), z2.record(z2.string(), z2.unknown())).optional().describe(
+          'Extra named inputs for this run: {"A": {"at": [x,y,z]}} (lever, button, plate\u2026; "as" to place a block).'
+        ),
+        outputs: z2.record(z2.string(), z2.record(z2.string(), z2.unknown())).optional().describe(
+          'Extra named outputs: {"Q": {"at": [x,y,z]}} or a bus {"at": [[x,y,z], \u2026]}; "read": "power" for 0\u201315.'
+        ),
+        locations: z2.number().int().min(1).max(16).optional(),
+        show: z2.string().optional().describe("Name of a test to play live in the viewer.")
+      }
+    },
+    async ({ tests, only, inputs, outputs, locations, show }) => guarded(async () => {
+      const r = builds.simulate({
+        ...tests ? { tests } : {},
+        ...only ? { only } : {},
+        ...inputs ? { inputs } : {},
+        ...outputs ? { outputs } : {},
+        ...locations ? { locations } : {},
+        ...show ? { show } : {}
+      });
+      return { content: [text(r.text)] };
+    })
+  );
   return server;
 }
 async function startMcpServer(deps) {
@@ -6899,10 +14077,10 @@ async function startMcpServer(deps) {
 
 // apps/server/src/index.ts
 function isPortFree(host, port) {
-  return new Promise((resolve) => {
+  return new Promise((resolve3) => {
     const probe = createServer();
-    probe.once("error", () => resolve(false));
-    probe.once("listening", () => probe.close(() => resolve(true)));
+    probe.once("error", () => resolve3(false));
+    probe.once("listening", () => probe.close(() => resolve3(true)));
     probe.listen(port, host);
   });
 }
@@ -6944,7 +14122,7 @@ async function main() {
   await listen(app, config);
   if (config.mcpMode) {
     await startMcpServer({ builds, config });
-    const note = existsSync8(config.webDist) ? "" : ' (run "pnpm build" once to enable the browser viewer)';
+    const note = existsSync12(config.webDist) ? "" : ' (run "pnpm build" once to enable the browser viewer)';
     process.stderr.write(`vibeschem: MCP ready; viewer on ${config.baseUrl}${note}
 `);
   } else {

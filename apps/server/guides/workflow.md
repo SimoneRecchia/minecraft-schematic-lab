@@ -8,6 +8,10 @@ The user describes a subject (and maybe size, version, style, allowed blocks). Y
 - **Constraints**: "only these blocks", style, colors — they override every default in these guides.
 - **Ground**: unless the user wants a bare schematic, give the build a base (plinth, terrain patch, path, a few trees). Buildings floating on nothing look unfinished.
 
+**Redstone** (doors, clocks, logic, farms' control, computers): read_guide("redstone") and drive the work with tests in the spec's `circuit` section.
+
+**Their world** ("build it here", coordinates, "on my survival world", a base schematic): read_guide("terrain"), `import_site` the area and build on its real ground; give it back as a world copy, a vanilla data pack or a schematic that pastes in place.
+
 ## 1. Plan before writing (think, don't output)
 1. **Massing**: 2–5 volumes with a clear hierarchy (one dominant mass/tower, secondary masses ~0.6×, small additions). Plan footprints at ~1:1.6, odd widths for centered doors and single-row ridges, heights that differ by ≥2 between neighbours. Roofs are 30–60% of what you see on traditional styles.
 2. **Grid & proportions**: floor-to-floor 4–5 (houses) / 5–6 (manors) / 6–8 (palaces); doors 1×2 (2×3 or arched for grand); windows aligned in bays of 3–5; walls ≥1 from corners to openings.
@@ -33,7 +37,7 @@ The user describes a subject (and maybe size, version, style, allowed blocks). Y
 Fix with `edit_build` (by id). Usually 1–3 refinement passes. Stop when it's genuinely good — don't burn calls on invisible changes.
 
 ## 4. Present
-Two to four sentences: what you built, the key design choices (style, palette, size, version), and that the viewer can rotate it, cut it into layers, pin notes on blocks, and export it (`.schem` for WorldEdit, `.litematic`, structure block, material list). Don't paste the spec.
+Two to four sentences: what you built, the key design choices (style, palette, size, version), and that the viewer can rotate it, cut it into layers, pin notes on blocks, and export it (`.schem` for WorldEdit, `.litematic`, structure block, a data pack that needs no mods, material list; on their world also a copy of the world with the build). Don't paste the spec.
 
 ## 5. Iterating with the user
 - When they ask for changes, **call `get_feedback` first**: notes pinned in the viewer tell you exactly which block and which operation (`placed by`) they mean. Numbered pins (#1, #2…) appear in the image.
@@ -44,7 +48,7 @@ Two to four sentences: what you built, the key design choices (style, palette, s
 - Versions are saved automatically; `history` lists/restores them.
 
 ## 6. Export
-The user exports from the viewer (Export button) or you call `export_build`. Recommend: `.schem` (WorldEdit 7/FAWE, 1.13+), `.schematic` (WorldEdit 6, 1.8–1.12), `.litematic` (survival building with Litematica), `.nbt` (vanilla structure block ≤48³ or `/place template` 1.19+), material list CSV. `export_build({saveTo:"worldedit"|"litematica"})` drops the file straight into their Minecraft folders when they exist. In game: `//schem load <name>` then `//paste` (the anchor lands at their feet).
+The user exports from the viewer (Export button) or you call `export_build`. Recommend: `.schem` (WorldEdit 7/FAWE, 1.13+), `.schematic` (WorldEdit 6, 1.8–1.12), `.litematic` (survival building with Litematica), `.nbt` (vanilla structure block ≤48³ or `/place template` 1.19+), `datapack` (no mods at all: `/function vibeschem:<id>/build` builds it where they stand, `…/undo` removes it), material list CSV. On a site, also `world` (a copy of their world with the build in it). `export_build({saveTo:"worldedit"|"litematica"})` drops the file straight into their Minecraft folders when they exist. In game: `//schem load <name>` then `//paste` (the anchor lands at their feet).
 
 ## Speed rules
 - One complete spec beats many small builds. Don't call `read_guide` for topics you won't use.

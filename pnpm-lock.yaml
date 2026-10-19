@@ -90,9 +90,15 @@ importers:
       '@minecraft-schematic-lab/formats':
         specifier: workspace:*
         version: link:../../packages/formats
+      '@minecraft-schematic-lab/redstone':
+        specifier: workspace:*
+        version: link:../../packages/redstone
       '@minecraft-schematic-lab/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@minecraft-schematic-lab/world':
+        specifier: workspace:*
+        version: link:../../packages/world
       '@modelcontextprotocol/sdk':
         specifier: ^1.32.1
         version: 1.32.1(zod@3.25.76)
@@ -121,6 +127,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@minecraft-schematic-lab/redstone':
+        specifier: workspace:*
+        version: link:../../packages/redstone
       '@minecraft-schematic-lab/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -161,6 +170,9 @@ importers:
       '@minecraft-schematic-lab/catalog':
         specifier: workspace:*
         version: link:../catalog
+      '@minecraft-schematic-lab/redstone':
+        specifier: workspace:*
+        version: link:../redstone
     devDependencies:
       '@types/node':
         specifier: ^22.10.2
@@ -193,7 +205,26 @@ importers:
         specifier: ^2.5.0
         version: 2.8.0
 
+  packages/redstone:
+    devDependencies:
+      '@minecraft-schematic-lab/catalog':
+        specifier: workspace:*
+        version: link:../catalog
+
   packages/shared:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.2
+        version: 22.19.21
+
+  packages/world:
+    dependencies:
+      '@minecraft-schematic-lab/catalog':
+        specifier: workspace:*
+        version: link:../catalog
+      '@minecraft-schematic-lab/formats':
+        specifier: workspace:*
+        version: link:../formats
     devDependencies:
       '@types/node':
         specifier: ^22.10.2

@@ -3,7 +3,18 @@ import type { ScriptRunner } from './context';
 import { CompileLimitError } from './SparseVolume';
 
 /** API functions called with primitive arguments; every other one gets its arguments as JSON. */
-const PRIMITIVE_CALLS = ['set', 'get', 'rand', 'randInt', 'chance', 'noise', 'fbm'];
+const PRIMITIVE_CALLS = [
+  'set',
+  'get',
+  'rand',
+  'randInt',
+  'chance',
+  'noise',
+  'fbm',
+  'ground',
+  'surface',
+  'water',
+];
 
 /** A readable message for anything thrown, without keeping a reference to it. */
 function describe(thrown: unknown): string {
@@ -63,7 +74,7 @@ export const nodeScriptRunner: ScriptRunner = (code, api, timeoutMs) => {
 
   const context = vm.createContext({}, { microtaskMode: 'afterEvaluate' });
   const install = vm.runInContext(
-    `(function (bridge, FAIL, primitiveJson, namesJson, argsJson) {
+    `(function (bridge, FAIL, primitiveJson, namesJson, argsJson, globalsJson) {
       'use strict';
       const primitive = JSON.parse(primitiveJson);
       const call = (name, args) => {
@@ -80,6 +91,7 @@ export const nodeScriptRunner: ScriptRunner = (code, api, timeoutMs) => {
       globalThis.pick = (list) => list[Math.floor(globalThis.rand() * list.length)];
       globalThis.log = (...parts) => call('log', parts.map(String));
       globalThis.args = JSON.parse(argsJson);
+      for (const [k, v] of Object.entries(JSON.parse(globalsJson))) globalThis[k] = v;
       delete globalThis.Atomics;
       delete globalThis.SharedArrayBuffer;
       delete globalThis.WebAssembly;
@@ -95,6 +107,7 @@ export const nodeScriptRunner: ScriptRunner = (code, api, timeoutMs) => {
     JSON.stringify(PRIMITIVE_CALLS),
     JSON.stringify(names),
     JSON.stringify(api.args ?? {}),
+    JSON.stringify(api.globals ?? {}),
   );
 
   // The code is compiled inside the context from a string, never pasted into this wrapper, so it

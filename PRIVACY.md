@@ -1,6 +1,6 @@
 # VibeSchem privacy policy
 
-Last updated: 18 October 2026
+Last updated: 19 October 2026
 
 VibeSchem (the Claude plugin and desktop extension built from this repository) runs entirely on your
 computer. It has no accounts, no analytics and no telemetry, and its author receives no data from it.
@@ -20,9 +20,14 @@ tools (such as build summaries and preview images) as in any conversation. That 
   version history and the notes you pin in the viewer, extracted textures and models, the downloaded
   game clients and, if needed, Node.js.
 - It reads your Minecraft launcher folder to reuse game versions you already installed and to find
-  the WorldEdit and Litematica folders. It does not read your Minecraft account or saves.
+  the WorldEdit and Litematica folders. It does not read your Minecraft account.
+- To build on your world, it reads your saved worlds (official launcher, Prism, MultiMC, CurseForge,
+  Modrinth): the name, version and player position of each world when it lists them, and the blocks
+  of the area you import. The imported area is stored with your builds.
 - It writes exported schematics only where you ask: a browser download, your `Downloads` folder, or
-  your WorldEdit or Litematica folder.
+  your WorldEdit or Litematica folder. When you ask for it, it creates a copy of a world with the
+  build in it, next to the original in your saves, or adds a data pack folder to a world's
+  `datapacks` folder. It never changes an existing world's files.
 - Its local viewer listens only on your own computer (`127.0.0.1`) and refuses requests from other
   websites.
 

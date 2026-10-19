@@ -23,7 +23,15 @@ export interface HttpDeps {
   config: AppConfig;
 }
 
-const FORMATS = new Set(['schem', 'schem3', 'schematic', 'litematic', 'nbt', 'materials']);
+const FORMATS = new Set([
+  'schem',
+  'schem3',
+  'schematic',
+  'litematic',
+  'nbt',
+  'datapack',
+  'materials',
+]);
 
 function vec(q: Record<string, string | undefined>, ...keys: [string, string, string]): Vec3 {
   const v = keys.map((k) => Number.parseInt(q[k] ?? '', 10));
@@ -83,6 +91,9 @@ export async function createHttpServer({
       connection: 'keep-alive',
       'x-accel-buffering': 'no',
     });
+    // Reconnect within a second after the server restarts (a new Claude session), so the open tab
+    // is reused instead of a new one being opened.
+    res.write('retry: 1000\n\n');
     const client = hub.add(res);
     hub.send(client, {
       type: 'hello',
@@ -169,7 +180,27 @@ export async function createHttpServer({
     builds.inspectAt(vec(req.query as Record<string, string>, 'x', 'y', 'z')),
   );
 
+  app.get('/api/build/changes', async (req, reply) => {
+    const { buildId } = req.query as { buildId?: string };
+    const cur = builds.requireCurrent();
+    if (buildId && buildId !== cur.buildId)
+      throw new UserError('That build is no longer current.', 409);
+    return reply
+      .header('content-type', 'application/octet-stream')
+      .header('content-encoding', 'gzip')
+      .header('cache-control', 'no-store')
+      .send(builds.changesGz());
+  });
+
+  app.get('/api/build/terrain', async (req, reply) => {
+    const { step } = req.query as { step?: string };
+    return reply
+      .header('content-type', 'text/plain; charset=utf-8')
+      .send(builds.terrain(step ? { step: Number(step) } : {}));
+  });
+
   app.get('/api/build/spec', async () => builds.requireCurrent().record.spec);
+  app.get('/api/build/sim', async () => builds.simInfo());
 
   app.post('/api/build/version', async (req, reply) => {
     const { version, apply } = (req.body ?? {}) as { version?: string; apply?: boolean };
@@ -222,6 +253,58 @@ export async function createHttpServer({
     return { ok: true };
   });
 
+  // ------------------------------------------------------------------ worlds & sites
+  app.get('/api/worlds', async () => builds.worlds());
+
+  app.get('/api/worlds/:id/icon.png', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const icon = builds.worldIcon(id);
+    if (!icon) return reply.status(404).send({ error: 'No icon.' });
+    return reply
+      .header('content-type', 'image/png')
+      .header('cache-control', 'max-age=3600')
+      .send(icon);
+  });
+
+  app.get('/api/sites', async () => builds.siteList());
+
+  // Only worlds from the saves folders (by id): the viewer never names arbitrary paths.
+  app.post('/api/sites/import', async (req, reply) => {
+    const body = (req.body ?? {}) as {
+      world?: string;
+      center?: number[];
+      radius?: number;
+      dimension?: string;
+      name?: string;
+    };
+    if (!body.world) throw new UserError('Missing "world".');
+    const center = Array.isArray(body.center)
+      ? body.center.filter((n) => Number.isFinite(n)).map((n) => Math.floor(n))
+      : undefined;
+    const { site, outcome } = await builds.importWorldSite({
+      world: body.world,
+      ...(center && center.length >= 2 ? { center } : {}),
+      ...(body.radius ? { radius: Number(body.radius) } : {}),
+      ...(body.dimension ? { dimension: body.dimension } : {}),
+      ...(body.name ? { name: body.name } : {}),
+    });
+    if (!outcome.ok) return reply.status(422).send({ ok: false, errors: outcome.errors });
+    return { ok: true, site: site.info, warnings: site.warnings, build: builds.header() };
+  });
+
+  app.post('/api/sites/import-file', async (req, reply) => {
+    const body = (req.body ?? {}) as { filename?: string; data?: string; name?: string };
+    if (!body.filename || !body.data) throw new UserError('Missing "filename" or "data".');
+    const buffer = Buffer.from(body.data.replace(/^data:[^,]*,/, ''), 'base64');
+    const { site, outcome } = await builds.importSchematicSite(
+      buffer,
+      body.filename.replace(/^.*[\\/]/, ''),
+      body.name,
+    );
+    if (!outcome.ok) return reply.status(422).send({ ok: false, errors: outcome.errors });
+    return { ok: true, site: site.info, warnings: site.warnings, build: builds.header() };
+  });
+
   // ------------------------------------------------------------------ feedback
   app.get('/api/feedback', async () => builds.feedback());
 
@@ -264,6 +347,16 @@ export async function createHttpServer({
     const { target } = (req.body ?? {}) as { target?: 'worldedit' | 'litematica' | 'downloads' };
     if (!FORMATS.has(format)) throw new UserError(`Unknown format "${format}".`);
     return builds.saveExport(format as ExportFormat, target ?? 'downloads');
+  });
+
+  app.post('/api/export/world', async (req) => {
+    const { name } = (req.body ?? {}) as { name?: string };
+    return builds.exportWorldCopy(name?.trim() || undefined);
+  });
+
+  app.post('/api/export/datapack/install', async (req) => {
+    const { world } = (req.body ?? {}) as { world?: string };
+    return builds.installDatapack(world || undefined);
   });
 
   // ------------------------------------------------------------------ game assets

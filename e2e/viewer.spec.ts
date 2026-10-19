@@ -55,3 +55,52 @@ test('history records edits', async ({ page, request }) => {
   await page.getByRole('button', { name: /Versions|Versioni/ }).click();
   await expect(page.getByText(/darker roof/)).toBeVisible();
 });
+
+test('runs the redstone live: a switch in the panel lights the lamp', async ({ page, request }) => {
+  const circuit = {
+    name: 'E2E Lamp',
+    minecraftVersion: '1.21.4',
+    operations: [
+      { id: 'floor', type: 'box', from: [0, -1, 0], to: [5, -1, 0], block: 'smooth_stone' },
+      { id: 'lever', type: 'blocks', block: 'lever[face=floor,facing=east]', at: [[0, 0, 0]] },
+      { id: 'delay', type: 'blocks', block: 'repeater[facing=west,delay=4]', at: [[1, 0, 0]] },
+      { id: 'dust', type: 'line', from: [2, 0, 0], to: [3, 0, 0], block: 'redstone_wire' },
+      { id: 'lamp', type: 'blocks', block: 'redstone_lamp', at: [[4, 0, 0]] },
+    ],
+    circuit: {
+      inputs: { S: { at: [0, 0, 0] } },
+      outputs: { L: { at: [4, 0, 0] } },
+      tests: [{ name: 'lights', steps: [{ set: { S: 1 } }, { expect: { L: 1 }, within: 10 }] }],
+    },
+  };
+  const res = await request.post('/api/build', { data: { spec: circuit } });
+  expect(((await res.json()) as { summary: string }).summary).toContain('Tests: 1/1 passed');
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Redstone' }).click();
+  await expect(page.locator('.io-row')).toHaveCount(2);
+  await expect(page.locator('.io-row .led')).not.toHaveClass(/on/);
+  await page.getByRole('switch').click();
+  // The repeater waits 8 game ticks (0.4 s at real speed), then the lamp lights.
+  await expect(page.locator('.io-row .led')).toHaveClass(/on/, { timeout: 5000 });
+  await expect(page.locator('.simbar .clock')).toContainText(/\d/);
+  await page.getByRole('button', { name: /Run all|Esegui tutti/ }).click();
+  await expect(page.locator('.status-dot.pass')).toHaveCount(1);
+});
+
+test('imports a schematic as a site to build on', async ({ page, request }) => {
+  const schem = await request.get('/api/export/schem');
+  expect(schem.ok()).toBe(true);
+  await page.goto('/');
+  await page.locator('.sidebar-head button[title]').first().click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await page.getByRole('button', { name: /From a schematic|Da una schematica/ }).click();
+  await page.locator('input[type=file]').setInputFiles({
+    name: 'cottage.schem',
+    mimeType: 'application/octet-stream',
+    buffer: Buffer.from(await schem.body()),
+  });
+  await expect(page.locator('.build-name')).toHaveText('cottage');
+  await expect(page.locator('.site-card')).toContainText('cottage.schem');
+  const header = await (await request.get('/api/build')).json();
+  expect(header.build.site).toMatchObject({ kind: 'schematic', changes: 0 });
+});

@@ -46,6 +46,31 @@ export const list = (elem: TagType, v: Tag[]): Tag => ({ t: 'list', elem, v });
 export const intArray = (v: ArrayLike<number>): Tag => ({ t: 'intArray', v });
 export const byteArray = (v: Uint8Array | Int8Array): Tag => ({ t: 'byteArray', v });
 
+/**
+ * Java's "modified UTF-8" (DataOutput.writeUTF), which NBT uses: NUL takes two bytes and
+ * characters outside the BMP are written as two 3-byte surrogates. Standard UTF-8 4-byte
+ * sequences would make the game reject the whole chunk or file.
+ */
+export function encodeModifiedUtf8(s: string): Buffer {
+  let ascii = true;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c === 0 || c > 0x7f) {
+      ascii = false;
+      break;
+    }
+  }
+  if (ascii) return Buffer.from(s, 'latin1');
+  const out: number[] = [];
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c !== 0 && c <= 0x7f) out.push(c);
+    else if (c <= 0x7ff) out.push(0xc0 | (c >> 6), 0x80 | (c & 0x3f));
+    else out.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f));
+  }
+  return Buffer.from(out);
+}
+
 class Writer {
   private buf = Buffer.allocUnsafe(1 << 16);
   private pos = 0;
@@ -108,7 +133,8 @@ class Writer {
     this.pos += v.length;
   }
   string(s: string): void {
-    const b = Buffer.from(s, 'utf8');
+    const b = encodeModifiedUtf8(s);
+    if (b.length > 65535) throw new Error('An NBT string is longer than 65535 bytes.');
     this.u16(b.length);
     this.bytes(b);
   }
@@ -203,6 +229,20 @@ export function jsonToTag(value: unknown): Tag {
     return str(value);
   }
   if (Array.isArray(value)) {
+    // ["B;", 1, 2], ["I;", …], ["L;", …]: typed arrays, as SNBT writes them.
+    const kind = value[0];
+    if (kind === 'B;' || kind === 'I;' || kind === 'L;') {
+      const nums = value.slice(1);
+      if (kind === 'B;') return byteArray(Int8Array.from(nums.map((n) => Number(n))));
+      if (kind === 'I;') return intArray(nums.map((n) => Number(n)));
+      const words = new Uint32Array(nums.length * 2);
+      nums.forEach((n, i) => {
+        const v = BigInt.asUintN(64, BigInt(String(n).replace(/[lL]$/, '')));
+        words[2 * i] = Number(v & 0xffffffffn);
+        words[2 * i + 1] = Number(v >> 32n);
+      });
+      return { t: 'longArray', words };
+    }
     const items = value.map(jsonToTag);
     return list(items[0]?.t ?? 'compound', items);
   }

@@ -1,8 +1,10 @@
 import { controller } from '../controller';
 import { t } from '../i18n';
+import { useSim } from '../sim/simStore';
 import { useApp } from '../store';
 import {
   IconCamera,
+  IconHand,
   IconCube,
   IconCursor,
   IconExport,
@@ -12,12 +14,14 @@ import {
   IconOrtho,
   IconPin,
   IconSidebar,
+  IconTerrain,
 } from './Icons';
 
 type Preset = 'iso' | 'front' | 'right' | 'top';
 
 export function Toolbar() {
   const s = useApp();
+  const redstone = useSim((x) => x.available);
   const has = Boolean(s.header);
   const view = (v: Preset) => controller.viewer?.frameView(v, null);
   return (
@@ -38,6 +42,15 @@ export function Toolbar() {
         >
           <IconCursor width={15} height={15} />
         </button>
+        {redstone && (
+          <button
+            className={s.tool === 'use' ? 'on' : ''}
+            title={t.tools.use}
+            onClick={() => s.set({ tool: 'use', noteDraft: null })}
+          >
+            <IconHand width={15} height={15} />
+          </button>
+        )}
         <button
           className={s.tool === 'note' ? 'on' : ''}
           title={t.tools.note}
@@ -76,6 +89,15 @@ export function Toolbar() {
       >
         <IconLayers />
       </button>
+      {s.header?.site && (
+        <button
+          className={`icon-btn ${s.onlyChanges ? 'on' : ''}`}
+          title={t.tools.changes}
+          onClick={() => void controller.setOnlyChanges(!s.onlyChanges)}
+        >
+          <IconTerrain />
+        </button>
+      )}
       <button
         className={`icon-btn ${s.grid ? 'on' : ''}`}
         title={t.tools.grid}

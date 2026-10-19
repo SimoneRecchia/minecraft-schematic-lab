@@ -45,5 +45,6 @@ Always write modern ids; renamed blocks are mapped automatically (`grass`↔`sho
 
 ## Export by version
 - 1.8–1.12: MCEdit `.schematic` (WorldEdit 6). Block states are converted to numeric ids automatically.
-- 1.13+: Sponge `.schem` v2 (any WorldEdit 7 / FAWE), v3 for WorldEdit 7.3+ (1.20.4+), `.litematic`, structure `.nbt`.
+- 1.13+: Sponge `.schem` v2 (any WorldEdit 7 / FAWE), v3 for WorldEdit 7.3+ (1.20.4+), `.litematic`, structure `.nbt`, and a vanilla data pack (`/function`, no mods; the pack format and folder names follow the version).
+- 1.14+, builds on a site from a world: a copy of that world with the build in it.
 - Newer releases than the bundled data (e.g. 26.2, 26.3) get their extra blocks from the game files when the textures load.

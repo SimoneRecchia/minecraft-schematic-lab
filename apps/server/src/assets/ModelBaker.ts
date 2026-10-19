@@ -80,6 +80,16 @@ const TINTS: [RegExp, number][] = [
   [/^redstone_wire$/, 0xb40000],
 ];
 
+/** RedStoneWireBlock.COLORS: dark red unpowered, bright red-orange at 15. */
+function wireColor(power: number): number {
+  const f = Math.max(0, Math.min(15, power)) / 15;
+  const r = f * 0.6 + (f > 0 ? 0.4 : 0.3);
+  const g = Math.min(1, Math.max(0, f * f * 0.7 - 0.5));
+  const b = Math.min(1, Math.max(0, f * f * 0.6 - 0.7));
+  const c = (v: number) => Math.round(v * 255);
+  return (c(r) << 16) | (c(g) << 8) | c(b);
+}
+
 const SELF_CULL =
   /(^|_)glass$|^ice$|^packed_ice$|^blue_ice$|^slime_block$|^honey_block$|^water$|^lava$|^tinted_glass$/;
 const INVISIBLE = /^(air|cave_air|void_air|barrier|light|structure_void|moving_piston)$/;
@@ -299,7 +309,9 @@ export class ModelBaker {
   }
 
   /** Biome/fixed colour the game applies to tinted faces; untinted blocks (cherry, azalea…) keep their texture colour. */
-  private tintFor(name: string): number {
+  private tintFor(name: string, props?: Record<string, string>): number {
+    if (name === 'redstone_wire' && props?.power !== undefined)
+      return wireColor(Number(props.power));
     for (const [re, color] of TINTS) if (re.test(name)) return color;
     return -1;
   }
@@ -312,9 +324,10 @@ export class ModelBaker {
     ry: number,
     uvlock: boolean,
     out: number[],
+    props?: Record<string, string>,
   ): void {
     const center: V3 = [8, 8, 8];
-    const tint = this.tintFor(name);
+    const tint = this.tintFor(name, props);
     for (const el of model.elements) {
       for (const face of DIRS) {
         const fd = el.faces[face];
@@ -453,7 +466,7 @@ export class ModelBaker {
         if (!model) continue;
         if (model.elements.length === 0) continue;
         if (variants.length && out.length === 0 && this.isFullOpaque(model)) full = true;
-        this.bakeModel(model, name, ref.x ?? 0, ref.y ?? 0, ref.uvlock ?? false, q);
+        this.bakeModel(model, name, ref.x ?? 0, ref.y ?? 0, ref.uvlock ?? false, q, props);
       }
       out.push({ w: v.w, q });
     }

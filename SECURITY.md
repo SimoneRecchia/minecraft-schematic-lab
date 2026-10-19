@@ -18,5 +18,6 @@ published.
 ## Scope
 
 VibeSchem runs on the user's computer: the launcher scripts, the local server and its HTTP API on
-`127.0.0.1`, the 3D viewer, the sandbox for build scripts, and the files it writes. Reports about
+`127.0.0.1`, the 3D viewer, the sandbox for build scripts, the Minecraft worlds and schematics it
+reads, and the files it writes (exports, world copies and data packs). Reports about
 Claude itself go to Anthropic: https://www.anthropic.com/responsible-disclosure-policy.

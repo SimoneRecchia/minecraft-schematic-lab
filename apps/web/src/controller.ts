@@ -12,6 +12,7 @@ import { api, connectEvents } from './api';
 import { loadTextureArray } from './engine/textures';
 import { Viewer, type PickInfo } from './engine/Viewer';
 import { fmt, t } from './i18n';
+import { SimController } from './sim/simController';
 import { useApp } from './store';
 
 const VIEW_LABEL: Record<ViewName, string> = {
@@ -45,8 +46,17 @@ function hexToInt(c: string): number {
 function fallbackModel(state: string): BakedBlock {
   const shape = blockShape(state);
   const color = hexToInt(colorFor(state));
-  const h = shape === 'slab' ? 0.5 : 1;
-  const w = shape === 'thin' ? 0.3 : 1;
+  const h =
+    shape === 'slab'
+      ? 0.5
+      : shape === 'flat'
+        ? 1 / 16
+        : shape === 'low'
+          ? 2 / 16
+          : shape === 'small'
+            ? 0.6
+            : 1;
+  const w = shape === 'thin' ? 0.3 : shape === 'small' ? 0.25 : 1;
   const a = (1 - w) / 2;
   const b = a + w;
   const glass = shape === 'glass';
@@ -64,8 +74,17 @@ function fallbackModel(state: string): BakedBlock {
   return { v: [{ w: 1, q }], full: shape === 'full', self: glass };
 }
 
+const BASE_TITLE = document.title;
+
 class Controller {
   viewer: Viewer | null = null;
+  readonly sim = new SimController({
+    get viewer() {
+      return controller.viewer;
+    },
+    models: (states) => this.bakedFor(states),
+    warm: (states) => void this.bakedFor(states).catch(() => undefined),
+  });
 
   /** Textures currently loaded (for block icons). */
   get assets(): { version: string | null; manifest: AssetManifest | null } {
@@ -82,7 +101,10 @@ class Controller {
     const h = useApp.getState().header;
     if (!vol || !h) return [];
     const perId = new Uint32Array(h.palette.length);
-    for (let i = 0; i < vol.data.length; i++) (perId[vol.data[i] as number] as number)++;
+    // On a site, what you need is what the build places, not the terrain.
+    const mask = this.siteView?.mask;
+    for (let i = 0; i < vol.data.length; i++)
+      if (!mask || mask[i]) (perId[vol.data[i] as number] as number)++;
     const totals = new Map<string, { state: string; count: number }>();
     h.palette.forEach((state, id) => {
       const n = perId[id] as number;
@@ -146,6 +168,7 @@ class Controller {
     document.addEventListener('visibilitychange', () => {
       const id = s().clientId;
       if (id) void api.clientState(id, { visible: document.visibilityState === 'visible' });
+      if (document.visibilityState === 'visible') document.title = BASE_TITLE;
     });
     void api
       .versions()
@@ -196,6 +219,8 @@ class Controller {
         if (header) {
           await this.loadBuild(header, e.projectId === this.projectId);
           s.toast(`${t.updated} · v${header.n}`, 'success');
+          // Claude reuses this tab: mark it when the change lands while the user is elsewhere.
+          if (document.visibilityState === 'hidden') document.title = `● ${BASE_TITLE}`;
         }
         void this.refreshHistory();
         s.set({ feedback: await api.feedback().catch(() => s.feedback) });
@@ -219,6 +244,12 @@ class Controller {
         break;
       case 'focus':
         this.focus(e.from, e.to, e.message);
+        break;
+      case 'sim':
+        if (e.buildId === this.loadedBuildId) {
+          s.set({ panel: 'redstone', sidebarOpen: true });
+          this.sim.playTest(e.test as never, e.circuit as never);
+        }
         break;
     }
   }
@@ -254,21 +285,58 @@ class Controller {
 
   private async modelsFor(header: BuildHeader, textured: boolean): Promise<(BakedBlock | null)[]> {
     if (!textured) return header.palette.map((s, i) => (i === 0 ? null : fallbackModel(s)));
-    let cache = this.models.get(header.assetVersion);
+    const models = await this.cachedModels(header.assetVersion, header.palette.slice(1));
+    return [null, ...models];
+  }
+
+  private async cachedModels(version: string, states: string[]): Promise<(BakedBlock | null)[]> {
+    let cache = this.models.get(version);
     if (!cache) {
       cache = new Map();
-      this.models.set(header.assetVersion, cache);
+      this.models.set(version, cache);
     }
-    const missing = header.palette.filter((s, i) => i > 0 && !cache.has(s));
-    if (missing.length) {
-      const baked = await api.models(header.assetVersion, missing);
+    const missing = [...new Set(states.filter((s) => !cache.has(s)))];
+    for (let k = 0; k < missing.length; k += 400) {
+      const baked = await api.models(version, missing.slice(k, k + 400));
       for (const [state, m] of Object.entries(baked)) cache.set(state, m);
     }
-    return header.palette.map((s, i) => {
-      if (i === 0) return null;
+    return states.map((s) => {
+      if (/^minecraft:(air|cave_air|void_air)$/.test(s)) return null;
       const m = cache.get(s);
       return m && m.v.some((v) => v.q.length > 0) ? m : m?.fluid ? m : null;
     });
+  }
+
+  /** Models for states of the loaded build's version (the redstone simulation adds some). */
+  bakedFor(states: string[]): Promise<(BakedBlock | null)[]> {
+    const h = useApp.getState().header;
+    if (!h) return Promise.resolve(states.map(() => null));
+    if (!useApp.getState().textured || this.assetVersion !== h.assetVersion)
+      return Promise.resolve(
+        states.map((s) =>
+          /^minecraft:(air|cave_air|void_air)$/.test(s) ? null : fallbackModel(s),
+        ),
+      );
+    return this.cachedModels(h.assetVersion, states);
+  }
+
+  /** A site build's blocks and which of them the build changes. */
+  private siteView: { data: Uint16Array; mask: Uint8Array } | null = null;
+
+  private masked(v: { data: Uint16Array; mask: Uint8Array }): Uint16Array {
+    const out = new Uint16Array(v.data.length);
+    for (let i = 0; i < out.length; i++) if (v.mask[i]) out[i] = v.data[i] as number;
+    return out;
+  }
+
+  /** On a site: show only what the build changes, or everything. */
+  async setOnlyChanges(on: boolean): Promise<void> {
+    const s = useApp.getState();
+    s.set({ onlyChanges: on });
+    const v = this.viewer?.loadedVolume;
+    if (!this.viewer || !v || !this.siteView) return;
+    const data = on ? this.masked(this.siteView) : this.siteView.data.slice();
+    await this.viewer.load({ ...v, data }, true);
   }
 
   loadBuild(header: BuildHeader, keepCamera: boolean): Promise<void> {
@@ -299,14 +367,26 @@ class Controller {
         if (!ids.has(name)) ids.set(name, ids.size);
         nameIds[i] = ids.get(name) as number;
       });
+      // The simulation starts from the build as sent; the viewer's copy changes as it runs.
+      const original = data.slice();
+      this.siteView = null;
+      if (header.site) {
+        const mask = await api.changes(header.buildId).catch(() => null);
+        if (this.loadingBuildId !== header.buildId) return;
+        if (mask && mask.length === data.length) this.siteView = { data: original, mask };
+      }
+      viewer.setGridVisible(useApp.getState().grid && !header.site);
+      const shown =
+        this.siteView && useApp.getState().onlyChanges ? this.masked(this.siteView) : data;
       const load = viewer.load(
-        { size: header.size, data, models, nameIds },
+        { size: header.size, data: shown, models, nameIds },
         keepCamera || sameProject,
       );
       const st = useApp.getState();
       if (st.slice) void viewer.setClipY(st.sliceY - header.origin[1]);
       await load;
       this.loadedBuildId = header.buildId;
+      void this.sim.load(header, original, models, nameIds);
     };
     this.loadPromise = run().finally(() => {
       if (this.loadingBuildId === header.buildId) this.loadPromise = null;
@@ -328,13 +408,18 @@ class Controller {
       hit.pos[1] + h.origin[1],
       hit.pos[2] + h.origin[2],
     ];
-    s.set({ hover: { pos, state: h.palette[hit.id] ?? '' } });
+    s.set({ hover: { pos, state: h.palette[hit.id] ?? this.sim.stateOf(hit.id) ?? '' } });
   }
 
   private onClick(hit: PickInfo | null, shift: boolean): void {
     const s = useApp.getState();
     const h = s.header;
     if (!h) return;
+    if (s.tool === 'use') {
+      // Right-click in the game: flip a lever, press a button, change a repeater's delay.
+      if (hit) this.sim.use(hit.pos);
+      return;
+    }
     if (!hit) {
       if (!shift) {
         s.set({ selection: null, noteDraft: null });

@@ -16,7 +16,6 @@ import { APP_VERSION, type ViewName, type Vec3 } from '@minecraft-schematic-lab/
 import type { AppConfig } from '../config';
 import type { BuildOutcome, BuildService } from '../core/BuildService';
 import type { Edit } from '../core/edits';
-import { openViewer } from '../openBrowser';
 
 export interface McpDeps {
   builds: BuildService;
@@ -35,6 +34,10 @@ New build:
 
 Changes: when the user asks to change something, call get_feedback first — they can pin notes on blocks in the viewer, and each note says which operation placed that block. Edit with edit_build by operation id, then resolve_feedback with a one-line reply.
 
+Redstone: VibeSchem simulates Minecraft Java redstone faithfully for the build's version (game ticks, update order, quasi-connectivity, pistons, torch burnout). For any circuit, read read_guide("redstone"), declare named inputs/outputs and tests in the spec's "circuit" section — they run on every build like unit tests, and the summary reports them — and use simulate to try scenarios, measure delays and catch location-dependent designs. Never hand over a circuit whose tests fail.
+
+Building on the player's world: the player can give you a world (or a schematic) and a point to build at. worlds lists their saved worlds; import_site reads an area (centre + radius, default where they stand) into a new project and returns a terrain report: ground heights, water, trees, flat spots, existing builds. Read read_guide("terrain"), then build on it with edit_build (the spec already has "site"): flatten plots with blending, foundations down to the ground, paths that follow it, ground:true to stand trees and components on it, ground()/surface() in scripts. Coordinates are relative to the chosen point. Exports go back to the same world coordinates: a copy of the world with the build in it (export_build format "world"), a vanilla data pack with /fill commands and undo (no mods), or schematics for //paste -o.
+
 Rules: minecraftVersion is strict — only blocks that exist in that version are accepted; errors suggest alternatives and list_blocks checks availability. Coordinates: +X east, +Y up, +Z south (north = -Z); y=0 is ground level. Give every operation a short "id".`;
 
 const GUIDE_TOPICS = [
@@ -46,8 +49,10 @@ const GUIDE_TOPICS = [
   'palettes',
   'details',
   'landscape',
+  'terrain',
   'scripts',
   'versions',
+  'redstone',
   'examples',
 ] as const;
 
@@ -102,12 +107,10 @@ export function buildMcpServer({ builds, config }: McpDeps): McpServer {
         content.push({ type: 'image', data: img.png.toString('base64'), mimeType: 'image/png' });
       if (r.note) content.push(text(r.note));
     } else {
-      openViewerIfClosed();
+      void builds.showViewer();
     }
     return { content };
   };
-
-  const openViewerIfClosed = () => openViewer(`${config.baseUrl}/`);
 
   server.registerTool(
     'read_guide',
@@ -141,7 +144,7 @@ export function buildMcpServer({ builds, config }: McpDeps): McpServer {
         openWorldHint: true,
       },
       description:
-        'Build a Minecraft structure in VibeSchem: compile a BuildSpec and show it in the live 3D viewer (opens the browser if needed). Returns a summary and a rendered preview image. Starts a new project (with its own version history) unless newProject is false, which replaces the current build as a new version. Errors (unknown blocks for the version, bad fields) come back as a list to fix. BuildSpec: {name, minecraftVersion, palette?, components?, operations:[{type, id, …}]}; operation types: box, line, cylinder, cone, sphere, dome, polygon, roof, arch, blocks, layers, terrain, tree, scatter, replace, group, place, script — see read_guide("spec").',
+        'Build a Minecraft structure in VibeSchem: compile a BuildSpec and show it in the live 3D viewer (opens the browser if needed). Returns a summary and a rendered preview image. Starts a new project (with its own version history) unless newProject is false, which replaces the current build as a new version. Errors (unknown blocks for the version, bad fields) come back as a list to fix. BuildSpec: {name, minecraftVersion, palette?, components?, operations:[{type, id, …}], circuit?}; operation types: box, line, cylinder, cone, sphere, dome, polygon, roof, arch, blocks, layers, terrain, tree, scatter, replace, flatten, foundation, path, group, place, script — see read_guide("spec"). site = build on an area imported with import_site (see read_guide("terrain")). circuit = named redstone inputs/outputs + tests, run by the simulator on every build — see read_guide("redstone").',
       inputSchema: {
         spec: z.record(z.string(), z.unknown()).describe('The BuildSpec object.'),
         newProject: z
@@ -175,7 +178,7 @@ export function buildMcpServer({ builds, config }: McpDeps): McpServer {
         openWorldHint: true,
       },
       description:
-        'Change the current VibeSchem Minecraft build without resending it; saved as a new version. "edits" (preferred) target operations by id: {op:"add", operations, after?|before?|into?: id} · {op:"replace", id, with} · {op:"update", id, set:{field: value|null}} · {op:"remove", ids} · {op:"palette", set:{key: entry|null}} · {op:"component", name, set} · {op:"meta", set:{name?, minecraftVersion?, anchor?, …}}. "patch" accepts RFC 6902 JSON Patch on the spec for anything else.',
+        'Change the current VibeSchem Minecraft build without resending it; saved as a new version. "edits" (preferred) target operations by id: {op:"add", operations, after?|before?|into?: id} · {op:"replace", id, with} · {op:"update", id, set:{field: value|null}} · {op:"remove", ids} · {op:"palette", set:{key: entry|null}} · {op:"component", name, set} · {op:"meta", set:{name?, minecraftVersion?, anchor?, …}} · {op:"circuit", set:{inputs?, outputs?: {name: io|null}, tests?: [test | {name, remove:true}], settleTicks?}} (redstone I/O and tests, merged by name). "patch" accepts RFC 6902 JSON Patch on the spec for anything else.',
       inputSchema: {
         edits: z.array(z.object({ op: z.string() }).passthrough()).optional(),
         patch: z.array(z.object({ op: z.string(), path: z.string() }).passthrough()).optional(),
@@ -420,6 +423,123 @@ export function buildMcpServer({ builds, config }: McpDeps): McpServer {
   );
 
   server.registerTool(
+    'worlds',
+    {
+      title: 'List Minecraft worlds',
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      description:
+        "The player's Minecraft Java worlds on this computer (official launcher, Prism, MultiMC, CurseForge, Modrinth): id, name, version, where the player stands, dimensions. Use an id with import_site. Worlds are only read.",
+      inputSchema: {},
+    },
+    async () =>
+      guarded(async () => {
+        const list = builds.worlds();
+        if (!list.length)
+          return {
+            content: [
+              text(
+                'No Minecraft worlds found in the usual saves folders. Ask the player for the world folder path (import_site accepts it), or for a schematic file.',
+              ),
+            ],
+          };
+        const lines = list.slice(0, 40).map((w) => {
+          const played = w.lastPlayed ? new Date(w.lastPlayed).toISOString().slice(0, 10) : '?';
+          const pos = w.player
+            ? `player at ${w.player.pos.join(' ')} (${w.player.dimension.replace('minecraft:', '')})`
+            : 'player position unknown';
+          return `- ${w.id} "${w.name}" · ${w.version ?? 'unknown version'} · ${w.gameMode ?? ''} · last played ${played} · ${pos} · ${w.launcher}`;
+        });
+        return {
+          content: [text(`${list.length} world(s), most recent first:\n${lines.join('\n')}`)],
+        };
+      }),
+  );
+
+  server.registerTool(
+    'import_site',
+    {
+      title: 'Import a site to build on',
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+      description:
+        "Read an area of the player's Minecraft world (or a schematic file) and start a new project on it, shown in the viewer: then build on the real terrain with edit_build. world: id or name from worlds, or a world folder path. center: [x, z] or [x, y, z] in world coordinates (default: where the player stands); radius: half-size of the square area (default 48, max 128). Or file: a .schem/.schematic/.litematic/.nbt path. The world is only read. Returns the terrain report (as the terrain tool) and a preview.",
+      inputSchema: {
+        world: z.string().optional(),
+        center: z
+          .array(z.number())
+          .min(2)
+          .max(3)
+          .optional()
+          .describe('[x, z] or [x, y, z], world coordinates'),
+        radius: z.number().int().min(4).max(128).optional(),
+        dimension: z
+          .string()
+          .optional()
+          .describe("minecraft:overworld (default: the player's), minecraft:the_nether, …"),
+        file: z
+          .string()
+          .optional()
+          .describe('A schematic file to use as the site instead of a world.'),
+        name: z.string().optional(),
+      },
+    },
+    async ({ world, center, radius, dimension, file, name }) =>
+      guarded(async () => {
+        if (!world && !file) return errorResult('Give "world" (see worlds) or "file".');
+        const { site, outcome: out } = file
+          ? await builds.importSchematicFile(file, name)
+          : await builds.importWorldSite({
+              world: world as string,
+              ...(center ? { center } : {}),
+              ...(radius ? { radius } : {}),
+              ...(dimension ? { dimension } : {}),
+              ...(name ? { name } : {}),
+              allowPath: true,
+            });
+        if (!out.ok) return errorResult(out.errors.join('\n'));
+        const content: Content = [
+          text(
+            `${builds.terrain()}\n\nThe project "${out.build.record.spec.name}" (site ${site.info.id}) is open in the viewer. Add operations with edit_build ({op:"add"}); keep "site" and minecraftVersion ${site.version} in the spec.`,
+          ),
+        ];
+        const r = await builds.render({ views: ['iso'], size: 760 });
+        for (const img of r.images)
+          content.push({ type: 'image', data: img.png.toString('base64'), mimeType: 'image/png' });
+        return { content };
+      }),
+  );
+
+  server.registerTool(
+    'terrain',
+    {
+      title: 'Terrain report',
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      description:
+        'The ground of the current site as it is now: height map in spec coordinates (y of the top ground block), water, trees, flattest open spots, existing builds, and how spec coordinates map to the world. from/to zoom into a region; step sets the map spacing.',
+      inputSchema: {
+        from: vec3.optional(),
+        to: vec3.optional(),
+        step: z.number().int().min(1).max(32).optional(),
+      },
+    },
+    async ({ from, to, step }) =>
+      guarded(async () => ({
+        content: [
+          text(
+            builds.terrain({
+              ...(step ? { step } : {}),
+              ...(from && to ? { from: from as Vec3, to: to as Vec3 } : {}),
+            }),
+          ),
+        ],
+      })),
+  );
+
+  server.registerTool(
     'export_build',
     {
       title: 'Export build',
@@ -430,16 +550,53 @@ export function buildMcpServer({ builds, config }: McpDeps): McpServer {
         openWorldHint: false,
       },
       description:
-        "Export the current VibeSchem build as a Minecraft schematic. Formats: schem (Sponge v2, WorldEdit 7+/FAWE, 1.13+, default), schem3 (Sponge v3, WorldEdit 7.3+), schematic (MCEdit, WorldEdit 6 for 1.8–1.12), litematic (Litematica), nbt (vanilla structure block / /place template), materials (CSV shopping list). saveTo writes the file straight into the player's Minecraft folder: worldedit (config/worldedit/schematics, single player), litematica (schematics/) or downloads, under a new name if that file already exists (never overwrites). Without saveTo returns a download link. The viewer has an Export button too.",
+        "Export the current VibeSchem build for Minecraft. Formats: schem (Sponge v2, WorldEdit 7+/FAWE, 1.13+, default), schem3 (Sponge v3, WorldEdit 7.3+), schematic (MCEdit, WorldEdit 6 for 1.8–1.12), litematic (Litematica), nbt (vanilla structure block / /place template), datapack (vanilla commands, no mods: /function …/build builds it where the player stands — or, on a site, at its world position — and …/undo removes it), materials (CSV shopping list), world (builds on a site imported from a world only: a new copy of that world with the build in it; the original is never changed). On a site the schematics hold only the changed area and keep its world position (WorldEdit //paste -o). saveTo writes the file straight into the player's Minecraft folder: worldedit (config/worldedit/schematics, single player), litematica (schematics/) or downloads, under a new name if that file already exists (never overwrites); saveTo world (datapack only) installs the pack into a world's datapacks folder. Without saveTo returns a download link. The viewer has an Export button too.",
       inputSchema: {
         format: z
-          .enum(['schem', 'schem3', 'schematic', 'litematic', 'nbt', 'materials'])
+          .enum([
+            'schem',
+            'schem3',
+            'schematic',
+            'litematic',
+            'nbt',
+            'datapack',
+            'materials',
+            'world',
+          ])
           .optional(),
-        saveTo: z.enum(['worldedit', 'litematica', 'downloads']).optional(),
+        saveTo: z.enum(['worldedit', 'litematica', 'downloads', 'world']).optional(),
+        world: z
+          .string()
+          .optional()
+          .describe(
+            'datapack + saveTo "world": the world id (from worlds) to install it in; default the site\'s world.',
+          ),
+        name: z.string().optional().describe('format "world": name of the new world copy.'),
       },
     },
-    async ({ format, saveTo }) =>
+    async ({ format, saveTo, world, name }) =>
       guarded(async () => {
+        if (format === 'world') {
+          const copy = await builds.exportWorldCopy(name);
+          return {
+            content: [
+              text(
+                `Created the world "${copy.name}" (folder ${copy.path}) with the build in it: ${copy.blocks.toLocaleString('en-US')} blocks in ${copy.chunks} chunks. The original world is untouched. The player opens "${copy.name}" from Singleplayer; light is recomputed when the area loads.`,
+              ),
+            ],
+          };
+        }
+        if (format === 'datapack' && saveTo === 'world') {
+          const inst = builds.installDatapack(world);
+          return {
+            content: [
+              text(
+                `Installed the data pack in "${inst.world}" (${inst.path}). In that world (cheats on): /reload, then /function ${inst.functionId}/build — undo with /function ${inst.functionId}/undo.${inst.warnings.length ? `\nNotes: ${inst.warnings.join(' ')}` : ''}`,
+              ),
+            ],
+          };
+        }
+        if (saveTo === 'world') return errorResult('saveTo "world" is for format "datapack".');
         const formats = builds.formats();
         const fmt = (format ?? formats.find((f) => f.recommended)?.id ?? 'schem') as ExportFormat;
         if (saveTo) {
@@ -561,6 +718,51 @@ export function buildMcpServer({ builds, config }: McpDeps): McpServer {
       guarded(async () => {
         builds.focus(from as Vec3, (to ?? from) as Vec3, message);
         return { content: [text('Done.')] };
+      }),
+  );
+
+  server.registerTool(
+    'simulate',
+    {
+      title: 'Test the redstone',
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      description:
+        "Run the current VibeSchem build's redstone in a simulator that follows Minecraft Java's own mechanics for the build's version: game ticks (20/s; repeater delay 1 = 2 ticks), neighbour and shape updates in the game's order, scheduled-tick priorities, quasi-connectivity, pistons with slime/honey and 0-tick spitting, observers, comparators reading containers, torch burnout. Runs the stored tests (spec.circuit.tests) or the `tests` given here, and reports pass/fail per test with failing cases, latencies (\"expect … within\"), measured clock periods, traces of signal changes, and problems such as torches burning out or blocks popping off. `inputs`/`outputs` add or override named I/O for this run only. `locations` (2–16) re-runs at other world positions, where dust and pistons update in another order, to catch location-dependent designs. `show` plays one test live in the user's viewer. Test format and step reference: read_guide(\"redstone\").",
+      inputSchema: {
+        tests: z
+          .array(z.record(z.string(), z.unknown()))
+          .optional()
+          .describe(
+            'Tests to run instead of the stored ones: {name, steps:[{set:{A:1}}, {wait:4}, {expect:{L:1}, within:10}, …], forAll?:{A:[0,15]}, samples?, trace?:[names]}.',
+          ),
+        only: z.array(z.string()).optional().describe('Run only these stored tests (by name).'),
+        inputs: z
+          .record(z.string(), z.record(z.string(), z.unknown()))
+          .optional()
+          .describe(
+            'Extra named inputs for this run: {"A": {"at": [x,y,z]}} (lever, button, plate…; "as" to place a block).',
+          ),
+        outputs: z
+          .record(z.string(), z.record(z.string(), z.unknown()))
+          .optional()
+          .describe(
+            'Extra named outputs: {"Q": {"at": [x,y,z]}} or a bus {"at": [[x,y,z], …]}; "read": "power" for 0–15.',
+          ),
+        locations: z.number().int().min(1).max(16).optional(),
+        show: z.string().optional().describe('Name of a test to play live in the viewer.'),
+      },
+    },
+    async ({ tests, only, inputs, outputs, locations, show }) =>
+      guarded(async () => {
+        const r = builds.simulate({
+          ...(tests ? { tests } : {}),
+          ...(only ? { only } : {}),
+          ...(inputs ? { inputs } : {}),
+          ...(outputs ? { outputs } : {}),
+          ...(locations ? { locations } : {}),
+          ...(show ? { show } : {}),
+        });
+        return { content: [text(r.text)] };
       }),
   );
 

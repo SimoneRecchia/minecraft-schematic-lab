@@ -28,6 +28,9 @@ function chunkKey(cx: number, cy: number, cz: number): number {
 export class SparseVolume {
   readonly chunks = new Map<number, Chunk>();
   writes = 0;
+  /** Lowest and highest chunk layer allocated so far (for top-down column scans). */
+  minChunkY = Infinity;
+  maxChunkY = -Infinity;
   private last: Chunk | null = null;
   private lastKey = -1;
 
@@ -52,6 +55,8 @@ export class SparseVolume {
         prov: new Uint16Array(CHUNK * CHUNK * CHUNK),
       };
       this.chunks.set(key, chunk);
+      if (cy < this.minChunkY) this.minChunkY = cy;
+      if (cy > this.maxChunkY) this.maxChunkY = cy;
     }
     if (chunk) {
       this.last = chunk;
@@ -75,6 +80,12 @@ export class SparseVolume {
     const c = this.chunkAt(x, y, z, false);
     if (!c) return 0;
     return c.ids[((y & MASK) << 8) | ((z & MASK) << 4) | (x & MASK)] as number;
+  }
+
+  getProv(x: number, y: number, z: number): number {
+    const c = this.chunkAt(x, y, z, false);
+    if (!c) return 0;
+    return c.prov[((y & MASK) << 8) | ((z & MASK) << 4) | (x & MASK)] as number;
   }
 
   set(x: number, y: number, z: number, id: number, prov: number): void {

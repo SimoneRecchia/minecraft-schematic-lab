@@ -129,6 +129,47 @@ export class BlockVolume {
     );
   }
 
+  /** The cells from `lo` to `hi` (local, inclusive) as a new volume; same palette. */
+  crop(lo: [number, number, number], hi: [number, number, number]): BlockVolume {
+    const sx = hi[0] - lo[0] + 1;
+    const sy = hi[1] - lo[1] + 1;
+    const sz = hi[2] - lo[2] + 1;
+    const data = new Uint16Array(sx * sy * sz);
+    const prov = new Uint16Array(sx * sy * sz);
+    let i = 0;
+    for (let y = 0; y < sy; y++)
+      for (let z = 0; z < sz; z++) {
+        const from = this.index(lo[0], lo[1] + y, lo[2] + z);
+        data.set(this.data.subarray(from, from + sx), i);
+        prov.set(this.prov.subarray(from, from + sx), i);
+        i += sx;
+      }
+    const blockEntities = this.blockEntities
+      .filter(
+        (be) =>
+          be.pos[0] >= lo[0] &&
+          be.pos[0] <= hi[0] &&
+          be.pos[1] >= lo[1] &&
+          be.pos[1] <= hi[1] &&
+          be.pos[2] >= lo[2] &&
+          be.pos[2] <= hi[2],
+      )
+      .map((be) => ({
+        ...be,
+        pos: [be.pos[0] - lo[0], be.pos[1] - lo[1], be.pos[2] - lo[2]] as [number, number, number],
+      }));
+    return new BlockVolume(
+      sx,
+      sy,
+      sz,
+      [this.origin[0] + lo[0], this.origin[1] + lo[1], this.origin[2] + lo[2]],
+      this.palette,
+      data,
+      prov,
+      blockEntities,
+    ).compact();
+  }
+
   /** state -> positions, iterating in YZX order. */
   toInstanceGroups(): Record<string, [number, number, number][]> {
     const groups: Record<string, [number, number, number][]> = {};

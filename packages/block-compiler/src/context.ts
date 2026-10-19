@@ -1,4 +1,8 @@
-import type { BlockCatalog } from '@minecraft-schematic-lab/catalog';
+import {
+  terrainClass,
+  type BlockCatalog,
+  type TerrainClass,
+} from '@minecraft-schematic-lab/catalog';
 import type {
   BuildSpec,
   Component,
@@ -36,7 +40,18 @@ export class CompileContext {
     { x: number; y: number; z: number; data: Record<string, unknown> }
   >();
   readonly seed: number;
+  /** Provenance ids of operations that shape the ground (terrain, flatten). */
+  readonly groundProvs = new Set<number>();
+  /** Spec bounds of the site the build stands on, when there is one. */
+  siteBounds: { min: [number, number, number]; max: [number, number, number] } | null = null;
+  /** Block entities of the site (kept while the block they belong to stays). */
+  readonly siteEntities = new Map<
+    string,
+    { x: number; y: number; z: number; name: string; data: Record<string, unknown> }
+  >();
   private outOfRange = 0;
+  private readonly classes: TerrainClass[] = [];
+  private readonly columnCache = new Map<number, { writes: number; ground: number | null }>();
 
   constructor(
     readonly spec: BuildSpec,
@@ -119,6 +134,79 @@ export class CompileContext {
       }
     }
     this.volume.set(wx, wy, wz, id, this.prov);
+  }
+
+  /** Write a block source at a world position (no transform; honours the mask). */
+  putWorldSource(wx: number, wy: number, wz: number, src: BlockSource): void {
+    const id =
+      src.id >= 0
+        ? src.id
+        : src.id === -1
+          ? (src.pick as (a: number, b: number, c: number) => number)(wx, wy, wz)
+          : -2;
+    if (id >= 0) this.putWorld(wx, wy, wz, id);
+  }
+
+  classOf(id: number): TerrainClass {
+    let c = this.classes[id];
+    if (c === undefined) {
+      c = terrainClass(this.palette.get(id).name);
+      this.classes[id] = c;
+    }
+    return c;
+  }
+
+  /** Top and bottom y worth scanning in a column. */
+  private scanRange(): [number, number] | null {
+    if (this.siteBounds) return [this.siteBounds.max[1], this.siteBounds.min[1]];
+    const v = this.volume;
+    if (v.maxChunkY === -Infinity) return null;
+    return [v.maxChunkY * 16 + 15, v.minChunkY * 16];
+  }
+
+  /**
+   * World y of the topmost ground block of a column: the site's natural ground and what terrain
+   * or flatten operations made. Buildings, trees, plants and water are not ground.
+   */
+  groundAt(wx: number, wz: number): number | null {
+    const key = (wx + 32768) * 65536 + (wz + 32768);
+    const hit = this.columnCache.get(key);
+    if (hit && hit.writes === this.volume.writes) return hit.ground;
+    const range = this.scanRange();
+    let ground: number | null = null;
+    if (range) {
+      for (let y = range[0]; y >= range[1]; y--) {
+        const id = this.volume.get(wx, y, wz);
+        if (id === 0 || this.classOf(id) !== 'ground') continue;
+        const p = this.volume.getProv(wx, y, wz);
+        if (p === 0 || this.groundProvs.has(p)) {
+          ground = y;
+          break;
+        }
+      }
+    }
+    this.columnCache.set(key, { writes: this.volume.writes, ground });
+    return ground;
+  }
+
+  /** World y of the topmost block of any kind in a column. */
+  surfaceAt(wx: number, wz: number): number | null {
+    const range = this.scanRange();
+    if (!range) return null;
+    for (let y = range[0]; y >= range[1]; y--) if (this.volume.get(wx, y, wz) !== 0) return y;
+    return null;
+  }
+
+  /** World y of the water (or lava) surface above the ground of a column, if any. */
+  waterAt(wx: number, wz: number): number | null {
+    const range = this.scanRange();
+    if (!range) return null;
+    const ground = this.groundAt(wx, wz) ?? range[1] - 1;
+    for (let y = range[0]; y > ground; y--) {
+      const id = this.volume.get(wx, y, wz);
+      if (id !== 0 && this.classOf(id) === 'liquid') return y;
+    }
+    return null;
   }
 
   /** Run fn with an extra local transform (child -> current). */

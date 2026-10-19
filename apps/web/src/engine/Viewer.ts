@@ -238,6 +238,9 @@ export class Viewer {
   load(volume: LoadedVolume, keepCamera: boolean): Promise<void> {
     this.volume = volume;
     this.generation++;
+    this.liveDirty.clear();
+    this.liveInFlight = 0;
+    this.modelCount = volume.models.length;
     this.clearChunks();
     const [sx, sy, sz] = volume.size;
     for (const w of this.workers) {
@@ -328,8 +331,98 @@ export class Viewer {
     return new Promise((resolve) => this.meshWaiters.push(resolve));
   }
 
+  // ------------------------------------------------------------------ live updates
+
+  private liveDirty = new Set<string>();
+  private liveInFlight = 0;
+  /** Palette models the mesher workers have (the palette only grows while a build is loaded). */
+  private modelCount = 0;
+
+  /**
+   * Change cells in place (the redstone simulation): `cells` holds pairs of (cell index, palette
+   * index); `models` is the full palette, possibly longer than before. Only the chunks touched
+   * (and their neighbours across a border, for culling and shading) are meshed again, quietly
+   * and at most one batch at a time, so a busy circuit can't flood the workers.
+   */
+  patch(cells: Uint32Array, models: (BakedBlock | null)[], nameIds: Int32Array): void {
+    const v = this.volume;
+    if (!v || cells.length === 0) return;
+    const from = this.modelCount;
+    this.modelCount = models.length;
+    v.models = models;
+    v.nameIds = nameIds;
+    const [sx, , sz] = v.size;
+    for (let k = 0; k < cells.length; k += 2) {
+      const i = cells[k] as number;
+      v.data[i] = cells[k + 1] as number;
+      const x = i % sx;
+      const t = (i - x) / sx;
+      const z = t % sz;
+      const y = (t - z) / sz;
+      const cx = (x / CHUNK) | 0;
+      const cy = (y / CHUNK) | 0;
+      const cz = (z / CHUNK) | 0;
+      this.liveDirty.add(`${cx},${cy},${cz}`);
+      const lx = x % CHUNK;
+      const ly = y % CHUNK;
+      const lz = z % CHUNK;
+      if (lx === 0 && cx > 0) this.liveDirty.add(`${cx - 1},${cy},${cz}`);
+      if (lx === CHUNK - 1) this.liveDirty.add(`${cx + 1},${cy},${cz}`);
+      if (ly === 0 && cy > 0) this.liveDirty.add(`${cx},${cy - 1},${cz}`);
+      if (ly === CHUNK - 1) this.liveDirty.add(`${cx},${cy + 1},${cz}`);
+      if (lz === 0 && cz > 0) this.liveDirty.add(`${cx},${cy},${cz - 1}`);
+      if (lz === CHUNK - 1) this.liveDirty.add(`${cx},${cy},${cz + 1}`);
+    }
+    const msg: WorkerIn = {
+      type: 'patch',
+      generation: this.generation,
+      cells,
+      from,
+      models: models.slice(from),
+      nameIds,
+    };
+    for (const w of this.workers) w.postMessage(msg);
+    this.flushLive();
+  }
+
+  private flushLive(): void {
+    if (this.liveInFlight > 0 || this.liveDirty.size === 0 || !this.volume) return;
+    const [sx, sy, sz] = this.volume.size;
+    const chunks = [...this.liveDirty]
+      .map((k) => k.split(',').map(Number) as [number, number, number])
+      .filter(([x, y, z]) => x * CHUNK < sx && y * CHUNK < sy && z * CHUNK < sz);
+    this.liveDirty.clear();
+    const clipLayer = this.clipY !== null ? Math.floor(this.clipY / CHUNK) : null;
+    const jobs: { chunks: [number, number, number][]; clipY: number | null }[] = [
+      { chunks, clipY: null },
+    ];
+    if (clipLayer !== null)
+      jobs.push({ chunks: chunks.filter((c) => c[1] === clipLayer), clipY: this.clipY });
+    let w = 0;
+    for (const job of jobs) {
+      for (const c of job.chunks) {
+        this.liveInFlight++;
+        const msg: WorkerIn = {
+          type: 'mesh',
+          generation: this.generation,
+          chunks: [c],
+          clipY: job.clipY,
+          live: true,
+        };
+        (this.workers[w++ % this.workers.length] as Worker).postMessage(msg);
+      }
+    }
+  }
+
   private onWorker(msg: WorkerOut): void {
     if (msg.generation !== this.generation || msg.type !== 'chunk') return;
+    if (msg.live) {
+      this.addChunk(msg.mesh, msg.clipY);
+      this.liveInFlight = Math.max(0, this.liveInFlight - 1);
+      if (this.liveInFlight === 0) this.flushLive();
+      this.invalidate();
+      return;
+    }
     this.addChunk(msg.mesh, msg.clipY);
     this.pending--;
     this.cb.onProgress?.(this.total - this.pending, this.total);

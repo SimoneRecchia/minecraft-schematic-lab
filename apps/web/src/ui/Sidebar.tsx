@@ -3,9 +3,20 @@ import type { FeedbackItem } from '@minecraft-schematic-lab/shared';
 import { api } from '../api';
 import { controller } from '../controller';
 import { blockLabel, t } from '../i18n';
+import { useSim } from '../sim/simStore';
 import { useApp, type Panel } from '../store';
 import { blockIcon } from './blockIcons';
-import { IconCheck, IconChevron, IconFolder, IconTrash, IconWarn } from './Icons';
+import {
+  IconBolt,
+  IconCheck,
+  IconChevron,
+  IconFolder,
+  IconImport,
+  IconTerrain,
+  IconTrash,
+  IconWarn,
+} from './Icons';
+import { RedstonePane } from './Redstone';
 
 function timeAgo(ms: number): string {
   const d = (Date.now() - ms) / 1000;
@@ -44,7 +55,14 @@ export function Sidebar() {
   const s = useApp();
   const h = s.header;
   const openNotes = s.feedback.filter((f) => f.status === 'open').length;
-  const tabs: Panel[] = ['build', 'materials', 'history', 'notes'];
+  const redstone = useSim((x) => x.available);
+  const tabs: Panel[] = [
+    'build',
+    'materials',
+    'history',
+    'notes',
+    ...(redstone ? (['redstone'] as const) : []),
+  ];
   return (
     <aside className={`sidebar glass panel ${s.sidebarOpen ? '' : 'closed'}`}>
       <div className="sidebar-head">
@@ -52,6 +70,13 @@ export function Sidebar() {
           <div className="logo" />
           {t.appName}
           <span style={{ flex: 1 }} />
+          <button
+            className="icon-btn"
+            title={t.tools.import}
+            onClick={() => s.set({ importOpen: true, projectsOpen: false, versionOpen: false })}
+          >
+            <IconImport />
+          </button>
           <button
             className="icon-btn"
             title={t.projects}
@@ -83,20 +108,22 @@ export function Sidebar() {
           {tabs.map((p) => (
             <button
               key={p}
-              className={s.panel === p ? 'on' : ''}
+              className={`${s.panel === p || (p === 'build' && s.panel === 'redstone' && !redstone) ? 'on' : ''} ${p === 'redstone' ? 'icon-tab' : ''}`}
+              title={t.tabs[p]}
               onClick={() => s.set({ panel: p })}
             >
-              {t.tabs[p]}
+              {p === 'redstone' ? <IconBolt width={14} height={14} /> : t.tabs[p]}
               {p === 'notes' && openNotes > 0 ? ` ${openNotes}` : ''}
             </button>
           ))}
         </div>
       </div>
       <div className="sidebar-body">
-        {s.panel === 'build' && <BuildPane />}
+        {(s.panel === 'build' || (s.panel === 'redstone' && !redstone)) && <BuildPane />}
         {s.panel === 'materials' && <MaterialsPane />}
         {s.panel === 'history' && <HistoryPane />}
         {s.panel === 'notes' && <NotesPane />}
+        {s.panel === 'redstone' && <RedstonePane />}
       </div>
     </aside>
   );
@@ -157,13 +184,67 @@ function BuildPane() {
           </ul>
         </div>
       )}
-      <div className="section-title">{t.anchor}</div>
-      <div className="muted mono">
-        {h.anchor.map((v, i) => v + (h.origin[i] as number)).join(' ')}
-      </div>
+      {h.site ? (
+        <SitePane />
+      ) : (
+        <>
+          <div className="section-title">{t.anchor}</div>
+          <div className="muted mono">
+            {h.anchor.map((v, i) => v + (h.origin[i] as number)).join(' ')}
+          </div>
+        </>
+      )}
       <p className="faint" style={{ fontSize: 11.5, marginTop: 16 }}>
         {t.shortcuts}
       </p>
+    </>
+  );
+}
+
+function SitePane() {
+  const h = useApp((s) => s.header);
+  const onlyChanges = useApp((s) => s.onlyChanges);
+  const site = h?.site;
+  if (!site) return null;
+  const where = site.kind === 'world' ? site.world : site.file;
+  const dim = site.dimension ? (t.dimensionNames[site.dimension] ?? site.dimension) : null;
+  return (
+    <>
+      <div className="section-title">{t.site}</div>
+      <div className="site-card">
+        <IconTerrain width={20} height={20} style={{ color: 'var(--accent)', flex: 'none' }} />
+        <div style={{ minWidth: 0 }}>
+          <div className="title">{where}</div>
+          <div className="sub">
+            {[dim, `Minecraft ${site.version}`, site.size.join('×')].filter(Boolean).join(' · ')}
+          </div>
+        </div>
+      </div>
+      <div className="stat-grid" style={{ marginTop: 8 }}>
+        <div className="stat">
+          <div className="v">{site.changes.toLocaleString()}</div>
+          <div className="l">{t.siteChanges}</div>
+        </div>
+        <div className="stat">
+          <div className="v mono" style={{ fontSize: 13 }}>
+            {site.origin.join(' ')}
+          </div>
+          <div className="l">{t.siteOrigin}</div>
+        </div>
+      </div>
+      <label className="switch-row">
+        <input
+          type="checkbox"
+          checked={onlyChanges}
+          onChange={(e) => void controller.setOnlyChanges(e.target.checked)}
+        />
+        {t.onlyChanges}
+      </label>
+      {site.changes === 0 && (
+        <p className="faint" style={{ fontSize: 12, marginTop: 10 }}>
+          {t.siteHint}
+        </p>
+      )}
     </>
   );
 }
