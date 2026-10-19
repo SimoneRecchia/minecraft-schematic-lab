@@ -1,6 +1,6 @@
 # Landscape — ground, trees, water
 
-A build is only as good as the ground it stands on. Give every build a believable site unless the user wants a bare schematic.
+A build is only as good as the ground it stands on. Give every build a believable site unless the user wants a bare schematic. Building on the player's own world (real terrain, `flatten`, `foundation`, `path`, `ground: true`)? See read_guide("terrain").
 
 ## Terrain
 ```json
@@ -28,7 +28,7 @@ Flowers look best in single-species clusters: several scatters with small region
 Make a `rock` component (a small `sphere` or a few boxes of stone/andesite/cobblestone/tuff mixed with mossy tops, sunk 1 into the ground) and scatter it with `spacing` 6–10.
 
 ## Paths
-`box` strips of a path mix 1 block below the grass surface level (paths are slightly lower), widths 2–5, curving (use `line` with `radius` 1–2 through several points, or `polygon`).
+On uneven ground, `{"type":"path","points":[[x,z],…],"width":3}` follows the surface (it works on `terrain` too). Otherwise: `box` strips of a path mix 1 block below the grass surface level (paths are slightly lower), widths 2–5, curving (use `line` with `radius` 1–2 through several points, or `polygon`).
 
 ## Water
 Ponds 1 deep at the edges and 2–4 in the middle (carve with `sphere`/`dome` half `bottom` then fill water with `mask`), banks of sand/clay/gravel/mud, lily pads, `seagrass`, `kelp`. Fountains need a basin ≥5×5. Waterlogged edge blocks: `stone_brick_slab[waterlogged=true]`.

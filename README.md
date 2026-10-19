@@ -3,7 +3,9 @@
 **AI builder for Minecraft.** Describe a build to Claude — a cottage, a fantasy castle on a floating
 island, a gothic cathedral, a whole village, a piston door or a redstone computer — and Claude
 designs it automatically, shows it in 3D with the real game textures, and exports an expert-quality
-schematic for WorldEdit, Litematica or structure blocks that you can paste into your world.
+schematic for WorldEdit, Litematica or structure blocks, or a vanilla data pack that needs no mods.
+It can also build straight on the terrain of your own world and give you back a copy of the world
+with the build in it.
 
 - **Builds on your own world.** Point Claude at a world and a spot ("build a village here, I'm at
   120 70 -340"), or give it a schematic to start from. It reads that area straight from the save
@@ -86,16 +88,29 @@ Then open a new session (or restart Claude Code) and ask, in any language:
 
 > Costruiscimi un castello fantasy su un'isola fluttuante, per la 1.20.1, massimo 100×100.
 
+or, on your own world (save and quit it first):
+
+> Nel mio mondo "Survival", costruisci un villaggio dove sono adesso, raggio 60, e passami il mondo.
+
 The very first start prepares the builder once (about a minute, needs internet): it uses your Node
 22+ if you have one, otherwise it downloads the official Node from nodejs.org into
 `~/.minecraft-schematic-lab/runtime` — no admin password, nothing else on your computer changes. If
 the tools don't show up the first time, open a new session.
 
 The viewer opens in your browser. Ask for changes in chat or pin notes on blocks with the Note tool
-(N), then tell Claude "guarda le note". Export with the **Export** button.
+(N), then tell Claude "guarda le note". Export with the **Export** button. To build on a world, use
+**Import** in the viewer (pick the world, the centre and the radius, or drop a schematic) or just ask
+Claude.
 
-In game (WorldEdit): put the file in `config/worldedit/schematics` (single player) or
-`plugins/WorldEdit/schematics` (server), then `//schem load <name>` and `//paste`.
+In game:
+
+- **WorldEdit**: put the file in `config/worldedit/schematics` (single player) or
+  `plugins/WorldEdit/schematics` (server), then `//schem load <name>` and `//paste` (`//paste -o`
+  for a build made on your world: it goes back to its place).
+- **No mods**: put the data pack `.zip` in the world's `datapacks` folder (or let Claude install
+  it), then, with cheats on, `/reload` and `/function vibeschem:<name>/build`; `…/undo` removes it.
+- **A build made on your world**: ask for the world copy, then open the new world
+  ("<world> (VibeSchem v2)") from Singleplayer. Your original world is never changed.
 
 Update or remove it from the `/plugin` menu (or **Customize → Plugins**), or in a terminal with
 `claude plugin update vibeschem@vibeschem` / `claude plugin uninstall vibeschem@vibeschem`. Your

@@ -37,7 +37,7 @@ The user describes a subject (and maybe size, version, style, allowed blocks). Y
 Fix with `edit_build` (by id). Usually 1–3 refinement passes. Stop when it's genuinely good — don't burn calls on invisible changes.
 
 ## 4. Present
-Two to four sentences: what you built, the key design choices (style, palette, size, version), and that the viewer can rotate it, cut it into layers, pin notes on blocks, and export it (`.schem` for WorldEdit, `.litematic`, structure block, material list). Don't paste the spec.
+Two to four sentences: what you built, the key design choices (style, palette, size, version), and that the viewer can rotate it, cut it into layers, pin notes on blocks, and export it (`.schem` for WorldEdit, `.litematic`, structure block, a data pack that needs no mods, material list; on their world also a copy of the world with the build). Don't paste the spec.
 
 ## 5. Iterating with the user
 - When they ask for changes, **call `get_feedback` first**: notes pinned in the viewer tell you exactly which block and which operation (`placed by`) they mean. Numbered pins (#1, #2…) appear in the image.

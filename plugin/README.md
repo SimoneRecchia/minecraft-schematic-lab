@@ -3,8 +3,9 @@
 **AI builder for Minecraft.** Describe a build in your own words, in any language: a cottage, a
 fantasy castle on a floating island, a gothic cathedral, a whole village. Claude designs it
 automatically, shows it in a live 3D preview with the real game textures, and exports it as a
-schematic for **WorldEdit**, **Litematica** or vanilla **structure blocks**, ready to paste into your
-world.
+schematic for **WorldEdit**, **Litematica** or vanilla **structure blocks**, or as a **data pack**
+that needs no mods, ready for your world. It can also build on the terrain of your own world and
+give you back a copy of the world with the build in it.
 
 ## What you get
 
@@ -43,6 +44,12 @@ world.
    look at them.
 4. Export with the **Export** button in the viewer, or ask Claude. With WorldEdit, put the `.schem`
    file in `config/worldedit/schematics`, then run `//schem load <name>` and `//paste` in game.
+   Without mods, use the data pack: put it in the world's `datapacks` folder (or let Claude install
+   it), then `/reload` and `/function vibeschem:<name>/build` (cheats on).
+5. To build on your own world, save and quit it, then use **Import** in the viewer (pick the world,
+   the centre and the radius) or tell Claude where: "build a village where I'm standing in my world
+   Survival". Ask for a copy of the world with the build, a data pack or a schematic that pastes in
+   place; your original world is never changed.
 
 ### Try these
 
