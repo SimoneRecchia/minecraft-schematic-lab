@@ -428,6 +428,7 @@ export class ModelBaker {
         ...empty,
         self: true,
         fluid,
+        fluidLevel: name === 'bubble_column' ? 0 : Number(props.level ?? 0) || 0,
         fluidTex: [this.layerOf.get(`${fluid}_still`) ?? 0, this.layerOf.get(`${fluid}_flow`) ?? 0],
         fluidTint: fluid === 'water' ? 0x3f76e4 : -1,
       };

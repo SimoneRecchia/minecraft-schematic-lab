@@ -34,6 +34,7 @@ let selfCull: Uint8Array<ArrayBuffer> = new Uint8Array(0);
 let fluid: Uint8Array<ArrayBuffer> = new Uint8Array(0); // 0 none, 1 water, 2 lava
 let fluidTex: [number, number][] = [];
 let fluidTint: number[] = [];
+let fluidLevel: number[] = [];
 let nameIds: Int32Array<ArrayBufferLike> = new Int32Array(0);
 
 class Builder {
@@ -175,12 +176,20 @@ function emitQuad(
   b.quad((ao[0] as number) + (ao[2] as number) < (ao[1] as number) + (ao[3] as number));
 }
 
-/** Water and lava: surface 14/16 high unless the same fluid is above. */
+/** Surface height of the liquid in a cell: full under the same liquid, lower as it flows out. */
+function fluidHeight(id: number, x: number, y: number, z: number, clipY: number): number {
+  const above = idAt(x, y + 1, z, clipY);
+  if (above !== 0 && fluid[above] === fluid[id]) return 1;
+  const level = fluidLevel[id] ?? 0;
+  return level === 0 || level >= 8 ? 0.875 : Math.max(1, 8 - level) / 9;
+}
+
+/** Water and lava: surface 14/16 high for a source, lower as it flows, full under the same. */
 function emitFluid(b: Builder, id: number, x: number, y: number, z: number, clipY: number): void {
   const kind = fluid[id];
   const above = idAt(x, y + 1, z, clipY);
   const sameAbove = above !== 0 && fluid[above] === kind;
-  const h = sameAbove ? 1 : 0.875;
+  const h = fluidHeight(id, x, y, z, clipY);
   const [still, flow] = fluidTex[id] ?? [0, 0];
   const tint = fluidTint[id] ?? -1;
   const tr = tint >= 0 ? (tint >> 16) & 255 : 255;
@@ -189,6 +198,15 @@ function emitFluid(b: Builder, id: number, x: number, y: number, z: number, clip
   const hidden = (nx: number, ny: number, nz: number): boolean => {
     const nid = idAt(nx, ny, nz, clipY);
     return nid !== 0 && (fluid[nid] === kind || full[nid] === 1);
+  };
+  /** Where a side face starts: above a lower neighbour of the same liquid, else the bottom. */
+  const sideFrom = (nx: number, nz: number): number | null => {
+    const nid = idAt(nx, y, nz, clipY);
+    if (nid === 0) return 0;
+    if (full[nid] === 1) return null;
+    if (fluid[nid] !== kind) return 0;
+    const nh = fluidHeight(nid, nx, y, nz, clipY);
+    return nh >= h - 1e-3 ? null : nh;
   };
   const face = (pts: number[], tex: number, s: number, vTop = 0) => {
     for (let k = 0; k < 4; k++) {
@@ -211,10 +229,14 @@ function emitFluid(b: Builder, id: number, x: number, y: number, z: number, clip
   if (!sameAbove && !(above !== 0 && full[above]))
     face([0, h, 0, 0, h, 1, 1, h, 1, 1, h, 0], still, 1);
   if (!hidden(x, y - 1, z)) face([0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 1], still, 0.5);
-  if (!hidden(x, y, z - 1)) face([1, h, 0, 1, 0, 0, 0, 0, 0, 0, h, 0], flow, 0.8, 1 - h);
-  if (!hidden(x, y, z + 1)) face([0, h, 1, 0, 0, 1, 1, 0, 1, 1, h, 1], flow, 0.8, 1 - h);
-  if (!hidden(x - 1, y, z)) face([0, h, 0, 0, 0, 0, 0, 0, 1, 0, h, 1], flow, 0.6, 1 - h);
-  if (!hidden(x + 1, y, z)) face([1, h, 1, 1, 0, 1, 1, 0, 0, 1, h, 0], flow, 0.6, 1 - h);
+  let f = sideFrom(x, z - 1);
+  if (f !== null) face([1, h, 0, 1, f, 0, 0, f, 0, 0, h, 0], flow, 0.8, 1 - h);
+  f = sideFrom(x, z + 1);
+  if (f !== null) face([0, h, 1, 0, f, 1, 1, f, 1, 1, h, 1], flow, 0.8, 1 - h);
+  f = sideFrom(x - 1, z);
+  if (f !== null) face([0, h, 0, 0, f, 0, 0, f, 1, 0, h, 1], flow, 0.6, 1 - h);
+  f = sideFrom(x + 1, z);
+  if (f !== null) face([1, h, 1, 1, f, 1, 1, f, 0, 1, h, 0], flow, 0.6, 1 - h);
 }
 
 function meshChunk(cx: number, cy: number, cz: number, clipY: number): ChunkMesh {
@@ -285,6 +307,7 @@ function addModels(from: number, models: (BakedBlock | null)[]): void {
       fluid[i] = m.fluid === 'water' ? 1 : 2;
       fluidTex[i] = m.fluidTex ?? [0, 0];
       fluidTint[i] = m.fluidTint ?? -1;
+      fluidLevel[i] = m.fluidLevel ?? 0;
       return;
     }
     const total = m.v.reduce((s, v) => s + v.w, 0) || 1;
@@ -302,6 +325,7 @@ function init(models: (BakedBlock | null)[]): void {
   fluid = new Uint8Array(0);
   fluidTex = [];
   fluidTint = [];
+  fluidLevel = [];
   variants = [];
   addModels(0, models);
 }

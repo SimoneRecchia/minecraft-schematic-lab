@@ -5,7 +5,8 @@ VibeSchem simulates Minecraft **Java Edition** redstone the way the game's own c
 - neighbour updates in the game's order (west, east, down, up, north, south) and shape updates;
 - scheduled ticks ordered by priority;
 - block events and moving pistons (slime, honey, the 12-block push limit, sticky pistons dropping blocks on short pulses);
-- quasi-connectivity, observers, comparators reading containers, torch burnout.
+- quasi-connectivity, observers, comparators reading containers, torch burnout;
+- falling sand, gravel, concrete powder and anvils; water and lava flowing; hoppers, droppers and dispensers moving items and buckets.
 
 Treat a circuit like code: **declare its inputs and outputs, write tests, build, read the report, fix, repeat.** The tests run on every `create_build`/`edit_build`, and the summary reports them. Never hand over a circuit whose tests fail.
 
@@ -16,6 +17,9 @@ Treat a circuit like code: **declare its inputs and outputs, write tests, build,
 - A button stays pressed 20 gt (stone, polished blackstone) or 30 gt (wood).
 - A piston's block arrives 2 gt after the piston fires, which is 3 gt after a click.
 - Dust has no delay. It loses 1 level per block, from 15, so after 15 dust use a repeater.
+- Sand and gravel fall 2 gt after something next to them changes; dropping 1 block takes 7 gt more, 4 blocks about 14.
+- Water spreads 1 block every 5 gt, up to 7 blocks; lava 1 block every 30 gt, up to 3.
+- A hopper passes 1 item every 8 gt; an item waits 7 gt in each hopper of a chain.
 
 ## Which way things face (the most common mistake)
 | Block | `facing` means | Takes input from | Outputs to |
@@ -60,6 +64,8 @@ Anything that powers the space **above** a piston also powers the piston, but it
 - A pressure plate takes a value: entities on it, counted on weighted plates.
 - A target block takes a value too: the power of a hit, lasting 20 gt.
 - So does a daylight detector or a sculk sensor: the power it outputs.
+- A trapped chest takes the number of players looking in (1 = opened).
+- A lightning rod is struck by 1 (8 gt of power); a detector rail is 1 while a minecart is on it.
 - With `"as": "redstone_block"` (or any block), 1 places that block there and 0 puts back what was there.
 
 **Outputs**
@@ -70,12 +76,13 @@ Anything that powers the space **above** a piston also powers the piston, but it
   - power > 0, for dust;
   - powered, for a repeater or an observer;
   - locked, for a hopper;
+  - its comparator reading, for a container (chest, hopper, dropper…): 0 empty, 1–15 by how full;
   - powered, for any other block.
 - `"read": "power"` gives 0–15. `"read": "block"` gives 1 when a block stands there, for doors and moving parts.
 
 **Buses.** A list of positions is a bus, bit 0 first. It reads and writes as an integer: `{"set": {"B": 5}}`, `{"expect": {"S": 6}}`.
 
-Coordinates are spec coordinates. Power-on behaves as if every block had just been placed by hand, then runs until nothing changes. A clock never rests: give it a small `settleTicks`.
+Coordinates are spec coordinates. Power-on behaves as if every redstone component had just been placed by hand, then runs until nothing changes. Sand, gravel and liquids stay as built until something next to them changes, like after a WorldEdit paste: floating sand falls on the first update near it. A clock never rests: give it a small `settleTicks`.
 
 ## Test steps
 | Step | Does |
@@ -91,7 +98,8 @@ Coordinates are spec coordinates. Power-on behaves as if every block had just be
 | `{"expect": {…}, "for": 20}` | must hold now and for the next 20 gt |
 | `{"measure": "CLK", "ticks": 200, "expect": {"period": 20, "high": 10}}` | pulses, period, high time |
 | `{"log": ["Q", "S"]}` | note values in the report |
-| `{"use": [x,y,z]}`, `{"place": {"at": [x,y,z], "block": "…"}}`, `{"break": [x,y,z]}` | raw actions |
+| `{"use": [x,y,z]}` | what a player does to that block: right-click (lever, button, repeater delay, comparator mode, door, note block tuning, daylight detector, lectern page), step on or off a plate, shoot a target, open a trapped chest, strike a lightning rod, set off a sculk sensor, light TNT |
+| `{"place": {"at": [x,y,z], "block": "…"}}`, `{"break": [x,y,z]}` | place or break a block like a player |
 
 **Writing tests**
 - `forAll: {"A": [0, 15], "B": {"values": [0, 7, 15]}}` runs the steps once per combination, each case from the rest state.
@@ -108,13 +116,15 @@ Problems show as `!` lines:
 - **popped off**: a component lost the block it stood on.
 - **left the area**: something was pushed out of the simulated space.
 - **update suppressed**: an endless update chain.
+- **landed**: a falling block came to rest there; **dropped as an item**: it fell onto a torch, a slab or another block it can't replace, and broke.
+- **washed away** / **burnt by lava**: a liquid flowed into a component.
 
 ## Tools
 - `simulate`: run the stored tests, or `tests` written right there. You can add `inputs`/`outputs` to probe something without editing the spec.
 - `locations: 8` reruns everything at 8 world positions: dust and pistons update their neighbours in an order that depends on where the build sits. A design that passes at some positions and fails at others is broken in the game too. Avoid relying on update order, e.g. dust-based BUDs or 0-tick tricks.
 - `show: "test name"` plays that test live in the user's viewer.
 - `edit_build` with `{op:"circuit", set:{tests:[…]}}` adds or replaces tests by name. `{name, remove:true}` deletes one.
-- In the viewer the user drives the inputs, runs ▶ at any speed and clicks levers with the hand (U).
+- In the viewer the user drives the inputs, runs ▶ at any speed, and right-clicks levers, buttons, plates, targets, lecterns and trapped chests like in the game; falling blocks drop and liquids flow on screen.
 
 ## Verified building blocks
 All of these pass their tests. Copy them as components and scale them with `place` + `repeat` or a script.
@@ -151,6 +161,30 @@ With a delay-1 repeater the period would be 8 gt, and the torch burns out (8 tur
 {"name": "Light chaser", "minecraftVersion": "1.21.4", "operations": [{"type": "script", "id": "chaser", "args": {"stages": 8, "delay": 2}, "code": "const n = args.stages;\nbox([-1, -1, -1], [2 * n + 1, -1, 1], 'smooth_stone');\nset(0, 0, 0, 'lever[face=floor,facing=east]');\nfor (let k = 0; k < n; k++) {\n  set(1 + 2 * k, 0, 0, `repeater[facing=west,delay=${args.delay}]`);\n  set(2 + 2 * k, 0, 0, 'redstone_lamp');\n}"}], "circuit": {"inputs": {"GO": {"at": [0, 0, 0]}}, "outputs": {"LAMPS": {"at": [[2, 0, 0], [4, 0, 0], [6, 0, 0], [8, 0, 0], [10, 0, 0], [12, 0, 0], [14, 0, 0], [16, 0, 0]]}}, "tests": [{"name": "one more lamp every 4 ticks", "forAll": {"k": [1, 8]}, "steps": [{"set": {"GO": 1}}, {"wait": "k * 4"}, {"expect": {"LAMPS": "2 ** k - 1"}}]}, {"name": "all on, then all off", "steps": [{"set": {"GO": 1}}, {"expect": {"LAMPS": 255}, "within": 32}, {"set": {"GO": 0}}, {"expect": {"LAMPS": 0}, "within": 40}]}]}}
 ```
 
+## Gravity, liquids and items
+- **Falling blocks**: sand, red sand, gravel, concrete powder, anvils, the dragon egg, suspicious sand and gravel (they shatter), pointed dripstone hanging from a block that goes.
+  - They fall into air, water, lava and fire, and from 1.13 into grass and single snow layers.
+  - They land on the first collision box below: on a fence (1.5 high) they rest on top; landing inside a torch, slab, carpet or another block they can't replace, they break into an item.
+  - Concrete powder turns into concrete in water or next to it.
+  - A falling block is an entity for a few ticks: test where it ends with a `"read": "block"` output and `settle`.
+- **Liquids** follow the game's flow:
+  - down first, then toward the nearest drop within 4 blocks (lava 2), else every way;
+  - two sources with solid ground or water under a gap make a new source;
+  - water washes away dust, torches, repeaters, comparators, levers, buttons and (before 1.17) rails;
+  - lava touching water: obsidian from a source, cobblestone from flowing lava, stone where lava falls onto water.
+  - Doors, signs, ladders, pressure plates, banners and anything solid hold liquids back; waterloggable blocks hold a source.
+- **Items**:
+  - hoppers pull from the container above and push into the one they face, 1 item every 8 gt, and stop while powered;
+  - droppers push into the container in front, dispensers place water and lava from buckets and pick them back up with an empty bucket;
+  - the slot is the first filled one: the game picks at random, so don't rely on which.
+  - Comparators read the new contents, and the build saves them.
+- The ground around the build is one block below its lowest layer: water running off a floor's edge pours down there.
+
+**Sand trap** (a sticky piston holds the plank that carries the gravel; the lever pulls it away):
+```json
+{"name": "Sand trap", "minecraftVersion": "1.21.4", "operations": [{"type": "box", "id": "floor", "from": [0, -1, 0], "to": [4, -1, 2], "block": "smooth_stone"}, {"type": "blocks", "id": "pit", "block": "air", "at": [[3, -1, 1]]}, {"type": "blocks", "id": "lever_block", "block": "stone", "at": [[0, 0, 1]]}, {"type": "blocks", "id": "lever", "block": "lever[face=floor,facing=east,powered=true]", "at": [[0, 1, 1]]}, {"type": "blocks", "id": "piston", "block": "sticky_piston[facing=east,extended=true]", "at": [[1, 1, 1]]}, {"type": "blocks", "id": "head", "block": "piston_head[facing=east,type=sticky]", "at": [[2, 1, 1]]}, {"type": "blocks", "id": "support", "block": "oak_planks", "at": [[3, 1, 1]]}, {"type": "line", "id": "sand", "from": [3, 2, 1], "to": [3, 3, 1], "block": "gravel"}], "circuit": {"inputs": {"HOLD": {"at": [0, 1, 1]}}, "outputs": {"PIT": {"at": [[3, -1, 1], [3, 0, 1]], "read": "block"}}, "tests": [{"name": "holds while the lever is on", "steps": [{"expect": {"PIT": 0}, "for": 40}]}, {"name": "drops the gravel into the pit", "steps": [{"set": {"HOLD": 0}}, {"settle": 100}, {"expect": {"PIT": 3}}]}]}}
+```
+
 ## Building big
 1. **Specify first.**
    - Name every input and output.
@@ -179,18 +213,18 @@ Signals: a comparator's subtract mode with full-strength inputs gives `A AND NOT
 ## Versions
 | Release | What changes |
 |---|---|
-| 1.8–1.12 | Dust depowers one level per update. A lone dust powers all four sides. Lit/unlit torches, lamps and diodes are separate blocks: only the lit or powered one updates its surroundings, and a powered repeater turning off updates all around it. Note blocks can't be pushed. No observers before 1.11. Before 1.9.1 a tick runs at most 1000 scheduled ticks. |
-| 1.13 | Block states are flattened, and torches and diodes check whether a tick is already running. Components pop off on shape updates. |
+| 1.8–1.12 | Sand and gravel only fall into air, fire, water and lava. Flowing lava of level 5–7 touching water stays lava. Dust depowers one level per update. A lone dust powers all four sides. Lit/unlit torches, lamps and diodes are separate blocks: only the lit or powered one updates its surroundings, and a powered repeater turning off updates all around it. Note blocks can't be pushed. No observers before 1.11. Before 1.9.1 a tick runs at most 1000 scheduled ticks. |
+| 1.13 | Block states are flattened, and torches and diodes check whether a tick is already running. Components pop off on shape updates; falling blocks react to them too. |
 | 1.14 | Dust stays on glass, ice and sea lanterns. |
 | 1.15 | Honey block: it sticks like slime but never to slime. |
 | 1.16 | Dust "+" and "•" shapes: dust powers only the sides it visibly connects to. Target block. |
-| 1.17 | Lightning rod, sculk sensor (signal strength only; vibrations aren't simulated). |
+| 1.17 | Lightning rod, sculk sensor (vibrations come from inputs or a click). A falling block leaves its cell during its scheduled tick; before, on its entity's first tick, after the tick's block events. Pointed dripstone. |
 | 1.19 | Neighbour updates are queued depth-first instead of nested. A few piston and observer contraptions behave differently from 1.18. |
 | 1.21 | Copper bulb (toggles at once on each rising edge, non-conductive), crafter (4 gt). |
 | 1.21.2+ | The opt-in "Redstone Experiments" are **not** simulated: vanilla behaviour only. |
 
 ## What isn't simulated
-- Entities: items, mobs, minecarts. Pressure plates are driven as inputs.
-- Hoppers moving items: comparators read containers as filled in the spec, through `nbt` Items.
-- Explosions: primed TNT is reported. Water and lava flow aren't simulated, and daylight and vibrations come in through inputs.
-- The space below the build is solid ground. Slime or honey resting on it sticks to it, as it would on a real floor. Blocks pushed further than 6 blocks outside the build leave the simulation.
+- Entities other than falling blocks: dropped items, mobs, minecarts, arrows. Pressure plates, targets and detector rails are driven as inputs; items a dropper or dispenser throws out are gone, and hoppers don't pick up items lying above them.
+- Smelting, brewing and crafting: furnaces, brewing stands and crafters keep their contents.
+- Explosions: primed TNT is reported. Random ticks (fire, crops, lava's random slowdown) don't happen, and daylight and vibrations come in through inputs.
+- The space below the build is solid ground. Slime or honey resting on it sticks to it, as it would on a real floor. Blocks pushed further than 6 blocks outside the build leave the simulation, and liquids stop at that edge.

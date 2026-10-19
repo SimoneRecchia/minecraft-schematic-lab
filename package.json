@@ -1,6 +1,6 @@
 {
   "name": "minecraft-schematic-lab",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "license": "AGPL-3.0-only",
   "type": "module",
   "packageManager": "pnpm@11.6.0",

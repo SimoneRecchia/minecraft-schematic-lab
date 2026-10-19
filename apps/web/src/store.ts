@@ -21,6 +21,28 @@ export interface Toast {
 export interface Hover {
   pos: Vec3;
   state: string;
+  /** A right-click sets it off (lever, button, plate…) while the simulation is available. */
+  usable?: boolean;
+}
+
+/** I/O labels over the circuit: every bit of a bus, one per input/output, or none. */
+export type LabelMode = 'all' | 'names' | 'off';
+
+function storedLabels(): LabelMode {
+  try {
+    const v = localStorage.getItem('vibeschem.labels');
+    return v === 'all' || v === 'names' || v === 'off' ? v : 'all';
+  } catch {
+    return 'all';
+  }
+}
+
+export function saveLabels(mode: LabelMode): void {
+  try {
+    localStorage.setItem('vibeschem.labels', mode);
+  } catch {
+    // private window: the choice lasts for this session
+  }
 }
 
 export interface Selection {
@@ -62,6 +84,7 @@ interface AppState {
   focusMessage: string | null;
   toasts: Toast[];
   dark: boolean;
+  labels: LabelMode;
   set: (patch: Partial<AppState>) => void;
   toast: (text: string, tone?: Toast['tone']) => void;
 }
@@ -99,6 +122,7 @@ export const useApp = create<AppState>((set, get) => ({
   focusMessage: null,
   toasts: [],
   dark: typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches,
+  labels: storedLabels(),
   set: (patch) => set(patch),
   toast: (text, tone = 'info') => {
     const id = ++toastSeq;

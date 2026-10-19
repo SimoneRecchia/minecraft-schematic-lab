@@ -127,12 +127,20 @@ When the tools **are** loaded, use them and never start a second server.
     SHAPE_ORDER;
   - scheduled ticks ordered (time, priority, scheduling order), block events, and moving-piston
     block entities ticked in the game's phase order;
-  - Java HashSet/HashMap iteration order for dust and pistons, from world position (`offset`).
+  - Java HashSet/HashMap iteration order for dust and pistons, from world position (`offset`);
+  - fluid ticks after block ticks (`FlowingFluid`: spread, slope search, sources, lava + water),
+    falling blocks as entities (`FallingBlockEntity`: gravity, collision tops from `shapes.ts`,
+    landing), hoppers before moving pistons among the block entities (`HopperBlockEntity`
+    cooldowns), droppers and dispensers with real inventories.
+  `World.use` is a right-click; `World.activate` is what the viewer's click does (also steps on
+  plates, shoots targets, opens trapped chests). Sand and liquids at rest aren't woken by
+  power-on, only by updates next to them, like after a paste.
   Mechanics that changed between releases go in `version.ts` (`rulesFor`). It runs in Node (tests,
   `simulate`) and in a browser worker (`apps/web/src/sim`), so no Node APIs and no catalog import:
   block data comes in through `WorldOptions`.
   - A spec's `circuit` is powered on and tested at compile time
-    (`packages/block-compiler/src/redstone.ts`), and its rest state is written into the volume.
+    (`packages/block-compiler/src/redstone.ts`), and its rest state is written into the volume,
+    container contents included.
   - Every example in `guides/redstone.md` must pass its tests (`guides.test.ts`).
   - Engine behaviour is pinned by `packages/redstone/src/*.test.ts`: add a test for every mechanic
     you touch.

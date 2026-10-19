@@ -8,7 +8,17 @@ import { useSim } from './simStore';
 
 /** Blocks the simulation brings to life; other builds never start the worker. */
 const REDSTONE =
-  /redstone|repeater|comparator|piston|observer|lever|_button|pressure_plate|daylight_detector|target|copper_bulb|note_block|tripwire_hook/;
+  /redstone|repeater|comparator|piston|observer|lever|_button|pressure_plate|daylight_detector|target|copper_bulb|note_block|tripwire_hook|hopper|dropper|dispenser|trapped_chest|lectern|lightning_rod|sculk_sensor|detector_rail|crafter|minecraft:tnt|minecraft:bell/;
+
+/** Blocks a player sets off by hand: right-click, step on, shoot, open, strike. */
+const USABLE =
+  /^(lever|repeater|comparator|note_block|daylight_detector|target|tnt|bell|trapped_chest|detector_rail|sculk_sensor|calibrated_sculk_sensor|.*lightning_rod|.*_button|.*_pressure_plate|.*_door|.*_trapdoor|.*_fence_gate)$/;
+
+export function isUsable(state: string): boolean {
+  const name = state.replace(/^minecraft:/, '').replace(/\[.*$/, '');
+  if (name === 'lectern') return state.includes('has_book=true');
+  return USABLE.test(name) && !/^iron_(door|trapdoor)$/.test(name);
+}
 
 export interface SimHost {
   viewer: Viewer | null;
@@ -153,6 +163,7 @@ export class SimController {
     }
     if (f.cells.length)
       this.host.viewer?.patch(f.cells, this.models, Int32Array.from(this.nameIds));
+    if (f.entities) this.host.viewer?.setEntities(f.entities, this.models);
     const sim = useSim.getState();
     const events = f.events.length
       ? [...f.events.slice(-20).reverse(), ...sim.events].slice(0, 30)
@@ -223,8 +234,8 @@ export class SimController {
     this.send({ type: 'reset' });
   }
 
-  use(pos: Vec3): void {
-    this.interact({ type: 'use', pos });
+  use(pos: Vec3, hit?: { face: number; point: Vec3 }): void {
+    this.interact({ type: 'use', pos, ...(hit ? { hit } : {}) });
   }
 
   setInput(name: string, value: number): void {

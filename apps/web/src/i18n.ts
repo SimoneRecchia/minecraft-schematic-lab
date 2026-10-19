@@ -152,7 +152,7 @@ const it = {
   } as Record<string, string>,
   tools: {
     navigate: 'Naviga (V)',
-    use: 'Usa: leve, pulsanti, ripetitori (U)',
+    use: 'Usa: leve, pulsanti, piastre, bersagli… (U, o tasto destro)',
     note: 'Nota (N)',
     slice: 'Sezione a livelli (L)',
     grid: 'Griglia (G)',
@@ -201,7 +201,27 @@ const it = {
     press: 'Premi',
     events: 'Eventi',
     noCircuit:
-      'Questa build ha componenti redstone. Prendi la mano (U) e clicca leve e pulsanti, poi ▶ per farla girare. Chiedi a Claude di dare un nome a ingressi e uscite e di scrivere dei test: compariranno qui.',
+      'Questa build ha componenti redstone. Clicca col tasto destro su leve, pulsanti, piastre e bersagli, come in Minecraft: la simulazione parte da sola. Chiedi a Claude di dare un nome a ingressi e uscite e di scrivere dei test: compariranno qui.',
+    useHint:
+      'Tasto destro su leve, pulsanti, piastre, bersagli, leggii e bauli trappola per usarli, come in Minecraft. Sabbia e ghiaia cadono, acqua e lava scorrono, le tramogge spostano gli oggetti.',
+    labels: {
+      all: 'Etichette: tutte',
+      names: 'Etichette: solo i nomi',
+      off: 'Etichette nascoste',
+    } as Record<'all' | 'names' | 'off', string>,
+    strike: 'Fulmine',
+    kinds: {
+      lever: 'leva',
+      button: 'pulsante',
+      plate: 'piastra',
+      weighted: 'piastra a peso',
+      target: 'bersaglio',
+      power: 'potenza',
+      block: 'blocco',
+      chest: 'baule trappola',
+      strike: 'parafulmine',
+      rail: 'binario rilevatore',
+    } as Record<string, string>,
     testOf: 'Test «{n}»',
     stepOf: 'passo {s} di {t}',
     passed: 'superato',
@@ -217,6 +237,7 @@ const it = {
       burnout: 'torcia bruciata',
       suppressed: 'aggiornamento soppresso',
       'left-area': "uscito dall'area",
+      land: 'è atterrato',
     } as Record<string, string>,
   },
 };
@@ -373,7 +394,7 @@ const en: Dict = {
   },
   tools: {
     navigate: 'Navigate (V)',
-    use: 'Use: levers, buttons, repeaters (U)',
+    use: 'Use: levers, buttons, plates, targets… (U, or right-click)',
     note: 'Note (N)',
     slice: 'Layer cut (L)',
     grid: 'Grid (G)',
@@ -421,7 +442,23 @@ const en: Dict = {
     press: 'Press',
     events: 'Events',
     noCircuit:
-      'This build has redstone. Pick the hand (U) and click levers and buttons, then ▶ to run it. Ask Claude to name inputs and outputs and write tests: they will show up here.',
+      'This build has redstone. Right-click levers, buttons, plates and targets, like in Minecraft: the simulation starts by itself. Ask Claude to name inputs and outputs and write tests: they will show up here.',
+    useHint:
+      'Right-click levers, buttons, plates, targets, lecterns and trapped chests to use them, like in Minecraft. Sand and gravel fall, water and lava flow, hoppers move items.',
+    labels: { all: 'Labels: all', names: 'Labels: names only', off: 'Labels hidden' },
+    strike: 'Strike',
+    kinds: {
+      lever: 'lever',
+      button: 'button',
+      plate: 'plate',
+      weighted: 'weighted plate',
+      target: 'target',
+      power: 'power',
+      block: 'block',
+      chest: 'trapped chest',
+      strike: 'lightning rod',
+      rail: 'detector rail',
+    },
     testOf: 'Test “{n}”',
     stepOf: 'step {s} of {t}',
     passed: 'passed',
@@ -437,6 +474,7 @@ const en: Dict = {
       burnout: 'torch burnt out',
       suppressed: 'update suppressed',
       'left-area': 'left the area',
+      land: 'landed',
     },
   },
 };

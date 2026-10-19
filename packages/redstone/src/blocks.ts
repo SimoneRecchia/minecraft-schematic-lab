@@ -36,6 +36,11 @@ export const K = {
   LIGHTNING_ROD: 33,
   CRAFTER: 34,
   BELL: 35,
+  /** Sand, gravel, concrete powder, anvils, dragon egg, suspicious sand and gravel. */
+  FALLING: 36,
+  POINTED_DRIPSTONE: 37,
+  /** Water and lava blocks. */
+  LIQUID: 38,
 } as const;
 export type Kind = (typeof K)[keyof typeof K];
 
@@ -105,7 +110,23 @@ export function kindOf(name: string): Kind {
       return K.CRAFTER;
     case 'bell':
       return K.BELL;
+    case 'water':
+    case 'lava':
+      return K.LIQUID;
+    case 'pointed_dripstone':
+      return K.POINTED_DRIPSTONE;
+    case 'sand':
+    case 'red_sand':
+    case 'gravel':
+    case 'suspicious_sand':
+    case 'suspicious_gravel':
+    case 'anvil':
+    case 'chipped_anvil':
+    case 'damaged_anvil':
+    case 'dragon_egg':
+      return K.FALLING;
   }
+  if (name.endsWith('_concrete_powder')) return K.FALLING;
   if (name.endsWith('_button')) return K.BUTTON;
   if (name.endsWith('_pressure_plate')) return K.PLATE;
   if (name.endsWith('_trapdoor')) return K.TRAPDOOR;

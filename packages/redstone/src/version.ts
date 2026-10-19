@@ -35,6 +35,16 @@ export interface RedstoneRules {
   dustOnGlass: boolean;
   /** Scheduled ticks run per game tick: 65 536 since 1.9.1, 1 000 before. */
   maxScheduledPerTick: number;
+  /**
+   * 1.13+: falling blocks drop through anything replaceable (grass, snow layers); before, only
+   * through air, fire, water and lava.
+   */
+  fallThroughReplaceable: boolean;
+  /**
+   * 1.17+: the block turns into a falling entity during its scheduled tick (FallingBlockEntity
+   * .fall); before, the entity removes it on its first tick, after the tick's block events.
+   */
+  fallRemovesAtOnce: boolean;
 }
 
 function parts(v: string): number[] {
@@ -66,5 +76,7 @@ export function rulesFor(version: string): RedstoneRules {
     splitBlocks: !at('1.13'),
     dustOnGlass: at('1.14'),
     maxScheduledPerTick: at('1.9.1') ? 65536 : 1000,
+    fallThroughReplaceable: at('1.13'),
+    fallRemovesAtOnce: at('1.17'),
   };
 }

@@ -18,6 +18,13 @@ export const IconCursor = (p: P) => (
   </svg>
 );
 
+export const IconTag = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M3.5 12.2V4.8c0-.7.6-1.3 1.3-1.3h7.4l8.3 8.3a1.3 1.3 0 0 1 0 1.8l-7.4 7.4a1.3 1.3 0 0 1-1.8 0z" />
+    <circle cx="8.3" cy="8.3" r="1.5" />
+  </svg>
+);
+
 export const IconPin = (p: P) => (
   <svg {...base(p)}>
     <path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11z" />

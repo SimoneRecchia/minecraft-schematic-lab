@@ -87,6 +87,33 @@ test('runs the redstone live: a switch in the panel lights the lamp', async ({ p
   await expect(page.locator('.status-dot.pass')).toHaveCount(1);
 });
 
+test('a right-click in the scene flips the lever; the labels can be hidden', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Redstone' }).click();
+  await expect(page.locator('.io-label')).toHaveCount(2);
+  // Frame the lever, then right-click the middle of the scene, like in the game.
+  await page.locator('.io-name', { hasText: /^S$/ }).click();
+  await page.waitForTimeout(800);
+  const box = (await page.locator('.scene canvas').boundingBox()) as {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+  const x = box.x + box.width / 2;
+  const y = box.y + box.height / 2;
+  await page.mouse.move(x - 8, y - 8);
+  await page.mouse.move(x, y, { steps: 4 });
+  await expect(page.locator('.scene')).toHaveClass(/can-use/);
+  await page.mouse.click(x, y, { button: 'right' });
+  await expect(page.locator('.io-row .led')).toHaveClass(/on/, { timeout: 5000 });
+  await page.keyboard.press('i');
+  await page.keyboard.press('i');
+  await expect(page.locator('.io-label')).toHaveCount(0);
+  await page.keyboard.press('i');
+  await expect(page.locator('.io-label')).toHaveCount(2);
+});
+
 test('imports a schematic as a site to build on', async ({ page, request }) => {
   const schem = await request.get('/api/export/schem');
   expect(schem.ok()).toBe(true);

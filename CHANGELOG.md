@@ -3,6 +3,34 @@
 Installed plugins update when `version` changes (root `package.json`, synced into the plugin and the
 desktop extension by `pnpm bundle`).
 
+## 0.6.0
+
+- **Gravity.** Sand, red sand, gravel, concrete powder, anvils and the dragon egg fall when what
+  holds them goes, as entities with the game's physics (2 gt wait, gravity 0.04, drag 0.98): they
+  land on the first collision box below (on top of a fence, 1.5 high), break into an item inside a
+  torch, a slab or another block they can't replace, and concrete powder hardens in water.
+  Suspicious sand and gravel shatter; a stalactite falls when its block goes. In the viewer the
+  falling blocks glide down.
+- **Water and lava** flow like in the game: down first, then toward the nearest drop, 7 blocks
+  for water (1 every 5 gt), 3 for lava (1 every 30 gt); new sources between two; water washes
+  redstone away; lava and water make obsidian, cobblestone and stone; waterlogged blocks spill.
+  The viewer draws flowing liquids lower as they spread.
+- **Items move.** Hoppers pull from above and push where they face (1 item every 8 gt, 7 gt per
+  hopper along a chain, locked while powered), droppers push into containers, dispensers pour and
+  pick up water and lava with buckets. Comparators follow the contents, and a build's rest state
+  saves them.
+- **Click it like in Minecraft.** Right-click a lever, button, pressure plate, target (power by
+  where you hit it), lectern, trapped chest, lightning rod, sculk sensor, daylight detector, note
+  block or door in the viewer and the simulation starts by itself; the cursor shows what you can
+  use. The same in tests: `{"use": [x,y,z]}` steps on plates, shoots targets and opens trapped
+  chests too. New inputs: trapped chests, lightning rods, detector rails; containers can be read as
+  outputs.
+- **Labels you can hide**: the I/O labels on the model show every bit, only the names, or nothing
+  (the tag button or `I`), remembered between sessions. A bus is labelled once, its other bits by
+  number.
+- Fixed: the viewer didn't recognise blocks under the cursor when the camera was inside the
+  build's bounding box (zoomed in close).
+
 ## 0.5.0
 
 - **Build on your own world.** Claude can read an area of your Minecraft Java world and build on

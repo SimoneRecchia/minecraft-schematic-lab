@@ -4,8 +4,30 @@ import { controller } from '../controller';
 import { fmt, t } from '../i18n';
 import type { IoView } from '../sim/protocol';
 import { useSim } from '../sim/simStore';
-import { useApp } from '../store';
-import { IconBolt, IconCheck, IconPause, IconPlay, IconReset, IconStep, IconWarn } from './Icons';
+import { saveLabels, useApp, type LabelMode } from '../store';
+import {
+  IconBolt,
+  IconCheck,
+  IconPause,
+  IconPlay,
+  IconReset,
+  IconStep,
+  IconTag,
+  IconWarn,
+} from './Icons';
+
+/** Events that are just things happening, not something to look into. */
+const CALM_EVENTS = new Set(['note', 'bell', 'land', 'dispense', 'craft']);
+
+const NEXT_LABELS: Record<LabelMode, LabelMode> = { all: 'names', names: 'off', off: 'all' };
+
+/** Cycle the I/O labels over the model: all bits → one per name → hidden. */
+export function cycleLabels(): void {
+  const s = useApp.getState();
+  const next = NEXT_LABELS[s.labels];
+  s.set({ labels: next });
+  saveLabels(next);
+}
 
 const SPEEDS: [number, string][] = [
   [0.25, '¼×'],
@@ -21,8 +43,10 @@ const SPEEDS: [number, string][] = [
 export function SimBar() {
   const sim = useSim();
   const sidebar = useApp((s) => s.sidebarOpen);
+  const labels = useApp((s) => s.labels);
   if (!sim.available) return null;
   const run = sim.testRun;
+  const hasIo = sim.inputs.length + sim.outputs.length > 0;
   return (
     <div className={`simbar glass ${sidebar ? '' : 'wide'}`}>
       <button
@@ -56,6 +80,16 @@ export function SimBar() {
           </option>
         ))}
       </select>
+      {hasIo && (
+        <button
+          className={`icon-btn ${labels === 'off' ? '' : 'on'}`}
+          title={`${t.sim.labels[labels]} (I)`}
+          aria-label={t.sim.labels[labels]}
+          onClick={cycleLabels}
+        >
+          <IconTag />
+        </button>
+      )}
       <div className="divider" />
       <div className="clock mono">
         {sim.powered ? (
@@ -164,6 +198,12 @@ function InputRow({ io, value }: { io: IoView; value: number }) {
         {t.sim.press}
       </button>
     );
+  } else if (io.kind === 'strike') {
+    control = (
+      <button className="btn small" onClick={() => controller.sim.setInput(io.name, 1)}>
+        {t.sim.strike}
+      </button>
+    );
   } else if (io.kind === 'weighted' || io.kind === 'target' || io.kind === 'power') {
     control = (
       <div className="stepper">
@@ -188,7 +228,9 @@ function InputRow({ io, value }: { io: IoView; value: number }) {
       >
         {io.name}
       </button>
-      <span className="faint io-kind">{io.bits > 1 ? `${io.bits} bit` : io.kind}</span>
+      <span className="faint io-kind">
+        {io.bits > 1 ? `${io.bits} bit` : (t.sim.kinds[io.kind] ?? io.kind)}
+      </span>
       <span style={{ flex: 1 }} />
       {control}
     </div>
@@ -245,11 +287,13 @@ export function RedstonePane() {
           </ul>
         </div>
       )}
-      {!hasIo && sim.tests.length === 0 && (
+      {!hasIo && sim.tests.length === 0 ? (
         <div className="callout">
           <IconBolt width={16} height={16} style={{ color: 'var(--redstone)', flex: 'none' }} />
           <span>{t.sim.noCircuit}</span>
         </div>
+      ) : (
+        <div className="faint hint">{t.sim.useHint}</div>
       )}
       {sim.inputs.length > 0 && (
         <>
@@ -323,7 +367,7 @@ export function RedstonePane() {
           <div className="events">
             {sim.events.slice(0, 12).map((e, k) => (
               <div key={k} className="event">
-                <span className={e.type === 'note' || e.type === 'bell' ? '' : 'warn'}>
+                <span className={CALM_EVENTS.has(e.type) ? '' : 'warn'}>
                   {(t.sim.ev as Record<string, string>)[e.type] ?? e.type}
                 </span>
                 {e.detail && <span className="faint"> {e.detail}</span>}
@@ -344,6 +388,7 @@ export function RedstonePane() {
 export function CircuitLabels() {
   const sim = useSim();
   const header = useApp((s) => s.header);
+  const mode = useApp((s) => s.labels);
   const layer = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const update = () => {
@@ -370,9 +415,16 @@ export function CircuitLabels() {
     return () => {
       controller.frameListeners.delete(update);
     };
-  }, [header, sim.inputs, sim.outputs]);
-  if (!sim.available || !header) return null;
-  const labels: { key: string; at: Vec3; text: string; kind: 'in' | 'out'; on: boolean }[] = [];
+  }, [header, sim.inputs, sim.outputs, mode]);
+  if (!sim.available || !header || mode === 'off') return null;
+  const labels: {
+    key: string;
+    at: Vec3;
+    text: string;
+    kind: 'in' | 'out';
+    on: boolean;
+    bit: boolean;
+  }[] = [];
   for (const [list, kind] of [
     [sim.inputs, 'in'],
     [sim.outputs, 'out'],
@@ -380,13 +432,16 @@ export function CircuitLabels() {
     for (const io of list) {
       const v = sim.values[io.name] ?? 0;
       io.at.forEach((at, k) => {
-        const on = io.bits > 1 ? Math.floor(v / 2 ** k) % 2 === 1 : v > 0;
+        if (k > 0 && mode === 'names') return;
+        const on = io.bits > 1 && mode === 'all' ? Math.floor(v / 2 ** k) % 2 === 1 : v > 0;
         labels.push({
           key: `${io.name}${k}`,
           at,
-          text: io.bits > 1 ? `${io.name}${k}` : io.name,
+          // Bit 0 carries the name; the other bits of a bus only their number.
+          text: k === 0 ? io.name : String(k),
           kind,
           on,
+          bit: k > 0,
         });
       });
     }
@@ -397,7 +452,7 @@ export function CircuitLabels() {
         <div
           key={l.key}
           data-at={l.at.join(',')}
-          className={`io-label ${l.kind} ${l.on ? 'on' : ''}`}
+          className={`io-label ${l.kind} ${l.on ? 'on' : ''} ${l.bit ? 'bit' : ''}`}
         >
           {l.text}
         </div>

@@ -1,6 +1,13 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import type { BakedBlock, CameraState, ViewName, Vec3 } from '@minecraft-schematic-lab/shared';
+import {
+  FACE_SHADE,
+  QUAD_STRIDE,
+  type BakedBlock,
+  type CameraState,
+  type ViewName,
+  type Vec3,
+} from '@minecraft-schematic-lab/shared';
 import { createBlockMaterial, type LayerKind } from './blockMaterial';
 import { CHUNK, type ChunkMesh, type WorkerIn, type WorkerOut } from './meshTypes';
 import { uploadMipLevels, whiteTextureArray } from './textures';
@@ -10,11 +17,22 @@ export interface PickInfo {
   pos: Vec3;
   normal: Vec3;
   id: number;
+  /** Where the ray enters the block (local coordinates). */
+  point: Vec3;
+}
+
+/** A moving block drawn on its own (falling sand): palette index, local position of its bottom. */
+export interface EntityView {
+  id: number;
+  state: number;
+  pos: Vec3;
 }
 
 export interface ViewerCallbacks {
   onHover?(pick: PickInfo | null): void;
   onClick?(pick: PickInfo | null, event: { shift: boolean; alt: boolean }): void;
+  /** A right-click without dragging (dragging pans). */
+  onUse?(pick: PickInfo | null): void;
   onCamera?(state: CameraState): void;
   onFrame?(): void;
   onProgress?(done: number, total: number): void;
@@ -65,6 +83,11 @@ export class Viewer {
   controls: OrbitControls;
   private readonly world = new THREE.Group();
   private readonly helpers = new THREE.Group();
+  private readonly entityGroup = new THREE.Group();
+  private readonly entities = new Map<
+    number,
+    { group: THREE.Group; state: number; target: THREE.Vector3; gone: number }
+  >();
   private materials: Record<LayerKind, THREE.ShaderMaterial>;
   private atlas: THREE.DataArrayTexture = whiteTextureArray();
   private workers: Worker[] = [];
@@ -125,7 +148,7 @@ export class Viewer {
       translucent: createBlockMaterial(this.atlas, 'translucent'),
     };
 
-    this.scene.add(this.world, this.helpers);
+    this.scene.add(this.world, this.helpers, this.entityGroup);
     this.hoverBox = this.boxLines(0xffffff, 0.55);
     this.selectBox = this.boxLines(0x0a84ff, 1);
     this.hoverBox.visible = false;
@@ -238,6 +261,7 @@ export class Viewer {
   load(volume: LoadedVolume, keepCamera: boolean): Promise<void> {
     this.volume = volume;
     this.generation++;
+    for (const id of [...this.entities.keys()]) this.disposeEntity(id);
     this.liveDirty.clear();
     this.liveInFlight = 0;
     this.modelCount = volume.models.length;
@@ -724,9 +748,11 @@ export class Viewer {
     el.addEventListener('pointerup', (e) => {
       const d = this.downAt;
       this.downAt = null;
-      if (!d || e.button !== 0) return;
+      if (!d || (e.button !== 0 && e.button !== 2)) return;
       if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > 4 || performance.now() - d.t > 600) return;
-      this.cb.onClick?.(this.pickAt(this.pointer), { shift: e.shiftKey, alt: e.altKey });
+      const pick = this.pickAt(this.pointer);
+      if (e.button === 2) this.cb.onUse?.(pick);
+      else this.cb.onClick?.(pick, { shift: e.shiftKey, alt: e.altKey });
     });
     el.addEventListener('dblclick', () => {
       const hit = this.pickAt(this.pointer);
@@ -741,7 +767,11 @@ export class Viewer {
     const ray = new THREE.Raycaster();
     ray.setFromCamera(ndc, this.camera);
     const box = new THREE.Box3(new THREE.Vector3(0, 0, 0), new THREE.Vector3(...v.size));
-    const entry = ray.ray.intersectBox(box, new THREE.Vector3());
+    // From the camera when it is inside the build's box (zoomed in close), else where the ray
+    // enters it (intersectBox gives the exit point for a ray starting inside).
+    const entry = box.containsPoint(ray.ray.origin)
+      ? ray.ray.origin.clone()
+      : ray.ray.intersectBox(box, new THREE.Vector3());
     if (!entry) return null;
     const dir = ray.ray.direction;
     const p = entry.clone().addScaledVector(dir, 1e-4);
@@ -758,12 +788,16 @@ export class Viewer {
     let normal: Vec3 = [0, 0, 0];
     const [sx, sy, sz] = v.size;
     const clip = this.clipY ?? Infinity;
+    let t = 0;
     for (let i = 0; i < 4096; i++) {
       const [x, y, z] = cell as [number, number, number];
       if (x < 0 || y < 0 || z < 0 || x >= sx || y >= sy || z >= sz) return null;
       if (y <= clip) {
         const id = v.data[x + sx * (z + sz * y)] as number;
-        if (id !== 0 && v.models[id]) return { pos: [x, y, z], normal, id };
+        if (id !== 0 && v.models[id]) {
+          const point: Vec3 = [p.x + dir.x * t, p.y + dir.y * t, p.z + dir.z * t];
+          return { pos: [x, y, z], normal, id, point };
+        }
       }
       const a =
         (tMax[0] as number) < (tMax[1] as number)
@@ -774,6 +808,7 @@ export class Viewer {
             ? 1
             : 2;
       (cell[a] as number) += step[a] as number;
+      t = tMax[a] as number;
       (tMax[a] as number) += tDelta[a] as number;
       normal = [0, 0, 0];
       normal[a] = -(step[a] as number);
@@ -805,6 +840,100 @@ export class Viewer {
     if (v.z > 1) return null;
     const r = this.renderer.domElement;
     return { x: ((v.x + 1) / 2) * r.clientWidth, y: ((1 - v.y) / 2) * r.clientHeight };
+  }
+
+  // ------------------------------------------------------------------ moving blocks
+
+  /**
+   * Blocks that move on their own (falling sand and gravel), drawn as single-block meshes that
+   * glide to each new position. One that lands lingers a moment, until its block is meshed.
+   */
+  setEntities(list: EntityView[], models: readonly (BakedBlock | null)[]): void {
+    const now = performance.now();
+    const seen = new Set<number>();
+    for (const e of list) {
+      seen.add(e.id);
+      let m = this.entities.get(e.id);
+      if (m && m.state !== e.state) {
+        this.disposeEntity(e.id);
+        m = undefined;
+      }
+      if (!m) {
+        const group = this.blockMesh(models[e.state] ?? null);
+        group.position.set(e.pos[0], e.pos[1], e.pos[2]);
+        m = { group, state: e.state, target: new THREE.Vector3(), gone: 0 };
+        this.entities.set(e.id, m);
+        this.entityGroup.add(group);
+      }
+      m.target.set(e.pos[0], e.pos[1], e.pos[2]);
+      m.gone = 0;
+    }
+    for (const [id, m] of this.entities) if (!seen.has(id) && !m.gone) m.gone = now;
+    this.invalidate();
+  }
+
+  private disposeEntity(id: number): void {
+    const m = this.entities.get(id);
+    if (!m) return;
+    this.entityGroup.remove(m.group);
+    for (const c of m.group.children) (c as THREE.Mesh).geometry.dispose();
+    this.entities.delete(id);
+  }
+
+  /** One block's model as meshes (face shading, no ambient occlusion), its origin at a corner. */
+  private blockMesh(model: BakedBlock | null): THREE.Group {
+    const group = new THREE.Group();
+    const q = model?.v[0]?.q;
+    if (!q) return group;
+    const layers: { pos: number[]; uvw: number[]; col: number[]; idx: number[] }[] = [0, 1, 2].map(
+      () => ({ pos: [], uvw: [], col: [], idx: [] }),
+    );
+    for (let o = 0; o < q.length; o += QUAD_STRIDE) {
+      const L = layers[q[o + 24] as number];
+      if (!L) continue;
+      const dir = q[o + 22] as number;
+      const tint = q[o + 23] as number;
+      const shade = dir >= 0 ? (FACE_SHADE[dir] as number) : 1;
+      const rgb = tint >= 0 ? [(tint >> 16) & 255, (tint >> 8) & 255, tint & 255] : [255, 255, 255];
+      const base = L.pos.length / 3;
+      for (let k = 0; k < 4; k++) {
+        L.pos.push(q[o + k * 3] as number, q[o + k * 3 + 1] as number, q[o + k * 3 + 2] as number);
+        L.uvw.push(q[o + 12 + k * 2] as number, q[o + 13 + k * 2] as number, q[o + 20] as number);
+        L.col.push(...rgb.map((c) => Math.round((c as number) * shade)));
+      }
+      L.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+    }
+    layers.forEach((L, li) => {
+      if (!L.idx.length) return;
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(L.pos, 3));
+      geo.setAttribute('uvw', new THREE.Float32BufferAttribute(L.uvw, 3));
+      geo.setAttribute('color', new THREE.BufferAttribute(new Uint8Array(L.col), 3, true));
+      geo.setIndex(L.idx);
+      const mesh = new THREE.Mesh(geo, this.materials[KINDS[li] as LayerKind]);
+      mesh.renderOrder = li;
+      group.add(mesh);
+    });
+    return group;
+  }
+
+  /** Glide moving blocks toward their latest position; drop the ones gone a while. */
+  private animateEntities(now: number): boolean {
+    let moving = false;
+    for (const [id, m] of this.entities) {
+      if (m.gone && now - m.gone > 150) {
+        this.disposeEntity(id);
+        moving = true;
+        continue;
+      }
+      const p = m.group.position;
+      if (p.distanceToSquared(m.target) > 1e-6) {
+        p.lerp(m.target, 0.45);
+        moving = true;
+      }
+      m.group.visible = this.clipY === null || p.y <= this.clipY + 0.5;
+    }
+    return moving || this.entities.size > 0;
   }
 
   // ------------------------------------------------------------------ render loop
@@ -845,6 +974,7 @@ export class Viewer {
       this.needsRender = true;
     }
     if (this.controls.update()) this.needsRender = true;
+    if (this.entities.size && this.animateEntities(performance.now())) this.needsRender = true;
     if (this.pointerDirty) {
       this.pointerDirty = false;
       const hit = this.pickAt(this.pointer);
