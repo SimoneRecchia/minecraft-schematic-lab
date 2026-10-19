@@ -34,7 +34,7 @@ New build:
 
 Changes: when the user asks to change something, call get_feedback first — they can pin notes on blocks in the viewer, and each note says which operation placed that block. Edit with edit_build by operation id, then resolve_feedback with a one-line reply.
 
-Redstone: VibeSchem simulates Minecraft Java redstone faithfully for the build's version (game ticks, update order, quasi-connectivity, pistons, torch burnout). For any circuit, read read_guide("redstone"), declare named inputs/outputs and tests in the spec's "circuit" section — they run on every build like unit tests, and the summary reports them — and use simulate to try scenarios, measure delays and catch location-dependent designs. Never hand over a circuit whose tests fail.
+Redstone: VibeSchem simulates Minecraft Java redstone faithfully for the build's version (game ticks, update order, quasi-connectivity, pistons, torch burnout, falling sand and gravel, flowing water and lava, hoppers moving items). For any circuit, read read_guide("redstone"), declare named inputs/outputs and tests in the spec's "circuit" section — they run on every build like unit tests, and the summary reports them — and use simulate to try scenarios, measure delays and catch location-dependent designs. Never hand over a circuit whose tests fail.
 
 Building on the player's world: the player can give you a world (or a schematic) and a point to build at. worlds lists their saved worlds; import_site reads an area (centre + radius, default where they stand) into a new project and returns a terrain report: ground heights, water, trees, flat spots, existing builds. Read read_guide("terrain"), then build on it with edit_build (the spec already has "site"): flatten plots with blending, foundations down to the ground, paths that follow it, ground:true to stand trees and components on it, ground()/surface() in scripts. Coordinates are relative to the chosen point. Exports go back to the same world coordinates: a copy of the world with the build in it (export_build format "world"), a vanilla data pack with /fill commands and undo (no mods), or schematics for //paste -o.
 
@@ -727,7 +727,7 @@ export function buildMcpServer({ builds, config }: McpDeps): McpServer {
       title: 'Test the redstone',
       annotations: { readOnlyHint: true, openWorldHint: false },
       description:
-        "Run the current VibeSchem build's redstone in a simulator that follows Minecraft Java's own mechanics for the build's version: game ticks (20/s; repeater delay 1 = 2 ticks), neighbour and shape updates in the game's order, scheduled-tick priorities, quasi-connectivity, pistons with slime/honey and 0-tick spitting, observers, comparators reading containers, torch burnout. Runs the stored tests (spec.circuit.tests) or the `tests` given here, and reports pass/fail per test with failing cases, latencies (\"expect … within\"), measured clock periods, traces of signal changes, and problems such as torches burning out or blocks popping off. `inputs`/`outputs` add or override named I/O for this run only. `locations` (2–16) re-runs at other world positions, where dust and pistons update in another order, to catch location-dependent designs. `show` plays one test live in the user's viewer. Test format and step reference: read_guide(\"redstone\").",
+        "Run the current VibeSchem build's redstone in a simulator that follows Minecraft Java's own mechanics for the build's version: game ticks (20/s; repeater delay 1 = 2 ticks), neighbour and shape updates in the game's order, scheduled-tick priorities, quasi-connectivity, pistons with slime/honey and 0-tick spitting, observers, comparators reading containers, torch burnout, falling blocks (sand, gravel, concrete powder, anvils), water and lava flow (and what they wash away or turn to cobblestone), hoppers, droppers and dispensers moving items and buckets. Runs the stored tests (spec.circuit.tests) or the `tests` given here, and reports pass/fail per test with failing cases, latencies (\"expect … within\"), measured clock periods, traces of signal changes, and events such as torches burning out, blocks popping off or falling blocks landing. `inputs`/`outputs` add or override named I/O for this run only. `locations` (2–16) re-runs at other world positions, where dust and pistons update in another order, to catch location-dependent designs. `show` plays one test live in the user's viewer. Test format and step reference: read_guide(\"redstone\").",
       inputSchema: {
         tests: z
           .array(z.record(z.string(), z.unknown()))
@@ -740,7 +740,7 @@ export function buildMcpServer({ builds, config }: McpDeps): McpServer {
           .record(z.string(), z.record(z.string(), z.unknown()))
           .optional()
           .describe(
-            'Extra named inputs for this run: {"A": {"at": [x,y,z]}} (lever, button, plate…; "as" to place a block).',
+            'Extra named inputs for this run: {"A": {"at": [x,y,z]}} (lever, button, plate, target, trapped chest…; "as" to place a block).',
           ),
         outputs: z
           .record(z.string(), z.record(z.string(), z.unknown()))

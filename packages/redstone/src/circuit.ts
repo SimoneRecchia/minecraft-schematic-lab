@@ -103,8 +103,10 @@ const INPUT_KINDS = new Set<number>([
   K.TARGET,
   K.DAYLIGHT,
   K.SCULK_SENSOR,
+  K.TRAPPED_CHEST,
+  K.LIGHTNING_ROD,
 ]);
-const NOTABLE = new Set(['burnout', 'break', 'suppressed', 'left-area', 'tnt']);
+const NOTABLE = new Set(['burnout', 'break', 'suppressed', 'left-area', 'tnt', 'land']);
 
 /** The named inputs and outputs of a build, on a world. Coordinates are spec coordinates. */
 export class Circuit {
@@ -144,9 +146,14 @@ export class Circuit {
             continue;
           }
           const info = world.info(i);
-          if (kind === 'input' && !io.as && !INPUT_KINDS.has(info.kind)) {
+          if (
+            kind === 'input' &&
+            !io.as &&
+            !INPUT_KINDS.has(info.kind) &&
+            info.name !== 'detector_rail'
+          ) {
             this.errors.push(
-              `input ${name} at [${p.join(', ')}] is ${info.name}: an input must be a lever, button, pressure plate, target or daylight detector — or give "as" (e.g. "redstone_block") to place a block there for 1.`,
+              `input ${name} at [${p.join(', ')}] is ${info.name}: an input must be a lever, button, pressure plate, target, daylight detector, sculk sensor, trapped chest, lightning rod or detector rail — or give "as" (e.g. "redstone_block") to place a block there for 1.`,
             );
           }
           bits.push({ i, original: info.state });
@@ -200,6 +207,9 @@ export class Circuit {
       case K.HOPPER:
         p = info.enabled ? 0 : 15;
         break;
+      case K.TRAPPED_CHEST:
+        p = Math.min(15, w.chestOpenersAt(i));
+        break;
       case K.REPEATER:
       case K.OBSERVER:
       case K.LEVER:
@@ -208,10 +218,16 @@ export class Circuit {
       case K.POWERED_RAIL:
       case K.BELL:
       case K.PLATE:
+      case K.LIGHTNING_ROD:
+      case K.LECTERN:
         p = info.powered ? 15 : 0;
         break;
+      case K.RAIL:
+        p = info.name === 'detector_rail' && info.powered ? 15 : w.receivedPower(i);
+        break;
       default:
-        p = w.receivedPower(i);
+        // Containers read like a comparator would; anything else, the power it receives.
+        p = w.analogSignal(i, info) ?? w.receivedPower(i);
     }
     return mode === 'power' ? p : p > 0 ? 1 : 0;
   }
@@ -271,6 +287,15 @@ export class Circuit {
         case K.DAYLIGHT:
         case K.SCULK_SENSOR:
           w.setPower(b.i, single ? Math.min(15, value) : bit ? 15 : 0);
+          return;
+        case K.TRAPPED_CHEST:
+          w.setChestOpeners(b.i, single ? value : bit ? 1 : 0);
+          return;
+        case K.LIGHTNING_ROD:
+          if (bit) w.activate(b.i);
+          return;
+        case K.RAIL:
+          if (info.name === 'detector_rail' && info.powered !== bit) w.activate(b.i);
           return;
         default:
           throw new Error(`${name}: ${info.name} at bit ${k} can't be driven.`);
@@ -505,7 +530,7 @@ export function* runCase(
         if (out.notes.length < 40)
           out.notes.push(`t=${w.time - t0}: ${names.map((n) => `${n}=${c.read(n)}`).join(', ')}`);
       } else if ('use' in step) {
-        w.use(c.local(step.use));
+        w.activate(c.local(step.use));
       } else if ('place' in step) {
         const b = step.place.block;
         w.place(c.local(step.place.at), b.includes(':') ? b : `minecraft:${b}`);

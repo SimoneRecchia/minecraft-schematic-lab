@@ -6,7 +6,17 @@ import type {
 } from '@minecraft-schematic-lab/redstone';
 import type { SimInfo, Vec3 } from '@minecraft-schematic-lab/shared';
 
-export type InputKind = 'lever' | 'button' | 'plate' | 'weighted' | 'target' | 'power' | 'block';
+export type InputKind =
+  | 'lever'
+  | 'button'
+  | 'plate'
+  | 'weighted'
+  | 'target'
+  | 'power'
+  | 'block'
+  | 'chest'
+  | 'strike'
+  | 'rail';
 
 export interface IoView {
   name: string;
@@ -15,6 +25,12 @@ export interface IoView {
   /** Spec coordinates of each bit. */
   at: Vec3[];
   read?: 'bit' | 'power' | 'block';
+}
+
+export interface SimEntity {
+  id: number;
+  state: number;
+  pos: Vec3;
 }
 
 export interface TestProgress {
@@ -42,8 +58,11 @@ export type SimIn =
   | { type: 'speed'; speed: number }
   | { type: 'step'; ticks: number }
   | { type: 'reset' }
-  /** Right-click a block (local coordinates). */
-  | { type: 'use'; pos: Vec3 }
+  /**
+   * Set a block off like a player (local coordinates): right-click it, step on a plate, shoot a
+   * target (`hit`: where, in local coordinates, and the face's direction index).
+   */
+  | { type: 'use'; pos: Vec3; hit?: { face: number; point: Vec3 } }
   | { type: 'set'; name: string; value: number }
   | { type: 'press'; name: string }
   | { type: 'runTests' }
@@ -76,6 +95,8 @@ export type SimOut =
       values: Record<string, number>;
       events: SimEvent[];
       test: TestProgress | null;
+      /** Falling blocks: palette index and position of the bottom (local block units). */
+      entities: SimEntity[] | null;
     }
   | { type: 'tests'; report: CircuitReport }
   | { type: 'error'; message: string };

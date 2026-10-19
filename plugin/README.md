@@ -16,9 +16,11 @@ give you back a copy of the world with the build in it.
   schematic that pastes at the same coordinates. Your original world is only read.
 - **Working redstone, tested before you build it.** Ask for a piston door, a clock, a calculator or
   a whole redstone computer. VibeSchem simulates Minecraft Java redstone for your version: game
-  ticks, update order, pistons and quasi-connectivity. Claude writes tests for the circuit (truth
-  tables, delays, clock periods) and fixes the design until every test passes. In the viewer you
-  flip levers, press ▶ to run the circuit at any speed, and replay its tests in 3D.
+  ticks, update order, pistons and quasi-connectivity, falling sand and gravel, flowing water and
+  lava, hoppers moving items. Claude writes tests for the circuit (truth tables, delays, clock
+  periods) and fixes the design until every test passes. In the viewer you right-click levers,
+  buttons, plates and targets like in the game, watch the circuit run at any speed, and replay
+  its tests in 3D.
 
 - **Builds like an experienced builder.** Claude follows building guides distilled from expert
   practice: massing, depth, palettes and gradients, real roofs, styles, details and landscaping.

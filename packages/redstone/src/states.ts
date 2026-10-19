@@ -1,6 +1,8 @@
 import { blockTraits, hasBlockEntity, pushReactionOf, stateTraits } from './blocks';
 import type { BlockTraits, FullCubeTest, Kind, PushReaction } from './blocks';
 import { dirOf, NORTH, SOUTH, WEST } from './dirs';
+import { fallingOf, fluidOf, HOLDS_NO_FLUID, isReplaceable, shapeOf } from './shapes';
+import type { FluidInfo } from './shapes';
 
 /** Wire connection on one side: none, side (flat), up (climbs the block on that side). */
 export const SIDE_NONE = 0;
@@ -60,6 +62,27 @@ export interface StateInfo extends BlockTraits {
   blockEntity: boolean;
   /** Same number for every state of one block (scheduled ticks and block events are per block). */
   nameId: number;
+  /** Top of the collision box over the middle of the cell (0: none, 1.5 for fences). */
+  collision: number;
+  /** Faces the collision shape covers completely (bit per direction; 63 = full cube). */
+  faces: number;
+  /** BlockStateBase.isSolid (legacy solidity: fluids, falling blocks and hoppers ask it). */
+  solid: boolean;
+  /** BlockState.canBeReplaced(): air, liquids, grass, snow… */
+  replaceable: boolean;
+  /** The fluid in this block (water, lava, or water in a waterlogged block). */
+  fluid: FluidInfo;
+  /** Has a `waterlogged` property (SimpleWaterloggedBlock). */
+  waterloggable: boolean;
+  /** FlowingFluid.canHoldFluid fails for it whatever its shape (doors, signs, ladders…). */
+  holdsNoFluid: boolean;
+  /** FALL.* — sand, gravel, anvils, concrete powder, suspicious sand… */
+  falls: number;
+}
+
+function shapeFields(name: string, props: Readonly<Record<string, string>>, full: boolean) {
+  const { top, faces, solid } = shapeOf(name, props, full);
+  return { collision: top, faces, solid };
 }
 
 /**
@@ -122,6 +145,12 @@ export class StateTable {
       push: pushReactionOf(name),
       blockEntity: hasBlockEntity(name),
       nameId: this.nameIdOf(name),
+      ...shapeFields(name, p, this.isFullCube(name)),
+      replaceable: isReplaceable(name),
+      fluid: fluidOf(name, p),
+      waterloggable: 'waterlogged' in p,
+      holdsNoFluid: HOLDS_NO_FLUID.test(name),
+      falls: fallingOf(name),
     };
     this.infos.push(info);
     this.withCache.push(new Map());

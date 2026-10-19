@@ -1,6 +1,6 @@
 import type { CircuitDefinition } from '@minecraft-schematic-lab/build-spec';
 import type { BlockCatalog } from '@minecraft-schematic-lab/catalog';
-import { K, runCircuit, World } from '@minecraft-schematic-lab/redstone';
+import { itemsToNbt, K, runCircuit, World } from '@minecraft-schematic-lab/redstone';
 import type { CircuitReport, CircuitSpec } from '@minecraft-schematic-lab/redstone';
 import type { BlockVolume } from './BlockVolume';
 import { FLAG_REDSTONE, type PaletteEntry } from './palette';
@@ -79,16 +79,49 @@ export function runBuildCircuit(
   const { sizeX, sizeY, sizeZ } = volume;
   let i = 0;
   const comparators = new Map<string, number>();
+  const containers = new Map<string, number>();
+  const replaced = new Set<string>();
   for (let y = 0; y < sizeY; y++)
     for (let z = 0; z < sizeZ; z++)
       for (let x = 0; x < sizeX; x++, i++) {
         const w = world.index(x, y, z);
         const state = world.displayState(w);
-        if (state !== volume.palette[volume.data[i] as number])
+        const before = volume.palette[volume.data[i] as number] as string;
+        const key = `${x},${y},${z}`;
+        if (state !== before) {
           volume.data[i] = volume.idFor(state);
-        if (world.info(w).kind === K.COMPARATOR)
-          comparators.set(`${x},${y},${z}`, world.comparatorOutputAt(w));
+          if (state.replace(/\[.*$/, '') !== before.replace(/\[.*$/, '')) replaced.add(key);
+        }
+        const info = world.info(w);
+        if (info.kind === K.COMPARATOR) comparators.set(key, world.comparatorOutputAt(w));
+        if (info.blockEntity) containers.set(key, w);
       }
+  // Hoppers and dispensers may have moved items; water may have washed a banner away.
+  for (let k = volume.blockEntities.length - 1; k >= 0; k--) {
+    const be = volume.blockEntities[k] as (typeof volume.blockEntities)[number];
+    const key = be.pos.join(',');
+    if (replaced.has(key)) {
+      volume.blockEntities.splice(k, 1);
+      continue;
+    }
+    const w = containers.get(key);
+    if (w === undefined) continue;
+    containers.delete(key);
+    const inv = world.inventoryAt(w);
+    if (!inv && !Array.isArray(be.data.Items)) continue;
+    const { Items, ...rest } = be.data;
+    be.data = inv ? { ...rest, Items: itemsToNbt(inv, Items) } : rest;
+  }
+  for (const [key, w] of containers) {
+    const inv = world.inventoryAt(w);
+    if (!inv) continue;
+    const pos = key.split(',').map(Number) as [number, number, number];
+    volume.blockEntities.push({
+      id: `minecraft:${world.info(w).name}`,
+      pos,
+      data: { Items: itemsToNbt(inv) },
+    });
+  }
   // Comparators keep their output in a block entity: export it so a paste starts consistent.
   for (const be of volume.blockEntities) {
     const key = be.pos.join(',');

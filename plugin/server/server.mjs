@@ -754,7 +754,7 @@ function colorFor(state) {
 }
 
 // packages/shared/src/version.ts
-var APP_VERSION = "0.5.0";
+var APP_VERSION = "0.6.0";
 
 // apps/server/src/assets/ModelBaker.ts
 var DIRS = ["down", "up", "north", "south", "west", "east"];
@@ -1094,6 +1094,7 @@ var ModelBaker = class {
         ...empty,
         self: true,
         fluid,
+        fluidLevel: name === "bubble_column" ? 0 : Number(props.level ?? 0) || 0,
         fluidTex: [this.layerOf.get(`${fluid}_still`) ?? 0, this.layerOf.get(`${fluid}_flow`) ?? 0],
         fluidTint: fluid === "water" ? 4159204 : -1
       };
@@ -2705,7 +2706,12 @@ var K = {
   SCULK_SENSOR: 32,
   LIGHTNING_ROD: 33,
   CRAFTER: 34,
-  BELL: 35
+  BELL: 35,
+  /** Sand, gravel, concrete powder, anvils, dragon egg, suspicious sand and gravel. */
+  FALLING: 36,
+  POINTED_DRIPSTONE: 37,
+  /** Water and lava blocks. */
+  LIQUID: 38
 };
 function kindOf2(name) {
   switch (name) {
@@ -2773,7 +2779,23 @@ function kindOf2(name) {
       return K.CRAFTER;
     case "bell":
       return K.BELL;
+    case "water":
+    case "lava":
+      return K.LIQUID;
+    case "pointed_dripstone":
+      return K.POINTED_DRIPSTONE;
+    case "sand":
+    case "red_sand":
+    case "gravel":
+    case "suspicious_sand":
+    case "suspicious_gravel":
+    case "anvil":
+    case "chipped_anvil":
+    case "damaged_anvil":
+    case "dragon_egg":
+      return K.FALLING;
   }
+  if (name.endsWith("_concrete_powder")) return K.FALLING;
   if (name.endsWith("_button")) return K.BUTTON;
   if (name.endsWith("_pressure_plate")) return K.PLATE;
   if (name.endsWith("_trapdoor")) return K.TRAPDOOR;
@@ -2890,24 +2912,56 @@ function containerSlots(name) {
   for (const [re, n] of SLOTS) if (re.test(name)) return n;
   return 0;
 }
-function itemsOf(data) {
+function slotNumber(v) {
+  const n = typeof v === "number" ? v : Number.parseInt(String(v ?? ""), 10);
+  return Number.isInteger(n) ? n : null;
+}
+function itemsOf(data, size) {
+  const out = Array.from({ length: size }, () => null);
   const items = data?.Items;
-  if (!Array.isArray(items)) return [];
-  const out = [];
+  if (!Array.isArray(items)) return out;
+  let next = 0;
   for (const it of items) {
     if (!it || typeof it !== "object") continue;
-    const r = it;
-    const id = typeof r.id === "string" ? r.id : "";
-    const raw = r.count ?? r.Count ?? 1;
-    const count = typeof raw === "number" ? raw : Number.parseInt(String(raw), 10);
-    if (id && Number.isFinite(count) && count > 0) out.push({ id, count });
+    const { Slot, id, count, Count, ...extra } = it;
+    const raw = count ?? Count ?? 1;
+    const n = typeof raw === "number" ? raw : Number.parseInt(String(raw), 10);
+    if (typeof id !== "string" || !id || !Number.isFinite(n) || n <= 0) continue;
+    let slot = slotNumber(Slot);
+    if (slot === null) slot = next;
+    next = slot + 1;
+    if (slot < 0 || slot >= size || out[slot]) continue;
+    const stack = { id: id.includes(":") ? id : `minecraft:${id}`, count: n };
+    if (Object.keys(extra).length) stack.extra = extra;
+    out[slot] = stack;
   }
   return out;
 }
+function itemsToNbt(slots, original) {
+  const first = Array.isArray(original) ? original[0] : void 0;
+  const bigCount = first ? "Count" in first && !("count" in first) : false;
+  const typedSlot = first ? typeof first.Slot === "string" : true;
+  const out = [];
+  slots.forEach((s, k) => {
+    if (!s) return;
+    const n = bigCount ? `${s.count}b` : s.count;
+    out.push({
+      Slot: typedSlot ? `${k}b` : k,
+      id: s.id,
+      ...bigCount ? { Count: n } : { count: n },
+      ...s.extra ?? {}
+    });
+  });
+  return out;
+}
+function sameItem(a, b) {
+  return a.id === b.id && JSON.stringify(a.extra ?? {}) === JSON.stringify(b.extra ?? {});
+}
 function containerSignal(items, slots) {
-  if (slots <= 0 || items.length === 0) return 0;
+  if (slots <= 0) return 0;
   let f = 0;
   for (const it of items) {
+    if (!it) continue;
     const max = Math.min(64, maxStackSize(it.id));
     f = Math.fround(f + Math.fround(Math.min(it.count, max) / max));
   }
@@ -3017,6 +3071,177 @@ function counterClockwise(d) {
   }
 }
 
+// packages/redstone/src/shapes.ts
+var ALL_FACES = 63;
+var bit = (d) => 1 << d;
+var NONE = { top: 0, faces: 0, solid: false };
+var FULL2 = { top: 1, faces: ALL_FACES, solid: true };
+var NO_COLLISION = /^(air|cave_air|void_air|water|lava|bubble_column|fire|soul_fire|redstone_wire|torch|wall_torch|soul_torch|soul_wall_torch|copper_torch|copper_wall_torch|redstone_torch|redstone_wall_torch|lever|rail|powered_rail|detector_rail|activator_rail|tripwire|tripwire_hook|light|structure_void|nether_portal|end_portal|end_gateway|cobweb|sugar_cane|kelp|kelp_plant|seagrass|tall_seagrass|vine|glow_lichen|sculk_vein|resin_clump|short_grass|grass|tall_grass|fern|large_fern|dead_bush|bush|firefly_bush|short_dry_grass|tall_dry_grass|dandelion|poppy|blue_orchid|allium|azure_bluet|oxeye_daisy|cornflower|lily_of_the_valley|wither_rose|torchflower|sunflower|lilac|rose_bush|peony|pitcher_plant|open_eyeblossom|closed_eyeblossom|pink_petals|wildflowers|leaf_litter|cactus_flower|brown_mushroom|red_mushroom|crimson_fungus|warped_fungus|crimson_roots|warped_roots|nether_sprouts|hanging_roots|spore_blossom|small_dripleaf|big_dripleaf_stem|cave_vines|cave_vines_plant|weeping_vines|weeping_vines_plant|twisting_vines|twisting_vines_plant|sweet_berry_bush|wheat|carrots|potatoes|beetroots|melon_stem|pumpkin_stem|attached_melon_stem|attached_pumpkin_stem|nether_wart|torchflower_crop|pitcher_crop|frogspawn|pale_hanging_moss|mangrove_propagule|bamboo_sapling|moving_piston)$|(_button|_pressure_plate|_sign|_wall_sign|_hanging_sign|_wall_hanging_sign|_banner|_wall_banner|_sapling|_tulip|_coral|_coral_fan|_coral_wall_fan)$/;
+var FORCE_SOLID = /(_pressure_plate|_sign|_banner)$|^moving_piston$/;
+function wide(top, faces = bit(DOWN)) {
+  return { top, faces, solid: top >= 0.1875 };
+}
+function narrow(top) {
+  return { top, faces: 0, solid: top >= 1 };
+}
+function doorFace(props) {
+  const f = dirOf(props.facing);
+  if (f < 0) return 0;
+  if (props.open !== "true") return bit(OPPOSITE2[f]);
+  return bit(props.hinge === "right" ? clockwise(f) : counterClockwise(f));
+}
+function shapeOf(name, props, fullCube) {
+  if (name === "snow") {
+    const layers2 = Number(props.layers ?? 1);
+    return layers2 <= 1 ? NONE : wide((layers2 - 1) * 2 / 16);
+  }
+  if (FORCE_SOLID.test(name)) return { top: 0, faces: 0, solid: true };
+  if (NO_COLLISION.test(name)) return NONE;
+  if (name.endsWith("_slab")) {
+    if (props.type === "double") return FULL2;
+    return props.type === "top" ? wide(1, bit(UP)) : wide(0.5);
+  }
+  if (name.endsWith("_stairs")) {
+    const f = dirOf(props.facing);
+    const back = f >= 0 ? bit(f) : 0;
+    return wide(1, (props.half === "top" ? bit(UP) : bit(DOWN)) | back);
+  }
+  if (name.endsWith("_trapdoor")) {
+    if (props.open === "true") {
+      const f = dirOf(props.facing);
+      return { top: 1, faces: f >= 0 ? bit(OPPOSITE2[f]) : 0, solid: true };
+    }
+    return props.half === "top" ? wide(1, bit(UP)) : wide(3 / 16);
+  }
+  if (name.endsWith("_door")) return { top: 1, faces: doorFace(props), solid: true };
+  if (name.endsWith("_fence_gate")) return props.open === "true" ? NONE : narrow(1.5);
+  if (/_fence$|_wall$/.test(name)) return narrow(1.5);
+  if (/_carpet$/.test(name)) return wide(1 / 16);
+  if (name === "piston" || name === "sticky_piston") {
+    if (props.extended !== "true") return FULL2;
+    const f = dirOf(props.facing);
+    return { top: f === UP ? 0.75 : 1, faces: ALL_FACES & ~bit(f), solid: true };
+  }
+  if (name === "piston_head") {
+    const f = dirOf(props.facing);
+    return { top: 1, faces: f >= 0 ? bit(f) : 0, solid: true };
+  }
+  if (name === "ladder") {
+    const f = dirOf(props.facing);
+    return { top: 1, faces: f >= 0 ? bit(OPPOSITE2[f]) : 0, solid: true };
+  }
+  if (fullCube) return FULL2;
+  switch (name) {
+    case "repeater":
+    case "comparator":
+      return wide(2 / 16);
+    case "daylight_detector":
+      return wide(6 / 16);
+    case "soul_sand":
+    case "mud":
+      return wide(14 / 16);
+    case "farmland":
+    case "dirt_path":
+    case "grass_path":
+      return wide(15 / 16);
+    case "honey_block":
+    case "cactus":
+      return { top: 15 / 16, faces: 0, solid: true };
+    case "chest":
+    case "trapped_chest":
+    case "ender_chest":
+      return { top: 14 / 16, faces: 0, solid: true };
+    case "lectern":
+      return wide(15 / 16);
+    case "enchanting_table":
+      return wide(12 / 16);
+    case "end_portal_frame":
+      return wide(13 / 16);
+    case "stonecutter":
+      return wide(9 / 16);
+    case "campfire":
+    case "soul_campfire":
+      return wide(7 / 16);
+    case "cake":
+    case "candle_cake":
+      return { top: 0.5, faces: 0, solid: true };
+    case "lily_pad":
+      return wide(1.5 / 16);
+    case "flower_pot":
+      return narrow(6 / 16);
+    case "heavy_core":
+      return narrow(0.5);
+    case "conduit":
+      return narrow(11 / 16);
+    case "lantern":
+    case "soul_lantern":
+    case "copper_lantern":
+      return narrow(props.hanging === "true" ? 10 / 16 : 9 / 16);
+    case "sea_pickle":
+    case "turtle_egg":
+      return narrow(7 / 16);
+    case "scaffolding":
+      return { top: 1, faces: bit(UP), solid: true };
+    case "pointed_dripstone":
+      return narrow(props.thickness === "tip" && props.vertical_direction === "up" ? 11 / 16 : 1);
+    case "end_rod":
+    case "lightning_rod":
+      return narrow(props.facing === "up" || props.facing === "down" ? 1 : 10 / 16);
+    case "chain":
+    case "iron_chain":
+      return narrow(props.axis === "y" || props.axis === void 0 ? 1 : 9.5 / 16);
+  }
+  if (/^potted_/.test(name)) return narrow(6 / 16);
+  if (/(^|_)candle$/.test(name)) return narrow(6 / 16);
+  if (/_wall_(head|skull)$/.test(name)) return narrow(0.75);
+  if (/_(head|skull)$/.test(name)) return narrow(0.5);
+  if (/_bed$/.test(name)) return { top: 9 / 16, faces: 0, solid: true };
+  if (/copper_lantern$/.test(name)) return narrow(9 / 16);
+  if (/_amethyst_bud$|^amethyst_cluster$/.test(name)) return narrow(7 / 16);
+  if (/_chain$/.test(name)) return narrow(props.axis === "y" ? 1 : 9.5 / 16);
+  if (/_lightning_rod$/.test(name))
+    return narrow(props.facing === "up" || props.facing === "down" ? 1 : 10 / 16);
+  return { top: 1, faces: 0, solid: true };
+}
+var REPLACEABLE2 = /^(air|cave_air|void_air|water|lava|bubble_column|fire|soul_fire|light|structure_void|short_grass|grass|tall_grass|fern|large_fern|dead_bush|bush|short_dry_grass|tall_dry_grass|vine|glow_lichen|sculk_vein|resin_clump|seagrass|tall_seagrass|crimson_roots|warped_roots|nether_sprouts|hanging_roots|snow|leaf_litter)$/;
+function isReplaceable(name) {
+  return REPLACEABLE2.test(name);
+}
+var FL = { EMPTY: 0, WATER: 1, FLOWING_WATER: 2, LAVA: 3, FLOWING_LAVA: 4 };
+var EMPTY_FLUID = { type: FL.EMPTY, amount: 0, falling: false };
+var WATER_SOURCE = { type: FL.WATER, amount: 8, falling: false };
+var ALWAYS_WATER = /^(kelp|kelp_plant|seagrass|tall_seagrass|bubble_column)$/;
+function fluidOf(name, props) {
+  if (name === "water" || name === "lava") {
+    const level = Number(props.level ?? 0);
+    const water = name === "water";
+    if (level === 0) return water ? WATER_SOURCE : { type: FL.LAVA, amount: 8, falling: false };
+    const type = water ? FL.FLOWING_WATER : FL.FLOWING_LAVA;
+    return level >= 8 ? { type, amount: 8, falling: true } : { type, amount: 8 - level, falling: false };
+  }
+  if (props.waterlogged === "true" || ALWAYS_WATER.test(name)) return WATER_SOURCE;
+  return EMPTY_FLUID;
+}
+function isWaterType(type) {
+  return type === FL.WATER || type === FL.FLOWING_WATER;
+}
+function isLavaType(type) {
+  return type === FL.LAVA || type === FL.FLOWING_LAVA;
+}
+function legacyLevel(f) {
+  if (f.type === FL.WATER || f.type === FL.LAVA) return 0;
+  return 8 - Math.min(f.amount, 8) + (f.falling ? 8 : 0);
+}
+var FALL = { NONE: 0, BLOCK: 1, CONCRETE_POWDER: 2, BRUSHABLE: 3 };
+function fallingOf(name) {
+  if (/^(sand|red_sand|gravel|anvil|chipped_anvil|damaged_anvil|dragon_egg)$/.test(name))
+    return FALL.BLOCK;
+  if (name.endsWith("_concrete_powder")) return FALL.CONCRETE_POWDER;
+  if (name === "suspicious_sand" || name === "suspicious_gravel") return FALL.BRUSHABLE;
+  return FALL.NONE;
+}
+var HOLDS_NO_FLUID = /(_door|_sign|_wall_sign|_hanging_sign|_wall_hanging_sign)$|^(ladder|sugar_cane|bubble_column|nether_portal|end_portal|end_gateway|structure_void|kelp|kelp_plant|seagrass|tall_seagrass)$/;
+
 // packages/redstone/src/states.ts
 var SIDE_NONE = 0;
 var SIDE_SIDE = 1;
@@ -3042,6 +3267,10 @@ function stringifyState2(name, props) {
   const keys = Object.keys(props).sort();
   const base = `minecraft:${name}`;
   return keys.length ? `${base}[${keys.map((k) => `${k}=${props[k]}`).join(",")}]` : base;
+}
+function shapeFields(name, props, full) {
+  const { top, faces, solid } = shapeOf(name, props, full);
+  return { collision: top, faces, solid };
 }
 var StateTable = class {
   constructor(isFullCube) {
@@ -3095,7 +3324,13 @@ var StateTable = class {
       sides: [0, 0, sideOf(p.north), sideOf(p.south), sideOf(p.west), sideOf(p.east)],
       push: pushReactionOf(name),
       blockEntity: hasBlockEntity(name),
-      nameId: this.nameIdOf(name)
+      nameId: this.nameIdOf(name),
+      ...shapeFields(name, p, this.isFullCube(name)),
+      replaceable: isReplaceable(name),
+      fluid: fluidOf(name, p),
+      waterloggable: "waterlogged" in p,
+      holdsNoFluid: HOLDS_NO_FLUID.test(name),
+      falls: fallingOf(name)
     };
     this.infos.push(info);
     this.withCache.push(/* @__PURE__ */ new Map());
@@ -3175,7 +3410,9 @@ function rulesFor(version) {
     shapeSurvival: at("1.13"),
     splitBlocks: !at("1.13"),
     dustOnGlass: at("1.14"),
-    maxScheduledPerTick: at("1.9.1") ? 65536 : 1e3
+    maxScheduledPerTick: at("1.9.1") ? 65536 : 1e3,
+    fallThroughReplaceable: at("1.13"),
+    fallRemovesAtOnce: at("1.17")
   };
 }
 
@@ -3193,6 +3430,48 @@ var P_EXTREMELY_HIGH = -3;
 var P_VERY_HIGH = -2;
 var P_HIGH = -1;
 var P_NORMAL = 0;
+var TickQueue = class {
+  heap = [];
+  scheduled = /* @__PURE__ */ new Map();
+  running = /* @__PURE__ */ new Set();
+  push(key, t) {
+    this.scheduled.set(key, t);
+    const h = this.heap;
+    h.push(t);
+    let k = h.length - 1;
+    while (k > 0) {
+      const parent = k - 1 >> 1;
+      if (!heapLess(t, h[parent])) break;
+      h[k] = h[parent];
+      k = parent;
+    }
+    h[k] = t;
+  }
+  pop() {
+    const h = this.heap;
+    const top = h[0];
+    const last = h.pop();
+    if (!top || !last || h.length === 0) return top;
+    let k = 0;
+    const n = h.length;
+    for (; ; ) {
+      const l = 2 * k + 1;
+      if (l >= n) break;
+      const r = l + 1;
+      const c = r < n && heapLess(h[r], h[l]) ? r : l;
+      if (!heapLess(h[c], last)) break;
+      h[k] = h[c];
+      k = c;
+    }
+    h[k] = last;
+    return top;
+  }
+  load(heap, key) {
+    this.heap = heap.map((t) => ({ ...t }));
+    this.scheduled.clear();
+    for (const t of this.heap) this.scheduled.set(key(t), t);
+  }
+};
 var PAD = 2;
 var GLASSY = /(^|_)glass$|^ice$|^sea_lantern$/;
 var MAX_DEPTH = 900;
@@ -3226,9 +3505,8 @@ var World = class {
   wireSignals = true;
   handlingTick = false;
   seq = 0;
-  heap = [];
-  scheduled = /* @__PURE__ */ new Map();
-  runningThisTick = /* @__PURE__ */ new Set();
+  blockTicks = new TickQueue();
+  fluidTicks = new TickQueue();
   eventQueue = [];
   eventHead = 0;
   eventKeys = /* @__PURE__ */ new Set();
@@ -3239,6 +3517,15 @@ var World = class {
   inventories = /* @__PURE__ */ new Map();
   plateEntities = /* @__PURE__ */ new Map();
   toggles = [];
+  /** Falling block entities, in the order they were spawned (the game's entity order). */
+  falling = [];
+  nextEntityId = 1;
+  /** Hopper block entities, ticked in the order they appeared. */
+  hoppers = /* @__PURE__ */ new Map();
+  /** A hopper may move an item next tick (something changed since they last all failed). */
+  hopperWake = false;
+  /** Players looking into a chest (trapped chests give that many as a signal). */
+  openers = /* @__PURE__ */ new Map();
   changedMark;
   changed = [];
   depth = 0;
@@ -3282,11 +3569,18 @@ var World = class {
     if (this.AIR !== 0) throw new Error("air must be state 0");
     for (const be of opts.blockEntities ?? []) {
       const p = this.index(...be.pos);
-      const items = itemsOf(be.data);
-      if (items.length) this.inventories.set(p, items);
+      const slots = containerSlots(this.info(p).name);
+      if (slots > 0) {
+        const items = itemsOf(be.data, slots);
+        if (items.some((s) => s)) this.inventories.set(p, items);
+      }
       const out = be.data.OutputSignal;
       if (typeof out === "number") this.comparatorOut.set(p, out);
     }
+    for (let k = 0; k < this.cells.length; k++)
+      if (this.states.kind(this.cells[k]) === K.HOPPER)
+        this.hoppers.set(k, { cooldown: -1, tickedGameTime: 0 });
+    this.hopperWake = this.hoppers.size > 0;
   }
   // ---------------------------------------------------------------- coordinates
   /** Cell index of local build coordinates (no bounds check). */
@@ -3561,65 +3855,59 @@ var World = class {
   /** Level.scheduleTick; `type` is the block asking (default: the block there now). */
   scheduleTick(i, delay, priority = P_NORMAL, type = this.info(i).nameId) {
     const key = this.tickKey(i, type);
-    if (this.scheduled.has(key)) return;
-    const t = { time: this.time + delay, priority, seq: this.seq++, pos: i, type };
-    this.scheduled.set(key, t);
-    const h = this.heap;
-    h.push(t);
-    let k = h.length - 1;
-    while (k > 0) {
-      const parent = k - 1 >> 1;
-      if (!heapLess(t, h[parent])) break;
-      h[k] = h[parent];
-      k = parent;
-    }
-    h[k] = t;
+    if (this.blockTicks.scheduled.has(key)) return;
+    this.blockTicks.push(key, { time: this.time + delay, priority, seq: this.seq++, pos: i, type });
   }
-  popTick() {
-    const h = this.heap;
-    const top = h[0];
-    const last = h.pop();
-    if (!top || !last || h.length === 0) return top;
-    let k = 0;
-    const n = h.length;
-    for (; ; ) {
-      const l = 2 * k + 1;
-      if (l >= n) break;
-      const r = l + 1;
-      const c = r < n && heapLess(h[r], h[l]) ? r : l;
-      if (!heapLess(h[c], last)) break;
-      h[k] = h[c];
-      k = c;
-    }
-    h[k] = last;
-    return top;
+  /** Level.scheduleTick for a fluid (type is the fluid: FL.WATER, FL.FLOWING_WATER…). */
+  scheduleFluidTick(i, type, delay) {
+    const key = this.tickKey(i, type);
+    if (this.fluidTicks.scheduled.has(key)) return;
+    this.fluidTicks.push(key, {
+      time: this.time + delay,
+      priority: P_NORMAL,
+      seq: this.seq++,
+      pos: i,
+      type
+    });
   }
   hasScheduledTick(i) {
-    return this.scheduled.has(this.tickKey(i, this.info(i).nameId));
+    return this.blockTicks.scheduled.has(this.tickKey(i, this.info(i).nameId));
   }
   willTickThisTick(i) {
-    return this.runningThisTick.has(this.tickKey(i, this.info(i).nameId));
+    return this.blockTicks.running.has(this.tickKey(i, this.info(i).nameId));
   }
-  runScheduledTicks() {
+  /** LevelTicks.tick: everything due now, at most maxScheduledPerTick, in order. */
+  runTicks(q, run) {
     this.handlingTick = true;
     try {
-      const run = [];
-      while (this.heap.length > 0 && this.heap[0].time <= this.time) {
-        if (run.length >= this.rules.maxScheduledPerTick) break;
-        const t = this.popTick();
+      const due = [];
+      while (q.heap.length > 0 && q.heap[0].time <= this.time) {
+        if (due.length >= this.rules.maxScheduledPerTick) break;
+        const t = q.pop();
         const key = this.tickKey(t.pos, t.type);
-        this.scheduled.delete(key);
-        this.runningThisTick.add(key);
-        run.push(t);
+        q.scheduled.delete(key);
+        q.running.add(key);
+        due.push(t);
       }
-      for (const t of run) {
-        this.runningThisTick.delete(this.tickKey(t.pos, t.type));
-        if (this.info(t.pos).nameId === t.type) this.tickBlock(t.pos);
+      for (const t of due) {
+        q.running.delete(this.tickKey(t.pos, t.type));
+        run(t);
       }
     } finally {
       this.handlingTick = false;
-      this.runningThisTick.clear();
+      q.running.clear();
     }
+  }
+  runScheduledTicks() {
+    this.runTicks(this.blockTicks, (t) => {
+      if (this.info(t.pos).nameId === t.type) this.tickBlock(t.pos);
+    });
+  }
+  /** ServerLevel.tickFluid: the fluid there must still be of the type that asked. */
+  runFluidTicks() {
+    this.runTicks(this.fluidTicks, (t) => {
+      if (this.info(t.pos).fluid.type === t.type) this.tickFluid(t.pos);
+    });
   }
   // ---------------------------------------------------------------- block events
   blockEvent(i, b0, b1) {
@@ -3639,11 +3927,15 @@ var World = class {
     this.eventHead = 0;
   }
   // ---------------------------------------------------------------- the game tick
-  /** One game tick: scheduled ticks, block events, entities (pressure plates), block entities. */
+  /**
+   * One game tick, in ServerLevel.tick's order: block ticks, fluid ticks, block events, entities
+   * (pressure plates, falling blocks), block entities (hoppers, moving pistons).
+   */
   tick() {
     this.time++;
     this.updates = 0;
     this.runScheduledTicks();
+    this.runFluidTicks();
     this.runBlockEvents();
     this.tickEntities();
     this.tickBlockEntities();
@@ -3651,18 +3943,23 @@ var World = class {
   run(ticks) {
     for (let t = 0; t < ticks; t++) this.tick();
   }
-  /** Nothing scheduled, queued or moving: the circuit rests until something changes. */
+  /** Nothing scheduled, queued, falling or moving: the circuit rests until something changes. */
   get idle() {
-    if (this.heap.length > 0 || this.eventQueue.length > this.eventHead) return false;
+    if (this.blockTicks.heap.length > 0 || this.fluidTicks.heap.length > 0) return false;
+    if (this.eventQueue.length > this.eventHead || this.falling.length > 0) return false;
     if (this.tickers.some((m) => !m.removed) || this.pendingTickers.some((m) => !m.removed))
       return false;
     for (const n of this.plateEntities.values()) if (n > 0) return false;
+    if (this.hopperWake) return false;
+    for (const h of this.hoppers.values()) if (h.cooldown > 0) return false;
     return true;
   }
   /** Ticks until the next scheduled tick (Infinity if none). */
   get nextTickIn() {
-    const t = this.heap[0];
-    return t ? Math.max(0, t.time - this.time) : Infinity;
+    const t = this.blockTicks.heap[0];
+    const f = this.fluidTicks.heap[0];
+    const next = Math.min(t?.time ?? Infinity, f?.time ?? Infinity);
+    return Number.isFinite(next) ? Math.max(0, next - this.time) : Infinity;
   }
   tickEntities() {
     for (const [i, n] of this.plateEntities) {
@@ -3671,8 +3968,15 @@ var World = class {
       if (info.kind !== K.PLATE && info.kind !== K.WEIGHTED_PLATE) continue;
       if (this.plateSignal(info) === 0) this.checkPlate(i, info, 0);
     }
+    if (this.falling.length) {
+      const ticked = [...this.falling];
+      const gone = /* @__PURE__ */ new Set();
+      for (const e of ticked) if (!this.tickFalling(e)) gone.add(e);
+      if (gone.size) this.falling = this.falling.filter((e) => !gone.has(e));
+    }
   }
   tickBlockEntities() {
+    if (this.hoppers.size) this.hopperWake = this.tickHoppers();
     if (this.pendingTickers.length) {
       this.tickers.push(...this.pendingTickers);
       this.pendingTickers = [];
@@ -3723,6 +4027,8 @@ var World = class {
         return Math.max(0, info.power);
       case K.RAIL:
         return info.name === "detector_rail" && info.powered ? 15 : 0;
+      case K.TRAPPED_CHEST:
+        return Math.min(15, this.openers.get(i) ?? 0);
       default:
         return 0;
     }
@@ -3754,6 +4060,8 @@ var World = class {
         return d === UP ? Math.max(0, info.power) : 0;
       case K.RAIL:
         return d === UP && info.name === "detector_rail" && info.powered ? 15 : 0;
+      case K.TRAPPED_CHEST:
+        return d === UP ? this.signal(i, info, d) : 0;
       default:
         return 0;
     }
@@ -3983,6 +4291,11 @@ var World = class {
       }
       case K.DOOR:
         return info.props.half === "upper" ? this.info(this.rel(i, DOWN)).kind === K.DOOR : this.info(this.rel(i, DOWN)).sturdyTop;
+      case K.POINTED_DRIPSTONE: {
+        const tip = dripstoneTip(info);
+        const s = this.info(this.rel(i, OPPOSITE2[tip]));
+        return (s.faces & 1 << tip) !== 0 || s.kind === K.POINTED_DRIPSTONE && dripstoneTip(s) === tip;
+      }
       default:
         return true;
     }
@@ -3996,7 +4309,27 @@ var World = class {
   updateShape(i, id, dir, neighbor, _from) {
     const info = this.states.info(id);
     const surviveOnShape = this.rules.shapeSurvival;
+    if (info.waterloggable && info.fluid.type === FL.WATER)
+      this.scheduleFluidTick(i, FL.WATER, this.fluidTickDelay(FL.WATER));
     switch (info.kind) {
+      case K.FALLING:
+        if (!surviveOnShape) return id;
+        if (info.falls === FALL.CONCRETE_POWDER && this.touchesWater(i))
+          return this.concreteOf(info);
+        this.scheduleTick(i, 2, P_NORMAL, info.nameId);
+        return id;
+      case K.POINTED_DRIPSTONE: {
+        if (dir !== UP && dir !== DOWN) return id;
+        const tip = dripstoneTip(info);
+        if (tip === DOWN && this.hasScheduledTickOf(i, info.nameId)) return id;
+        if (dir === OPPOSITE2[tip] && !this.canSurvive(i, info))
+          this.scheduleTick(i, tip === DOWN ? 2 : 1, P_NORMAL, info.nameId);
+        return id;
+      }
+      case K.LIQUID:
+        if (this.isSource(info.fluid) || this.isSource(this.states.info(neighbor).fluid))
+          this.scheduleFluidTick(i, info.fluid.type, this.fluidTickDelay(info.fluid.type));
+        return id;
       case K.WIRE:
         return this.wireUpdateShape(i, id, dir);
       case K.REPEATER:
@@ -4075,7 +4408,11 @@ var World = class {
         if (!sameBlock && this.hasNeighborSignal(i)) this.primeTnt(i);
         return;
       case K.HOPPER:
-        if (!sameBlock) this.checkHopper(i, info);
+        if (!sameBlock) {
+          this.hoppers.set(i, { cooldown: -1, tickedGameTime: 0 });
+          this.hopperWake = true;
+          this.checkHopper(i, info);
+        }
         return;
       case K.COPPER_BULB:
         if (!sameBlock) this.checkBulb(i, info);
@@ -4083,12 +4420,31 @@ var World = class {
       case K.POWERED_RAIL:
         if (!sameBlock && !moved) this.neighborChanged(i, info.nameId, i);
         return;
+      case K.FALLING:
+        if (!this.rules.shapeSurvival) {
+          if (sameBlock) return;
+          if (info.falls === FALL.CONCRETE_POWDER && this.touchesWater(i)) {
+            this.setBlock(i, this.concreteOf(info), UPDATE_ALL);
+            return;
+          }
+        }
+        this.scheduleTick(i, 2, P_NORMAL, info.nameId);
+        return;
+      case K.LIQUID:
+        if (this.shouldSpreadLiquid(i, info))
+          this.scheduleFluidTick(i, info.fluid.type, this.fluidTickDelay(info.fluid.type));
+        return;
       default:
         return;
     }
   }
   onRemove(i, old, info, moved) {
     const sameBlock = old.nameId === info.nameId;
+    if (!sameBlock && old.blockEntity) {
+      if (this.inventories.delete(i)) this.hopperWake = true;
+      this.hoppers.delete(i);
+      this.openers.delete(i);
+    }
     switch (old.kind) {
       case K.WIRE:
         if (!moved && !sameBlock) {
@@ -4152,12 +4508,11 @@ var World = class {
         }
         return;
       default:
-        if (!sameBlock) this.inventories.delete(i);
         return;
     }
   }
   hasScheduledTickOf(i, nameId) {
-    return this.scheduled.has(this.tickKey(i, nameId));
+    return this.blockTicks.scheduled.has(this.tickKey(i, nameId));
   }
   // ---------------------------------------------------------------- neighbour changed
   runNeighborChanged(i, src, from) {
@@ -4166,6 +4521,18 @@ var World = class {
     switch (info.kind) {
       case K.AIR:
       case K.SOLID:
+        return;
+      case K.FALLING:
+        if (this.rules.shapeSurvival) return;
+        if (info.falls === FALL.CONCRETE_POWDER && this.touchesWater(i)) {
+          this.setBlock(i, this.concreteOf(info), UPDATE_ALL);
+          return;
+        }
+        this.scheduleTick(i, 2);
+        return;
+      case K.LIQUID:
+        if (this.shouldSpreadLiquid(i, info))
+          this.scheduleFluidTick(i, info.fluid.type, this.fluidTickDelay(info.fluid.type));
         return;
       case K.WIRE:
         if (this.canSurvive(i, info)) this.updateWirePower(i, info.id);
@@ -4335,11 +4702,43 @@ var World = class {
         if (info.power > 0) this.setBlock(i, this.states.withPower(info.id, 0), UPDATE_ALL);
         return;
       case K.DISPENSER:
-        this.event("dispense", i, info.name);
+        this.dispenseFrom(i, info);
         return;
       case K.CRAFTER:
         this.event("craft", i);
         return;
+      case K.FALLING:
+        if (this.isFree(this.info(this.rel(i, DOWN))) && this.valid(this.rel(i, DOWN)))
+          this.spawnFalling(i, info, info.falls === FALL.BRUSHABLE);
+        return;
+      case K.POINTED_DRIPSTONE:
+        if (dripstoneTip(info) === UP) {
+          if (!this.canSurvive(i, info)) this.destroyBlock(i);
+        } else this.spawnFallingStalactite(i);
+        return;
+      case K.LIGHTNING_ROD:
+        if (info.powered) {
+          this.setBlock(i, this.states.withBool(info.id, "powered", false), UPDATE_ALL);
+          this.updateNeighborsAt(this.rel(i, OPPOSITE2[info.facing]), info.nameId);
+        }
+        return;
+      case K.LECTERN:
+        if (info.powered) this.lecternPowered(i, info, false);
+        return;
+      case K.SCULK_SENSOR: {
+        const phase = info.props.sculk_sensor_phase;
+        if (phase === "active") {
+          let s = this.states.with(info.id, "sculk_sensor_phase", "cooldown");
+          s = this.states.withPower(s, 0);
+          this.setBlock(i, s, UPDATE_ALL);
+          this.scheduleTick(i, 10);
+          this.updateNeighborsAt(i, info.nameId);
+          this.updateNeighborsAt(this.rel(i, DOWN), info.nameId);
+        } else if (phase === "cooldown") {
+          this.setBlock(i, this.states.with(info.id, "sculk_sensor_phase", "inactive"), UPDATE_ALL);
+        }
+        return;
+      }
       default:
         return;
     }
@@ -4532,8 +4931,10 @@ var World = class {
   // ---------------------------------------------------------------- other consumers
   checkHopper(i, info) {
     const enabled = !this.hasNeighborSignal(i);
-    if (enabled !== info.enabled)
+    if (enabled !== info.enabled) {
       this.setBlock(i, this.states.withBool(info.id, "enabled", enabled), F.INVISIBLE);
+      this.hopperWake = true;
+    }
   }
   checkBulb(i, info) {
     const powered = this.hasNeighborSignal(i);
@@ -4852,6 +5253,631 @@ var World = class {
     }
     this.markChanged(m.pos);
   }
+  // ---------------------------------------------------------------- falling blocks
+  /** FallingBlock.isFree: what a falling block drops through. */
+  isFree(info) {
+    if (info.kind === K.AIR || info.kind === K.LIQUID) return true;
+    if (info.name === "fire" || info.name === "soul_fire") return true;
+    return this.rules.fallThroughReplaceable && info.replaceable;
+  }
+  /** FallingBlockEntity.fall: the block becomes an entity, leaving its water (or air) behind. */
+  spawnFalling(i, info, cancelDrop) {
+    const [x, y, z3] = this.coords(i);
+    const state = info.waterloggable ? this.states.withBool(info.id, "waterlogged", false) : info.id;
+    this.falling.push({ id: this.nextEntityId++, x, z: z3, y, vy: 0, state, time: 0, cancelDrop });
+    if (this.rules.fallRemovesAtOnce) this.setBlock(i, this.liquidBlock(info.fluid), UPDATE_ALL);
+  }
+  /** PointedDripstoneBlock.spawnFallingStalactite: the stalactite falls down to its tip. */
+  spawnFallingStalactite(i) {
+    let p = i;
+    let s = this.info(p);
+    while (s.kind === K.POINTED_DRIPSTONE && dripstoneTip(s) === DOWN) {
+      this.spawnFalling(p, s, false);
+      if (s.props.thickness === "tip" || s.props.thickness === "tip_merge") break;
+      p = this.rel(p, DOWN);
+      s = this.info(p);
+    }
+  }
+  /** Collision top of a cell, a moving block counting as the block it carries. */
+  collisionTop(i) {
+    const info = this.info(i);
+    if (info.kind !== K.MOVING_PISTON) return info.collision;
+    const m = this.moving.get(i);
+    return m ? this.states.info(m.state).collision : 0;
+  }
+  /** Entity.move, straight down its column: the highest collision top it reaches stops it. */
+  moveFalling(e) {
+    const from = e.y;
+    let to = from + e.vy;
+    let hit = false;
+    if (e.vy < 0) {
+      for (let cy = Math.floor(from); cy >= Math.floor(to) - 1; cy--) {
+        const c = this.index(e.x, cy, e.z);
+        if (!this.valid(c)) continue;
+        const h = this.collisionTop(c);
+        if (h <= 0) continue;
+        const top = cy + h;
+        if (top <= from + 1e-7 && top > to) {
+          to = top;
+          hit = true;
+        }
+      }
+    }
+    e.y = to;
+    return hit;
+  }
+  canBeReplacedByFalling(info) {
+    if (!info.replaceable) return false;
+    return info.name !== "snow" || Number(info.props.layers ?? 1) <= 1;
+  }
+  /** FallingBlockEntity.tick; false once it is gone (landed, broke, or left the area). */
+  tickFalling(e) {
+    const st = this.states.info(e.state);
+    if (st.kind === K.AIR) return false;
+    if (!this.rules.fallRemovesAtOnce && e.time === 0) {
+      e.time++;
+      const start = this.index(e.x, Math.round(e.y), e.z);
+      if (this.info(start).nameId !== st.nameId) return false;
+      this.setBlock(start, this.liquidBlock(this.info(start).fluid), UPDATE_ALL);
+    } else e.time++;
+    const fromY = e.y;
+    e.vy -= 0.04;
+    const onGround = this.moveFalling(e);
+    if (e.y < -1) {
+      this.event("left-area", this.index(e.x, Math.max(-1, Math.floor(fromY)), e.z), st.name);
+      return false;
+    }
+    let cell = this.index(e.x, Math.floor(e.y), e.z);
+    const powder = st.falls === FALL.CONCRETE_POWDER;
+    let inWater = powder && isWaterType(this.info(cell).fluid.type);
+    if (powder && !inWater && e.vy * e.vy > 1) {
+      for (let cy = Math.floor(fromY); cy > Math.floor(e.y); cy--) {
+        const c = this.index(e.x, cy, e.z);
+        if (this.info(c).fluid.type === FL.WATER) {
+          cell = c;
+          inWater = true;
+          break;
+        }
+      }
+    }
+    if (!onGround && !inWater) {
+      if (e.time > 600) {
+        this.event("break", cell, `${st.name} (fell for too long)`);
+        return false;
+      }
+      e.vy *= 0.98;
+      return true;
+    }
+    const here = this.info(cell);
+    e.vy *= -0.5;
+    if (here.kind === K.MOVING_PISTON) {
+      e.vy *= 0.98;
+      return true;
+    }
+    if (e.cancelDrop) {
+      this.event("break", cell, `${st.name} (shattered)`);
+      return false;
+    }
+    const free = this.isFree(this.info(this.rel(cell, DOWN))) && !(powder && inWater);
+    if (this.canBeReplacedByFalling(here) && this.canSurvive(cell, st) && !free) {
+      let state = e.state;
+      if (st.waterloggable && here.fluid.type === FL.WATER)
+        state = this.states.withBool(state, "waterlogged", true);
+      if (this.setBlock(cell, state, UPDATE_ALL)) {
+        this.event("land", cell, st.name);
+        if (powder && this.info(cell).nameId === st.nameId) {
+          if (isWaterType(here.fluid.type) || this.touchesWater(cell))
+            this.setBlock(cell, this.concreteOf(st), UPDATE_ALL);
+        }
+        return false;
+      }
+    }
+    this.event("break", cell, `${st.name} (dropped as an item on ${here.name})`);
+    return false;
+  }
+  /** ConcretePowderBlock.touchesLiquid: water on any side but below (unless in water). */
+  touchesWater(i) {
+    const self = this.info(i);
+    for (const d of ALL) {
+      if (d === DOWN && !isWaterType(self.fluid.type)) continue;
+      const n = this.info(this.rel(i, d));
+      if (isWaterType(n.fluid.type) && (n.faces & 1 << OPPOSITE2[d]) === 0)
+        return true;
+    }
+    return false;
+  }
+  concreteOf(info) {
+    return this.states.idOfName(info.name.replace(/_powder$/, ""));
+  }
+  // ---------------------------------------------------------------- fluids (FlowingFluid)
+  isSource(f) {
+    return f.type === FL.WATER || f.type === FL.LAVA;
+  }
+  /** Water every 5 gt, lava every 30 (the overworld; lava's random slowdown isn't simulated). */
+  fluidTickDelay(type) {
+    return isLavaType(type) ? 30 : 5;
+  }
+  /** FluidState.createLegacyBlock. */
+  liquidBlock(f) {
+    if (f.type === FL.EMPTY) return this.AIR;
+    return this.states.idOfName(isWaterType(f.type) ? "water" : "lava", {
+      level: String(legacyLevel(f))
+    });
+  }
+  fluidOfFamily(lava, amount, falling) {
+    return { type: lava ? FL.FLOWING_LAVA : FL.FLOWING_WATER, amount, falling };
+  }
+  sameFamily(f, lava) {
+    return lava ? isLavaType(f.type) : isWaterType(f.type);
+  }
+  isSourceOf(f, lava) {
+    return f.type === (lava ? FL.LAVA : FL.WATER);
+  }
+  /**
+   * FlowingFluid.canPassThroughWall: neither block's collision shape is a full cube, and
+   * neither covers the face between them.
+   */
+  canPassThroughWall(d, from, to) {
+    if (from.faces === 63 || to.faces === 63) return false;
+    if (from.collision === 0 && to.collision === 0) return true;
+    return (from.faces & 1 << d) === 0 && (to.faces & 1 << OPPOSITE2[d]) === 0;
+  }
+  /** FlowingFluid.canHoldFluid: a fluid can go into this block (washing it away). */
+  canHoldFluid(info, type) {
+    if (info.waterloggable) return type === FL.WATER;
+    if (info.holdsNoFluid) return false;
+    return !(info.solid && info.name !== "cobweb" && info.name !== "bamboo_sapling");
+  }
+  /** Fluid.canBeReplacedWith: water gives way only to lava from above, lava to water. */
+  canBeReplacedWith(n, type, d) {
+    const f = this.info(n).fluid;
+    if (f.type === FL.EMPTY) return true;
+    if (isWaterType(f.type)) return d === DOWN && !isWaterType(type);
+    return this.fluidHeight(n) >= 0.44444445 && isWaterType(type);
+  }
+  /** FluidState.getHeight. */
+  fluidHeight(n) {
+    const f = this.info(n).fluid;
+    if (f.type === FL.EMPTY) return 0;
+    if (this.sameFamily(this.info(this.rel(n, UP)).fluid, isLavaType(f.type))) return 1;
+    return f.amount / 9;
+  }
+  canSpreadTo(i, d, n, type) {
+    if (!this.valid(n)) return false;
+    const to = this.info(n);
+    return this.canBeReplacedWith(n, type, d) && this.canPassThroughWall(d, this.info(i), to) && this.canHoldFluid(to, type);
+  }
+  /** FlowingFluid.canPassThrough, for the spread search. */
+  canPassThrough(i, d, n, type, lava) {
+    if (!this.valid(n)) return false;
+    const to = this.info(n);
+    return !this.isSourceOf(to.fluid, lava) && this.canPassThroughWall(d, this.info(i), to) && this.canHoldFluid(to, type);
+  }
+  /** FlowingFluid.isWaterHole: the fluid can fall down from p. */
+  isWaterHole(p, type, lava) {
+    const b = this.rel(p, DOWN);
+    if (!this.valid(b)) return false;
+    const below = this.info(b);
+    if (!this.canPassThroughWall(DOWN, this.info(p), below)) return false;
+    return this.sameFamily(below.fluid, lava) || this.canHoldFluid(below, type);
+  }
+  /** FlowingFluid.getNewLiquid: what this cell should hold, from its neighbours. */
+  newLiquid(i, lava) {
+    const here = this.info(i);
+    let amount = 0;
+    let sources = 0;
+    for (const d of HORIZONTAL) {
+      const ni = this.info(this.rel(i, d));
+      if (this.sameFamily(ni.fluid, lava) && this.canPassThroughWall(d, here, ni)) {
+        if (this.isSourceOf(ni.fluid, lava)) sources++;
+        amount = Math.max(amount, ni.fluid.amount);
+      }
+    }
+    if (!lava && sources >= 2) {
+      const below = this.info(this.rel(i, DOWN));
+      if (below.solid || below.fluid.type === FL.WATER)
+        return { type: FL.WATER, amount: 8, falling: false };
+    }
+    const above = this.info(this.rel(i, UP));
+    if (this.sameFamily(above.fluid, lava) && this.canPassThroughWall(UP, here, above))
+      return this.fluidOfFamily(lava, 8, true);
+    const k = amount - (lava ? 2 : 1);
+    return k <= 0 ? { type: FL.EMPTY, amount: 0, falling: false } : this.fluidOfFamily(lava, k, false);
+  }
+  /** FlowingFluid.tick. */
+  tickFluid(i) {
+    let f = this.info(i).fluid;
+    if (!this.isSource(f)) {
+      const next = this.newLiquid(i, isLavaType(f.type));
+      if (next.type === FL.EMPTY) {
+        f = next;
+        this.setBlock(i, this.AIR, UPDATE_ALL);
+      } else if (next.type !== f.type || next.amount !== f.amount || next.falling !== f.falling) {
+        f = next;
+        const b = this.liquidBlock(next);
+        this.setBlock(i, b, F.CLIENTS);
+        this.scheduleFluidTick(i, next.type, this.fluidTickDelay(next.type));
+        this.updateNeighborsAt(i, this.states.info(b).nameId);
+      }
+    }
+    this.spreadFluid(i, f);
+  }
+  /** FlowingFluid.spread: down first, then to the sides (toward the nearest drop). */
+  spreadFluid(i, f) {
+    if (f.type === FL.EMPTY) return;
+    const lava = isLavaType(f.type);
+    const b = this.rel(i, DOWN);
+    const down = this.newLiquid(b, lava);
+    if (this.canSpreadTo(i, DOWN, b, down.type)) {
+      this.spreadTo(b, DOWN, down, lava);
+      if (this.sourceNeighbours(i, lava) >= 3) this.spreadToSides(i, f);
+    } else if (this.isSource(f) || !this.isWaterHole(i, down.type, lava)) {
+      this.spreadToSides(i, f);
+    }
+  }
+  sourceNeighbours(i, lava) {
+    let n = 0;
+    for (const d of HORIZONTAL) if (this.isSourceOf(this.info(this.rel(i, d)).fluid, lava)) n++;
+    return n;
+  }
+  spreadToSides(i, f) {
+    const lava = isLavaType(f.type);
+    const amount = f.falling ? 7 : f.amount - (lava ? 2 : 1);
+    if (amount <= 0) return;
+    for (const [d, nf] of this.getSpread(i, lava)) {
+      const n = this.rel(i, d);
+      if (this.canSpreadTo(i, d, n, nf.type)) this.spreadTo(n, d, nf, lava);
+    }
+  }
+  /** FlowingFluid.getSpread: the sides closest to a way down, in EnumMap order (N, S, W, E). */
+  getSpread(i, lava) {
+    let best = 1e3;
+    let out = [];
+    const flowing = lava ? FL.FLOWING_LAVA : FL.FLOWING_WATER;
+    for (const d of HORIZONTAL) {
+      const n = this.rel(i, d);
+      if (!this.valid(n)) continue;
+      const nf = this.newLiquid(n, lava);
+      if (!this.canPassThrough(i, d, n, nf.type, lava)) continue;
+      const j = this.isWaterHole(n, flowing, lava) ? 0 : this.slopeDistance(n, 1, OPPOSITE2[d], lava);
+      if (j < best) out = [];
+      if (j <= best) {
+        out.push([d, nf]);
+        best = j;
+      }
+    }
+    return out.sort((a, b) => a[0] - b[0]);
+  }
+  /** FlowingFluid.getSlopeDistance: steps to the nearest drop (water looks 4 ahead, lava 2). */
+  slopeDistance(p, depth, back, lava) {
+    let best = 1e3;
+    const flowing = lava ? FL.FLOWING_LAVA : FL.FLOWING_WATER;
+    for (const d of HORIZONTAL) {
+      if (d === back) continue;
+      const n = this.rel(p, d);
+      if (!this.canPassThrough(p, d, n, flowing, lava)) continue;
+      if (this.isWaterHole(n, flowing, lava)) return depth;
+      if (depth < (lava ? 2 : 4)) {
+        const j = this.slopeDistance(n, depth + 1, OPPOSITE2[d], lava);
+        if (j < best) best = j;
+      }
+    }
+    return best;
+  }
+  /** FlowingFluid.spreadTo (and LavaFluid's: lava falling on water makes stone). */
+  spreadTo(n, d, nf, lava) {
+    const ni = this.info(n);
+    if (lava && d === DOWN && isWaterType(ni.fluid.type)) {
+      if (ni.kind === K.LIQUID) this.setBlock(n, this.states.idOf("minecraft:stone"), UPDATE_ALL);
+      return;
+    }
+    if (ni.waterloggable) {
+      if (ni.fluid.type !== FL.WATER && nf.type === FL.WATER) {
+        this.setBlock(n, this.states.withBool(ni.id, "waterlogged", true), UPDATE_ALL);
+        this.scheduleFluidTick(n, FL.WATER, this.fluidTickDelay(FL.WATER));
+      }
+      return;
+    }
+    if (ni.kind !== K.AIR && ni.kind !== K.LIQUID && !ni.replaceable)
+      this.event("break", n, `${ni.name} (${lava ? "burnt by lava" : "washed away"})`);
+    this.setBlock(n, this.liquidBlock(nf), UPDATE_ALL);
+  }
+  /** LiquidBlock.shouldSpreadLiquid: lava touching water turns to obsidian or cobblestone. */
+  shouldSpreadLiquid(i, info) {
+    if (!isLavaType(info.fluid.type)) return true;
+    const soulSoil = this.info(this.rel(i, DOWN)).name === "soul_soil";
+    for (const d of [UP, NORTH, SOUTH, WEST, EAST]) {
+      const n = this.info(this.rel(i, d));
+      if (isWaterType(n.fluid.type)) {
+        const source = this.isSource(info.fluid);
+        if (!source && !this.rules.shapeSurvival && Number(info.props.level ?? 0) > 4) return true;
+        const block = source ? "minecraft:obsidian" : "minecraft:cobblestone";
+        this.setBlock(i, this.states.idOf(block), UPDATE_ALL);
+        return false;
+      }
+      if (soulSoil && n.name === "blue_ice") {
+        this.setBlock(i, this.states.idOfName("basalt", { axis: "y" }), UPDATE_ALL);
+        return false;
+      }
+    }
+    return true;
+  }
+  // ---------------------------------------------------------------- containers and hoppers
+  /** The inventory at a cell, as a Container (a double chest is both halves, right one first). */
+  containerAt(i) {
+    if (!this.valid(i)) return null;
+    const info = this.info(i);
+    const size = containerSlots(info.name);
+    if (size === 0 || info.name === "brewing_stand") return null;
+    const cells = [i];
+    if ((info.name === "chest" || info.name === "trapped_chest") && info.props.type !== "single") {
+      const d = info.props.type === "left" ? clockwise(info.facing) : counterClockwise(info.facing);
+      const other = this.rel(i, d);
+      const oi = this.info(other);
+      const want = info.props.type === "left" ? "right" : "left";
+      if (oi.nameId === info.nameId && oi.props.type === want && oi.facing === info.facing) {
+        if (info.props.type === "right") cells.push(other);
+        else cells.unshift(other);
+      }
+    }
+    return { cells, size, name: info.name };
+  }
+  slots(i, size) {
+    let s = this.inventories.get(i);
+    if (!s) {
+      s = Array.from({ length: size }, () => null);
+      this.inventories.set(i, s);
+    }
+    return s;
+  }
+  getItem(c, k) {
+    const inv = this.inventories.get(c.cells[Math.floor(k / c.size)]);
+    return inv?.[k % c.size] ?? null;
+  }
+  setItem(c, k, stack) {
+    this.slots(c.cells[Math.floor(k / c.size)], c.size)[k % c.size] = stack;
+  }
+  isEmptyContainer(c) {
+    for (let k = 0; k < c.size * c.cells.length; k++) if (this.getItem(c, k)) return false;
+    return true;
+  }
+  /** WorldlyContainer.getSlotsForFace (furnaces), every slot for the rest. */
+  slotsFor(c, side) {
+    if (/(^|_)(furnace|smoker)$/.test(c.name)) {
+      if (side === null) return [0, 1, 2];
+      return side === DOWN ? [2, 1] : side === UP ? [0] : [1];
+    }
+    return Array.from({ length: c.size * c.cells.length }, (_, k) => k);
+  }
+  canPlaceItem(c, k, stack, side) {
+    const id = stack.id.replace(/^minecraft:/, "");
+    if (c.name.endsWith("shulker_box") && /shulker_box$/.test(id)) return false;
+    if (/(^|_)(furnace|smoker)$/.test(c.name)) {
+      if (k === 2) return false;
+      if (k === 1) {
+        const fuel = this.getItem(c, 1);
+        return FUEL.test(id) || id === "bucket" && fuel?.id !== "minecraft:bucket";
+      }
+    }
+    void side;
+    return true;
+  }
+  canTakeItem(c, k, stack, side) {
+    if (/(^|_)(furnace|smoker)$/.test(c.name) && side === DOWN && k === 1)
+      return stack.id === "minecraft:water_bucket" || stack.id === "minecraft:bucket";
+    return true;
+  }
+  /** The container changed: comparators reading it update (BlockEntity.setChanged). */
+  containerChanged(c) {
+    this.hopperWake = true;
+    for (const cell of c.cells) this.updateNeighbourForOutputSignal(cell, this.info(cell).nameId);
+  }
+  /** HopperBlockEntity.addItem: put a stack in, slot by slot; returns what didn't fit. */
+  addItem(source, dest, stack, side) {
+    for (const k of this.slotsFor(dest, side)) {
+      if (stack.count <= 0) break;
+      this.tryMoveInItem(source, dest, stack, k, side);
+    }
+    return stack;
+  }
+  tryMoveInItem(source, dest, stack, k, side) {
+    if (!this.canPlaceItem(dest, k, stack, side)) return;
+    const cur = this.getItem(dest, k);
+    const wasEmpty = this.isEmptyContainer(dest);
+    let moved = false;
+    if (!cur) {
+      this.setItem(dest, k, { ...stack });
+      stack.count = 0;
+      moved = true;
+    } else if (sameItem(cur, stack) && cur.count < maxStackSize(cur.id)) {
+      const n = Math.min(stack.count, maxStackSize(cur.id) - cur.count);
+      stack.count -= n;
+      cur.count += n;
+      moved = n > 0;
+    }
+    if (!moved) return;
+    const dh = dest.name === "hopper" ? this.hoppers.get(dest.cells[0]) : void 0;
+    if (wasEmpty && dh && dh.cooldown <= 8) {
+      const sh = source !== null ? this.hoppers.get(source) : void 0;
+      dh.cooldown = 8 - (sh && dh.tickedGameTime >= sh.tickedGameTime ? 1 : 0);
+    }
+    this.containerChanged(dest);
+  }
+  isFull(c, side) {
+    for (const k of this.slotsFor(c, side)) {
+      const s = this.getItem(c, k);
+      if (!s || s.count < maxStackSize(s.id)) return false;
+    }
+    return true;
+  }
+  /** HopperBlockEntity.pushItemsTick, for every hopper. True when one moved an item. */
+  tickHoppers() {
+    let moved = false;
+    for (const [i, h] of this.hoppers) {
+      const info = this.info(i);
+      if (info.kind !== K.HOPPER) {
+        this.hoppers.delete(i);
+        continue;
+      }
+      h.cooldown--;
+      h.tickedGameTime = this.time;
+      if (h.cooldown > 0) continue;
+      h.cooldown = 0;
+      if (!info.enabled) continue;
+      const self = { cells: [i], size: 5, name: "hopper" };
+      let ok = false;
+      if (!this.isEmptyContainer(self)) ok = this.ejectItems(i, info, self);
+      if (!this.isFull(self, null)) ok = this.suckInItems(i, self) || ok;
+      if (ok) {
+        h.cooldown = 8;
+        this.containerChanged(self);
+        moved = true;
+      }
+    }
+    return moved;
+  }
+  ejectItems(i, info, self) {
+    const target = this.containerAt(this.rel(i, info.facing));
+    if (!target) return false;
+    const side = OPPOSITE2[info.facing];
+    if (this.isFull(target, side)) return false;
+    for (let k = 0; k < self.size; k++) {
+      const st = this.getItem(self, k);
+      if (!st) continue;
+      const rest = this.addItem(i, target, { ...st, count: 1 }, side);
+      if (rest.count === 0) {
+        st.count--;
+        if (st.count <= 0) this.setItem(self, k, null);
+        return true;
+      }
+    }
+    return false;
+  }
+  /** HopperBlockEntity.suckInItems: one item from the container above (item entities aren't simulated). */
+  suckInItems(i, self) {
+    const src = this.containerAt(this.rel(i, UP));
+    if (!src) return false;
+    for (const k of this.slotsFor(src, DOWN)) {
+      const st = this.getItem(src, k);
+      if (!st || !this.canTakeItem(src, k, st, DOWN)) continue;
+      const srcCell = src.name === "hopper" ? src.cells[0] : null;
+      const rest = this.addItem(srcCell, self, { ...st, count: 1 }, null);
+      if (rest.count === 0) {
+        st.count--;
+        if (st.count <= 0) this.setItem(src, k, null);
+        this.containerChanged(src);
+        return true;
+      }
+    }
+    return false;
+  }
+  /** DispenserBlock.dispenseFrom / DropperBlock.dispenseFrom. */
+  dispenseFrom(i, info) {
+    const self = this.containerAt(i) ?? { cells: [i], size: 9, name: info.name };
+    let k = -1;
+    for (let s = 0; s < 9; s++)
+      if (this.getItem(self, s)) {
+        k = s;
+        break;
+      }
+    if (k < 0) {
+      this.event("dispense", i, `${info.name} is empty`);
+      return;
+    }
+    const st = this.getItem(self, k);
+    const front = this.rel(i, info.facing);
+    const id = st.id.replace(/^minecraft:/, "");
+    if (info.name === "dropper") {
+      const target = this.containerAt(front);
+      if (target) {
+        const rest = this.addItem(i, target, { ...st, count: 1 }, OPPOSITE2[info.facing]);
+        if (rest.count > 0) return;
+      } else this.event("dispense", i, `dropper drops ${id}`);
+      this.shrink(self, k, st);
+      return;
+    }
+    if (id === "water_bucket" || id === "lava_bucket") {
+      if (this.emptyBucket(front, id === "water_bucket")) {
+        this.consumeWithRemainder(self, k, st, "minecraft:bucket");
+        return;
+      }
+    } else if (id === "bucket") {
+      const filled = this.pickupFluid(front);
+      if (filled) {
+        this.consumeWithRemainder(self, k, st, filled);
+        return;
+      }
+    } else if (id === "tnt") {
+      this.event("tnt", front, "primed TNT dispensed (explosions are not simulated)");
+      this.shrink(self, k, st);
+      return;
+    } else if (id === "flint_and_steel") {
+      if (this.info(front).kind === K.TNT) this.primeTnt(front);
+      else this.event("dispense", i, "flint and steel (fire is not simulated)");
+      this.containerChanged(self);
+      return;
+    }
+    this.event("dispense", i, `${info.name} shoots ${id}`);
+    this.shrink(self, k, st);
+  }
+  shrink(c, k, st) {
+    st.count--;
+    if (st.count <= 0) this.setItem(c, k, null);
+    this.containerChanged(c);
+  }
+  /** DefaultDispenseItemBehavior.consumeWithRemainder: the bucket comes back. */
+  consumeWithRemainder(c, k, st, remainder) {
+    st.count--;
+    if (st.count <= 0) this.setItem(c, k, { id: remainder, count: 1 });
+    else {
+      const rest = this.addItem(null, c, { id: remainder, count: 1 }, null);
+      if (rest.count > 0) this.event("dispense", c.cells[0], `drops ${remainder}`);
+    }
+    this.containerChanged(c);
+  }
+  /** BucketItem.emptyContents. */
+  emptyBucket(n, water) {
+    if (!this.valid(n)) return false;
+    const info = this.info(n);
+    const fits = info.replaceable || !info.solid;
+    if (info.waterloggable && water) {
+      if (info.fluid.type !== FL.WATER) {
+        this.setBlock(n, this.states.withBool(info.id, "waterlogged", true), UPDATE_ALL);
+        this.scheduleFluidTick(n, FL.WATER, this.fluidTickDelay(FL.WATER));
+      }
+      return true;
+    }
+    if (info.kind !== K.AIR && !fits) return false;
+    if (fits && info.kind !== K.LIQUID && info.kind !== K.AIR) this.destroyBlock(n);
+    const src = water ? { type: FL.WATER, amount: 8, falling: false } : { type: FL.LAVA, amount: 8, falling: false };
+    this.setBlock(n, this.liquidBlock(src), UPDATE_ALL | 8);
+    return true;
+  }
+  /** BucketPickup.pickupBlock: a source block (or a waterlogged block's water) into a bucket. */
+  pickupFluid(n) {
+    if (!this.valid(n)) return null;
+    const info = this.info(n);
+    if (info.kind === K.LIQUID && this.isSource(info.fluid)) {
+      this.setBlock(n, this.AIR, UPDATE_ALL | 8);
+      return info.fluid.type === FL.WATER ? "minecraft:water_bucket" : "minecraft:lava_bucket";
+    }
+    if (info.waterloggable && info.fluid.type === FL.WATER) {
+      this.setBlock(n, this.states.withBool(info.id, "waterlogged", false), UPDATE_ALL);
+      return "minecraft:water_bucket";
+    }
+    return null;
+  }
+  /** Items in a container block, by slot (null when it holds none). */
+  inventoryAt(i) {
+    const inv = this.inventories.get(i);
+    return inv && inv.some((s) => s) ? inv.map((s) => s ? { ...s } : null) : null;
+  }
+  // ---------------------------------------------------------------- lecterns
+  /** LecternBlock.changePowered: powers the block below it. */
+  lecternPowered(i, info, on) {
+    this.setBlock(i, this.states.withBool(info.id, "powered", on), UPDATE_ALL);
+    this.updateNeighborsAt(this.rel(i, DOWN), info.nameId);
+  }
   // ---------------------------------------------------------------- player actions
   /** Right-click: flip a lever, press a button, cycle a repeater, toggle a comparator or door. */
   use(i) {
@@ -4890,12 +5916,111 @@ var World = class {
         if (/^iron_/.test(info.name)) return false;
         this.setBlock(i, this.states.withBool(info.id, "open", !info.open), F.CLIENTS | 8);
         return true;
-      case K.NOTE_BLOCK:
-        this.blockEvent(i, 0, 0);
+      case K.NOTE_BLOCK: {
+        const note = info.props.note;
+        const flags = this.rules.noteBlockState ? UPDATE_ALL : F.CLIENTS | F.KNOWN_SHAPE;
+        if (note !== void 0)
+          this.setBlock(
+            i,
+            this.states.with(info.id, "note", String((Number(note) + 1) % 25)),
+            flags
+          );
+        if (this.info(this.rel(i, UP)).kind === K.AIR) this.blockEvent(i, 0, 0);
+        return true;
+      }
+      case K.DAYLIGHT: {
+        const s = this.states.withBool(info.id, "inverted", info.props.inverted !== "true");
+        this.setBlock(i, s, F.CLIENTS);
+        this.setPower(i, 15 - Math.max(0, info.power));
+        return true;
+      }
+      case K.LECTERN:
+        if (info.props.has_book !== "true" || info.powered) return false;
+        this.lecternPowered(i, info, true);
+        this.scheduleTick(i, 2);
+        return true;
+      case K.TRAPPED_CHEST:
+        this.setChestOpeners(i, this.chestOpenersAt(i) > 0 ? 0 : 1);
         return true;
       default:
         return false;
     }
+  }
+  /**
+   * What a player does to set a block off, for the viewer: right-click (see use), step on a
+   * pressure plate or off it, shoot a target (its power from where the arrow hits: `hit` is the
+   * point on the block, 0–1, and the face), ride a minecart onto a detector rail, strike a
+   * lightning rod, make a sculk sensor hear something, ring a bell, light TNT.
+   */
+  activate(i, hit) {
+    const info = this.info(i);
+    switch (info.kind) {
+      case K.PLATE:
+      case K.WEIGHTED_PLATE:
+        this.setPlateEntities(i, this.plateEntitiesAt(i) > 0 ? 0 : 1);
+        if (this.plateEntitiesAt(i) > 0 && this.plateSignal(info) === 0)
+          this.checkPlate(i, info, 0);
+        return true;
+      case K.TARGET: {
+        let power = 15;
+        if (hit) {
+          const [x, y, z3] = hit.point.map((v) => Math.abs(v - Math.floor(v) - 0.5));
+          const axis2 = axisOf(hit.face);
+          const d = axis2 === 1 ? Math.max(x, z3) : axis2 === 2 ? Math.max(x, y) : Math.max(y, z3);
+          power = Math.max(1, Math.ceil(15 * Math.min(1, Math.max(0, (0.5 - d) / 0.5))));
+        }
+        this.hitTarget(i, power, 20);
+        return true;
+      }
+      case K.RAIL:
+        if (info.name !== "detector_rail") return false;
+        this.setBlock(i, this.states.withBool(info.id, "powered", !info.powered), UPDATE_ALL);
+        this.updateNeighborsAt(i, info.nameId);
+        this.updateNeighborsAt(this.rel(i, DOWN), info.nameId);
+        this.updateNeighbourForOutputSignal(i, info.nameId);
+        return true;
+      case K.LIGHTNING_ROD:
+        if (info.powered) return false;
+        this.setBlock(i, this.states.withBool(info.id, "powered", true), UPDATE_ALL);
+        this.updateNeighborsAt(this.rel(i, OPPOSITE2[info.facing]), info.nameId);
+        this.scheduleTick(i, 8);
+        return true;
+      case K.SCULK_SENSOR: {
+        if (info.props.sculk_sensor_phase !== "inactive" && info.props.sculk_sensor_phase !== void 0)
+          return false;
+        let s = this.states.withPower(info.id, 15);
+        s = this.states.with(s, "sculk_sensor_phase", "active");
+        this.setBlock(i, s, UPDATE_ALL);
+        this.scheduleTick(i, info.name === "calibrated_sculk_sensor" ? 10 : 30);
+        this.updateNeighborsAt(i, info.nameId);
+        this.updateNeighborsAt(this.rel(i, DOWN), info.nameId);
+        return true;
+      }
+      case K.BELL:
+        this.event("bell", i);
+        return true;
+      case K.TNT:
+        this.primeTnt(i);
+        return true;
+      default:
+        return this.use(i);
+    }
+  }
+  /** Players looking into a chest, both halves of a double one: a trapped chest powers by it. */
+  setChestOpeners(i, n) {
+    const count = Math.max(0, Math.floor(n));
+    for (const cell of this.containerAt(i)?.cells ?? [i]) {
+      if ((this.openers.get(cell) ?? 0) === count) continue;
+      this.openers.set(cell, count);
+      const ci = this.info(cell);
+      if (ci.kind !== K.TRAPPED_CHEST) continue;
+      this.updateNeighborsAt(cell, ci.nameId);
+      this.updateNeighborsAt(this.rel(cell, DOWN), ci.nameId);
+    }
+  }
+  /** Players looking into a chest. */
+  chestOpenersAt(i) {
+    return this.openers.get(i) ?? 0;
   }
   /** Entities standing on a pressure plate (weighted plates count them). */
   setPlateEntities(i, count) {
@@ -4940,7 +6065,9 @@ var World = class {
     const comps = [];
     for (let i = 0; i < this.cells.length; i++) {
       const k = this.info(i).kind;
-      if (k !== K.AIR && k !== K.SOLID) comps.push(i);
+      if (k === K.AIR || k === K.SOLID || k === K.FALLING || k === K.LIQUID) continue;
+      if (k === K.POINTED_DRIPSTONE) continue;
+      comps.push(i);
     }
     for (const i of comps) {
       const id = this.cells[i];
@@ -4980,16 +6107,21 @@ var World = class {
       cells: this.cells.slice(),
       time: this.time,
       seq: this.seq,
-      heap: this.heap.map((t) => ({ ...t })),
+      heap: this.blockTicks.heap.map((t) => ({ ...t })),
+      fluidHeap: this.fluidTicks.heap.map((t) => ({ ...t })),
       events: this.eventQueue.slice(this.eventHead).map((e) => ({ ...e })),
       moving: [...this.moving.entries()].map(([k, m]) => [k, moving.get(m)]),
       tickers: this.tickers.map((m) => moving.get(m)),
       pending: this.pendingTickers.map((m) => moving.get(m)),
       comparatorOut: new Map(this.comparatorOut),
-      inventories: new Map(this.inventories),
+      inventories: copyInventories(this.inventories),
       plateEntities: new Map(this.plateEntities),
       toggles: this.toggles.map((t) => ({ ...t })),
-      eventLog: this.events.length
+      eventLog: this.events.length,
+      falling: this.falling.map((e) => ({ ...e })),
+      hoppers: [...this.hoppers].map(([k, h]) => [k, { ...h }]),
+      hopperWake: this.hopperWake,
+      openers: new Map(this.openers)
     };
   }
   restore(s) {
@@ -5004,9 +6136,8 @@ var World = class {
       if (!c) copies.set(m, c = { ...m });
       return c;
     };
-    this.heap = s.heap.map((t) => ({ ...t }));
-    this.scheduled.clear();
-    for (const t of this.heap) this.scheduled.set(this.tickKey(t.pos, t.type), t);
+    this.blockTicks.load(s.heap, (t) => this.tickKey(t.pos, t.type));
+    this.fluidTicks.load(s.fluidHeap, (t) => this.tickKey(t.pos, t.type));
     this.eventQueue = s.events.map((e) => ({ ...e }));
     this.eventHead = 0;
     this.eventKeys.clear();
@@ -5022,11 +6153,17 @@ var World = class {
     this.comparatorOut.clear();
     for (const [k, v] of s.comparatorOut) this.comparatorOut.set(k, v);
     this.inventories.clear();
-    for (const [k, v] of s.inventories) this.inventories.set(k, v);
+    for (const [k, v] of copyInventories(s.inventories)) this.inventories.set(k, v);
     this.plateEntities.clear();
     for (const [k, v] of s.plateEntities) this.plateEntities.set(k, v);
     this.toggles = s.toggles.map((t) => ({ ...t }));
     this.events.length = Math.min(this.events.length, s.eventLog);
+    this.falling = s.falling.map((e) => ({ ...e }));
+    this.hoppers.clear();
+    for (const [k, h] of s.hoppers) this.hoppers.set(k, { ...h });
+    this.hopperWake = s.hopperWake;
+    this.openers.clear();
+    for (const [k, v] of s.openers) this.openers.set(k, v);
   }
   /**
    * The state a player placing this block would get from its neighbours: dust connections (a
@@ -5045,6 +6182,19 @@ var World = class {
     return this.comparatorOut.get(i) ?? 0;
   }
 };
+function copyInventories(m) {
+  const out = /* @__PURE__ */ new Map();
+  for (const [k, v] of m)
+    out.set(
+      k,
+      v.map((s) => s ? { ...s } : null)
+    );
+  return out;
+}
+var FUEL = /^(coal|charcoal|coal_block|lava_bucket|blaze_rod|stick|bamboo|dried_kelp_block|scaffolding|bowl|crafting_table|bookshelf|chest|barrel|composter|ladder|jukebox|note_block)$|^(oak|spruce|birch|jungle|acacia|dark_oak|mangrove|cherry|pale_oak|bamboo)_(log|wood|planks|slab|stairs|fence|fence_gate|door|trapdoor|button|pressure_plate|sign|boat|sapling)$|^stripped_.*_(log|wood)$|_wool$|_carpet$/;
+function dripstoneTip(info) {
+  return info.props.vertical_direction === "up" ? UP : DOWN;
+}
 function connectedDir(info) {
   return info.face === "floor" ? UP : info.face === "ceiling" ? DOWN : info.facing;
 }
@@ -5352,9 +6502,11 @@ var INPUT_KINDS = /* @__PURE__ */ new Set([
   K.WEIGHTED_PLATE,
   K.TARGET,
   K.DAYLIGHT,
-  K.SCULK_SENSOR
+  K.SCULK_SENSOR,
+  K.TRAPPED_CHEST,
+  K.LIGHTNING_ROD
 ]);
-var NOTABLE = /* @__PURE__ */ new Set(["burnout", "break", "suppressed", "left-area", "tnt"]);
+var NOTABLE = /* @__PURE__ */ new Set(["burnout", "break", "suppressed", "left-area", "tnt", "land"]);
 var Circuit = class {
   constructor(world, spec, origin) {
     this.world = world;
@@ -5385,9 +6537,9 @@ var Circuit = class {
             continue;
           }
           const info = world.info(i);
-          if (kind === "input" && !io.as && !INPUT_KINDS.has(info.kind)) {
+          if (kind === "input" && !io.as && !INPUT_KINDS.has(info.kind) && info.name !== "detector_rail") {
             this.errors.push(
-              `input ${name} at [${p.join(", ")}] is ${info.name}: an input must be a lever, button, pressure plate, target or daylight detector \u2014 or give "as" (e.g. "redstone_block") to place a block there for 1.`
+              `input ${name} at [${p.join(", ")}] is ${info.name}: an input must be a lever, button, pressure plate, target, daylight detector, sculk sensor, trapped chest, lightning rod or detector rail \u2014 or give "as" (e.g. "redstone_block") to place a block there for 1.`
             );
           }
           bits.push({ i, original: info.state });
@@ -5442,6 +6594,9 @@ var Circuit = class {
       case K.HOPPER:
         p = info.enabled ? 0 : 15;
         break;
+      case K.TRAPPED_CHEST:
+        p = Math.min(15, w.chestOpenersAt(i));
+        break;
       case K.REPEATER:
       case K.OBSERVER:
       case K.LEVER:
@@ -5450,10 +6605,15 @@ var Circuit = class {
       case K.POWERED_RAIL:
       case K.BELL:
       case K.PLATE:
+      case K.LIGHTNING_ROD:
+      case K.LECTERN:
         p = info.powered ? 15 : 0;
         break;
+      case K.RAIL:
+        p = info.name === "detector_rail" && info.powered ? 15 : w.receivedPower(i);
+        break;
       default:
-        p = w.receivedPower(i);
+        p = w.analogSignal(i, info) ?? w.receivedPower(i);
     }
     return mode === "power" ? p : p > 0 ? 1 : 0;
   }
@@ -5480,13 +6640,13 @@ var Circuit = class {
     const w = this.world;
     const single = io.bits.length === 1;
     io.bits.forEach((b, k) => {
-      const bit = Math.floor(value / 2 ** k) % 2 === 1;
+      const bit2 = Math.floor(value / 2 ** k) % 2 === 1;
       const info = w.info(b.i);
       if (io.spec.as) {
-        const want = bit ? io.spec.as : b.original;
+        const want = bit2 ? io.spec.as : b.original;
         const cur = info.state.replace(/^minecraft:/, "");
         if (cur !== want.replace(/^minecraft:/, "") && info.state !== want) {
-          if (bit) w.place(b.i, want.includes(":") ? want : `minecraft:${want}`);
+          if (bit2) w.place(b.i, want.includes(":") ? want : `minecraft:${want}`);
           else if (b.original === "minecraft:air") w.breakBlock(b.i);
           else w.place(b.i, b.original);
         }
@@ -5494,22 +6654,31 @@ var Circuit = class {
       }
       switch (info.kind) {
         case K.LEVER:
-          if (info.powered !== bit) w.use(b.i);
+          if (info.powered !== bit2) w.use(b.i);
           return;
         case K.BUTTON:
-          if (bit) w.use(b.i);
+          if (bit2) w.use(b.i);
           return;
         case K.PLATE:
         case K.WEIGHTED_PLATE:
-          w.setPlateEntities(b.i, single ? value : bit ? 1 : 0);
+          w.setPlateEntities(b.i, single ? value : bit2 ? 1 : 0);
           return;
         case K.TARGET:
-          if (bit || single && value > 0)
+          if (bit2 || single && value > 0)
             w.hitTarget(b.i, single ? Math.min(15, value) || 15 : 15);
           return;
         case K.DAYLIGHT:
         case K.SCULK_SENSOR:
-          w.setPower(b.i, single ? Math.min(15, value) : bit ? 15 : 0);
+          w.setPower(b.i, single ? Math.min(15, value) : bit2 ? 15 : 0);
+          return;
+        case K.TRAPPED_CHEST:
+          w.setChestOpeners(b.i, single ? value : bit2 ? 1 : 0);
+          return;
+        case K.LIGHTNING_ROD:
+          if (bit2) w.activate(b.i);
+          return;
+        case K.RAIL:
+          if (info.name === "detector_rail" && info.powered !== bit2) w.activate(b.i);
           return;
         default:
           throw new Error(`${name}: ${info.name} at bit ${k} can't be driven.`);
@@ -5705,7 +6874,7 @@ function* runCase(c, test, vars, out) {
         if (out.notes.length < 40)
           out.notes.push(`t=${w.time - t0}: ${names.map((n) => `${n}=${c.read(n)}`).join(", ")}`);
       } else if ("use" in step) {
-        w.use(c.local(step.use));
+        w.activate(c.local(step.use));
       } else if ("place" in step) {
         const b = step.place.block;
         w.place(c.local(step.place.at), b.includes(":") ? b : `minecraft:${b}`);
@@ -5919,16 +7088,48 @@ function runBuildCircuit(volume, circuit, catalog) {
   const { sizeX, sizeY, sizeZ } = volume;
   let i = 0;
   const comparators = /* @__PURE__ */ new Map();
+  const containers = /* @__PURE__ */ new Map();
+  const replaced = /* @__PURE__ */ new Set();
   for (let y = 0; y < sizeY; y++)
     for (let z3 = 0; z3 < sizeZ; z3++)
       for (let x = 0; x < sizeX; x++, i++) {
         const w = world.index(x, y, z3);
         const state = world.displayState(w);
-        if (state !== volume.palette[volume.data[i]])
+        const before = volume.palette[volume.data[i]];
+        const key = `${x},${y},${z3}`;
+        if (state !== before) {
           volume.data[i] = volume.idFor(state);
-        if (world.info(w).kind === K.COMPARATOR)
-          comparators.set(`${x},${y},${z3}`, world.comparatorOutputAt(w));
+          if (state.replace(/\[.*$/, "") !== before.replace(/\[.*$/, "")) replaced.add(key);
+        }
+        const info = world.info(w);
+        if (info.kind === K.COMPARATOR) comparators.set(key, world.comparatorOutputAt(w));
+        if (info.blockEntity) containers.set(key, w);
       }
+  for (let k = volume.blockEntities.length - 1; k >= 0; k--) {
+    const be = volume.blockEntities[k];
+    const key = be.pos.join(",");
+    if (replaced.has(key)) {
+      volume.blockEntities.splice(k, 1);
+      continue;
+    }
+    const w = containers.get(key);
+    if (w === void 0) continue;
+    containers.delete(key);
+    const inv = world.inventoryAt(w);
+    if (!inv && !Array.isArray(be.data.Items)) continue;
+    const { Items, ...rest } = be.data;
+    be.data = inv ? { ...rest, Items: itemsToNbt(inv, Items) } : rest;
+  }
+  for (const [key, w] of containers) {
+    const inv = world.inventoryAt(w);
+    if (!inv) continue;
+    const pos = key.split(",").map(Number);
+    volume.blockEntities.push({
+      id: `minecraft:${world.info(w).name}`,
+      pos,
+      data: { Items: itemsToNbt(inv) }
+    });
+  }
   for (const be of volume.blockEntities) {
     const key = be.pos.join(",");
     const out = comparators.get(key);
@@ -9518,9 +10719,9 @@ function writeLitematic(input) {
   const words = new Uint32Array(longs * 2);
   for (let i = 0; i < total; i++) {
     const v = volume.data[i];
-    const bit = i * bits;
-    const w = bit >>> 5;
-    const off = bit & 31;
+    const bit2 = i * bits;
+    const w = bit2 >>> 5;
+    const off = bit2 & 31;
     words[w] = (words[w] | v << off) >>> 0;
     if (off + bits > 32) words[w + 1] = (words[w + 1] | v >>> 32 - off) >>> 0;
   }
@@ -10119,9 +11320,9 @@ function readLitematic(root, name) {
     for (let y = 0; y < ry; y++)
       for (let z3 = 0; z3 < rz; z3++)
         for (let x = 0; x < rx; x++, i++) {
-          const bit = i * r.bits;
-          const w = bit >>> 5;
-          const off = bit & 31;
+          const bit2 = i * r.bits;
+          const w = bit2 >>> 5;
+          const off = bit2 & 31;
           let v = (r.states[w] ?? 0) >>> off;
           if (off + r.bits > 32) v |= (r.states[w + 1] ?? 0) << 32 - off;
           const pi = v & mask2;
@@ -13445,7 +14646,7 @@ New build:
 
 Changes: when the user asks to change something, call get_feedback first \u2014 they can pin notes on blocks in the viewer, and each note says which operation placed that block. Edit with edit_build by operation id, then resolve_feedback with a one-line reply.
 
-Redstone: VibeSchem simulates Minecraft Java redstone faithfully for the build's version (game ticks, update order, quasi-connectivity, pistons, torch burnout). For any circuit, read read_guide("redstone"), declare named inputs/outputs and tests in the spec's "circuit" section \u2014 they run on every build like unit tests, and the summary reports them \u2014 and use simulate to try scenarios, measure delays and catch location-dependent designs. Never hand over a circuit whose tests fail.
+Redstone: VibeSchem simulates Minecraft Java redstone faithfully for the build's version (game ticks, update order, quasi-connectivity, pistons, torch burnout, falling sand and gravel, flowing water and lava, hoppers moving items). For any circuit, read read_guide("redstone"), declare named inputs/outputs and tests in the spec's "circuit" section \u2014 they run on every build like unit tests, and the summary reports them \u2014 and use simulate to try scenarios, measure delays and catch location-dependent designs. Never hand over a circuit whose tests fail.
 
 Building on the player's world: the player can give you a world (or a schematic) and a point to build at. worlds lists their saved worlds; import_site reads an area (centre + radius, default where they stand) into a new project and returns a terrain report: ground heights, water, trees, flat spots, existing builds. Read read_guide("terrain"), then build on it with edit_build (the spec already has "site"): flatten plots with blending, foundations down to the ground, paths that follow it, ground:true to stand trees and components on it, ground()/surface() in scripts. Coordinates are relative to the chosen point. Exports go back to the same world coordinates: a copy of the world with the build in it (export_build format "world"), a vanilla data pack with /fill commands and undo (no mods), or schematics for //paste -o.
 
@@ -14039,14 +15240,14 @@ Can also save directly to: ${targets.join(", ")}` : "")
     {
       title: "Test the redstone",
       annotations: { readOnlyHint: true, openWorldHint: false },
-      description: "Run the current VibeSchem build's redstone in a simulator that follows Minecraft Java's own mechanics for the build's version: game ticks (20/s; repeater delay 1 = 2 ticks), neighbour and shape updates in the game's order, scheduled-tick priorities, quasi-connectivity, pistons with slime/honey and 0-tick spitting, observers, comparators reading containers, torch burnout. Runs the stored tests (spec.circuit.tests) or the `tests` given here, and reports pass/fail per test with failing cases, latencies (\"expect \u2026 within\"), measured clock periods, traces of signal changes, and problems such as torches burning out or blocks popping off. `inputs`/`outputs` add or override named I/O for this run only. `locations` (2\u201316) re-runs at other world positions, where dust and pistons update in another order, to catch location-dependent designs. `show` plays one test live in the user's viewer. Test format and step reference: read_guide(\"redstone\").",
+      description: "Run the current VibeSchem build's redstone in a simulator that follows Minecraft Java's own mechanics for the build's version: game ticks (20/s; repeater delay 1 = 2 ticks), neighbour and shape updates in the game's order, scheduled-tick priorities, quasi-connectivity, pistons with slime/honey and 0-tick spitting, observers, comparators reading containers, torch burnout, falling blocks (sand, gravel, concrete powder, anvils), water and lava flow (and what they wash away or turn to cobblestone), hoppers, droppers and dispensers moving items and buckets. Runs the stored tests (spec.circuit.tests) or the `tests` given here, and reports pass/fail per test with failing cases, latencies (\"expect \u2026 within\"), measured clock periods, traces of signal changes, and events such as torches burning out, blocks popping off or falling blocks landing. `inputs`/`outputs` add or override named I/O for this run only. `locations` (2\u201316) re-runs at other world positions, where dust and pistons update in another order, to catch location-dependent designs. `show` plays one test live in the user's viewer. Test format and step reference: read_guide(\"redstone\").",
       inputSchema: {
         tests: z2.array(z2.record(z2.string(), z2.unknown())).optional().describe(
           "Tests to run instead of the stored ones: {name, steps:[{set:{A:1}}, {wait:4}, {expect:{L:1}, within:10}, \u2026], forAll?:{A:[0,15]}, samples?, trace?:[names]}."
         ),
         only: z2.array(z2.string()).optional().describe("Run only these stored tests (by name)."),
         inputs: z2.record(z2.string(), z2.record(z2.string(), z2.unknown())).optional().describe(
-          'Extra named inputs for this run: {"A": {"at": [x,y,z]}} (lever, button, plate\u2026; "as" to place a block).'
+          'Extra named inputs for this run: {"A": {"at": [x,y,z]}} (lever, button, plate, target, trapped chest\u2026; "as" to place a block).'
         ),
         outputs: z2.record(z2.string(), z2.record(z2.string(), z2.unknown())).optional().describe(
           'Extra named outputs: {"Q": {"at": [x,y,z]}} or a bus {"at": [[x,y,z], \u2026]}; "read": "power" for 0\u201315.'

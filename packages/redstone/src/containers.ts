@@ -30,22 +30,65 @@ export function containerSlots(name: string): number {
 export interface ItemStack {
   id: string;
   count: number;
+  /** The rest of the item's NBT (components, tag…), kept as written. */
+  extra?: Record<string, unknown>;
 }
 
-/** Items of a block entity's NBT ({Items:[{Slot, id, Count|count}]}). */
-export function itemsOf(data: Record<string, unknown> | undefined): ItemStack[] {
+/** A container's slots, empty ones null. */
+export type Slots = (ItemStack | null)[];
+
+function slotNumber(v: unknown): number | null {
+  const n = typeof v === 'number' ? v : Number.parseInt(String(v ?? ''), 10);
+  return Number.isInteger(n) ? n : null;
+}
+
+/** A block entity's NBT {Items:[{Slot, id, Count|count, …}]} as `size` slots. */
+export function itemsOf(data: Record<string, unknown> | undefined, size: number): Slots {
+  const out: Slots = Array.from({ length: size }, () => null);
   const items = data?.Items;
-  if (!Array.isArray(items)) return [];
-  const out: ItemStack[] = [];
+  if (!Array.isArray(items)) return out;
+  let next = 0;
   for (const it of items) {
     if (!it || typeof it !== 'object') continue;
-    const r = it as Record<string, unknown>;
-    const id = typeof r.id === 'string' ? r.id : '';
-    const raw = r.count ?? r.Count ?? 1;
-    const count = typeof raw === 'number' ? raw : Number.parseInt(String(raw), 10);
-    if (id && Number.isFinite(count) && count > 0) out.push({ id, count });
+    const { Slot, id, count, Count, ...extra } = it as Record<string, unknown>;
+    const raw = count ?? Count ?? 1;
+    const n = typeof raw === 'number' ? raw : Number.parseInt(String(raw), 10);
+    if (typeof id !== 'string' || !id || !Number.isFinite(n) || n <= 0) continue;
+    let slot = slotNumber(Slot);
+    if (slot === null) slot = next;
+    next = slot + 1;
+    if (slot < 0 || slot >= size || out[slot]) continue;
+    const stack: ItemStack = { id: id.includes(':') ? id : `minecraft:${id}`, count: n };
+    if (Object.keys(extra).length) stack.extra = extra;
+    out[slot] = stack;
   }
   return out;
+}
+
+/** Slots back as NBT Items, in the style the original data used (count or Count, 0b or 0). */
+export function itemsToNbt(slots: Slots, original?: unknown): Record<string, unknown>[] {
+  const first = Array.isArray(original)
+    ? (original[0] as Record<string, unknown> | undefined)
+    : undefined;
+  const bigCount = first ? 'Count' in first && !('count' in first) : false;
+  const typedSlot = first ? typeof first.Slot === 'string' : true;
+  const out: Record<string, unknown>[] = [];
+  slots.forEach((s, k) => {
+    if (!s) return;
+    const n = bigCount ? `${s.count}b` : s.count;
+    out.push({
+      Slot: typedSlot ? `${k}b` : k,
+      id: s.id,
+      ...(bigCount ? { Count: n } : { count: n }),
+      ...(s.extra ?? {}),
+    });
+  });
+  return out;
+}
+
+/** Two stacks merge when they are the same item with the same data. */
+export function sameItem(a: ItemStack, b: ItemStack): boolean {
+  return a.id === b.id && JSON.stringify(a.extra ?? {}) === JSON.stringify(b.extra ?? {});
 }
 
 /**
@@ -53,10 +96,11 @@ export function itemsOf(data: Record<string, unknown> | undefined): ItemStack[] 
  * sum is divided by the slot count, then floor(f × 14) + 1 when anything is inside. Java float
  * maths, so the thresholds land exactly where the game puts them.
  */
-export function containerSignal(items: readonly ItemStack[], slots: number): number {
-  if (slots <= 0 || items.length === 0) return 0;
+export function containerSignal(items: readonly (ItemStack | null)[], slots: number): number {
+  if (slots <= 0) return 0;
   let f = 0;
   for (const it of items) {
+    if (!it) continue;
     const max = Math.min(64, maxStackSize(it.id));
     f = Math.fround(f + Math.fround(Math.min(it.count, max) / max));
   }

@@ -12,7 +12,8 @@ import { api, connectEvents } from './api';
 import { loadTextureArray } from './engine/textures';
 import { Viewer, type PickInfo } from './engine/Viewer';
 import { fmt, t } from './i18n';
-import { SimController } from './sim/simController';
+import { isUsable, SimController } from './sim/simController';
+import { useSim } from './sim/simStore';
 import { useApp } from './store';
 
 const VIEW_LABEL: Record<ViewName, string> = {
@@ -140,6 +141,7 @@ class Controller {
     this.viewer = new Viewer(container, {
       onHover: (hit) => this.onHover(hit),
       onClick: (hit, e) => this.onClick(hit, e.shift),
+      onUse: (hit) => this.onUse(hit),
       onCamera: (camera) => {
         const id = s().clientId;
         if (id) void api.clientState(id, { camera });
@@ -408,7 +410,20 @@ class Controller {
       hit.pos[1] + h.origin[1],
       hit.pos[2] + h.origin[2],
     ];
-    s.set({ hover: { pos, state: h.palette[hit.id] ?? this.sim.stateOf(hit.id) ?? '' } });
+    const state = h.palette[hit.id] ?? this.sim.stateOf(hit.id) ?? '';
+    s.set({ hover: { pos, state, usable: useSim.getState().available && isUsable(state) } });
+  }
+
+  /** Right-click, like in the game: set off a lever, button, plate, target… */
+  private onUse(hit: PickInfo | null): void {
+    if (!hit || !useSim.getState().available) return;
+    this.useBlock(hit);
+  }
+
+  private useBlock(hit: PickInfo): void {
+    const [nx, ny, nz] = hit.normal;
+    const face = ny < 0 ? 0 : ny > 0 ? 1 : nz < 0 ? 2 : nz > 0 ? 3 : nx < 0 ? 4 : 5;
+    this.sim.use(hit.pos, { face, point: hit.point });
   }
 
   private onClick(hit: PickInfo | null, shift: boolean): void {
@@ -417,7 +432,7 @@ class Controller {
     if (!h) return;
     if (s.tool === 'use') {
       // Right-click in the game: flip a lever, press a button, change a repeater's delay.
-      if (hit) this.sim.use(hit.pos);
+      if (hit) this.useBlock(hit);
       return;
     }
     if (!hit) {

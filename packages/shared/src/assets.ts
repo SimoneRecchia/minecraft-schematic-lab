@@ -42,6 +42,8 @@ export interface BakedBlock {
   self: boolean;
   /** Fluids are meshed specially (height depends on what is above). */
   fluid?: 'water' | 'lava';
+  /** The liquid's `level` (0 source, 1–7 flowing lower and lower, 8+ falling). */
+  fluidLevel?: number;
   /** Fluid texture layers [still, flow] and tint. */
   fluidTex?: [number, number];
   fluidTint?: number;

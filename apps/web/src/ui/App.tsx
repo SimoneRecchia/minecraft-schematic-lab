@@ -3,7 +3,7 @@ import { controller } from '../controller';
 import { useSim } from '../sim/simStore';
 import { useApp } from '../store';
 import { Empty, FocusMessage, Gizmo, Inspector, LayerSlider, Status, Toasts } from './Overlays';
-import { SimBar } from './Redstone';
+import { cycleLabels, SimBar } from './Redstone';
 import { Scene } from './Scene';
 import { ImportSheet, importSchematicFile } from './ImportSheet';
 import { ExportSheet, ProjectsPopover, VersionPopover } from './Sheets';
@@ -50,6 +50,9 @@ function useShortcuts(): void {
           return;
         case 't':
           if (useSim.getState().available) controller.sim.step(1);
+          return;
+        case 'i':
+          if (useSim.getState().available) cycleLabels();
           return;
         case 'n':
           s.set({ tool: 'note' });

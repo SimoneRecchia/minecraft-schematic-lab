@@ -10,11 +10,12 @@ import { CircuitLabels } from './Redstone';
 export function Scene() {
   const ref = useRef<HTMLDivElement>(null);
   const tool = useApp((s) => s.tool);
+  const usable = useApp((s) => s.hover?.usable === true);
   useEffect(() => {
     if (ref.current) controller.attach(ref.current);
   }, []);
   return (
-    <div ref={ref} className={`scene tool-${tool}`}>
+    <div ref={ref} className={`scene tool-${tool} ${usable ? 'can-use' : ''}`}>
       <CircuitLabels />
       <Pins />
       <HoverLabel />

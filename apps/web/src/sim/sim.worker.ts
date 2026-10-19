@@ -13,7 +13,7 @@ import {
   type WorldSnapshot,
 } from '@minecraft-schematic-lab/redstone';
 import type { Vec3 } from '@minecraft-schematic-lab/shared';
-import type { InputKind, IoView, SimIn, SimOut, TestProgress } from './protocol';
+import type { InputKind, IoView, SimEntity, SimIn, SimOut, TestProgress } from './protocol';
 
 /**
  * The redstone simulation for the viewer, off the main thread: the same engine the server runs
@@ -52,6 +52,8 @@ let test: {
   spec: TestSpec;
 } | null = null;
 let eventsSent = 0;
+/** Falling blocks were on screen in the last frame (so an empty list clears them). */
+let entitiesShown = false;
 
 function post(msg: SimOut, transfer: Transferable[] = []): void {
   ctx.postMessage(msg, transfer);
@@ -70,6 +72,12 @@ function inputKind(kind: number, as?: string): InputKind {
       return 'weighted';
     case K.TARGET:
       return 'target';
+    case K.TRAPPED_CHEST:
+      return 'chest';
+    case K.LIGHTNING_ROD:
+      return 'strike';
+    case K.RAIL:
+      return 'rail';
     default:
       return 'power';
   }
@@ -79,9 +87,23 @@ function inputKind(kind: number, as?: string): InputKind {
 function variantsOf(world: World): string[] {
   const out = new Set<string>();
   const st = world.states;
-  const toggles = ['powered', 'lit', 'extended', 'open', 'triggered', 'enabled', 'locked'];
+  const toggles = [
+    'powered',
+    'lit',
+    'extended',
+    'open',
+    'triggered',
+    'enabled',
+    'locked',
+    'inverted',
+    'waterlogged',
+  ];
+  let fluids = false;
   for (let id = 0; id < st.size; id++) {
     const info = st.info(id);
+    if (info.kind === K.LIQUID || info.waterloggable) fluids = true;
+    if (info.kind === K.FALLING && info.name.endsWith('_concrete_powder'))
+      out.add(`minecraft:${info.name.replace(/_powder$/, '')}`);
     if (info.kind === K.AIR || info.kind === K.SOLID) continue;
     let ids = [id];
     for (const key of toggles) {
@@ -99,6 +121,9 @@ function variantsOf(world: World): string[] {
     }
     if (out.size > 4000) break;
   }
+  if (fluids)
+    for (const name of ['water', 'lava'])
+      for (let level = 0; level <= 8; level++) out.add(`minecraft:${name}[level=${level}]`);
   return [...out];
 }
 
@@ -138,6 +163,7 @@ function load(msg: Extract<SimIn, { type: 'load' }>): void {
   playing = false;
   test = null;
   eventsSent = 0;
+  entitiesShown = true;
   world.takeChanges();
   const view = (kind: 'input' | 'output') => {
     const map = kind === 'input' ? circuit.inputs : circuit.outputs;
@@ -189,18 +215,30 @@ function frame(): void {
   const cells: number[] = [];
   const newStates: string[] = [];
   const [sx, sy, sz] = s.size;
+  const paletteId = (state: string): number => {
+    const st = s as Loaded;
+    let id = st.paletteIndex.get(state);
+    if (id === undefined) {
+      id = st.palette.length;
+      st.palette.push(state);
+      st.paletteIndex.set(state, id);
+      newStates.push(state);
+    }
+    return id;
+  };
   for (const i of changes) {
     const [x, y, z] = w.coords(i);
     if (x < 0 || y < 0 || z < 0 || x >= sx || y >= sy || z >= sz) continue;
-    const state = w.displayState(i);
-    let id = s.paletteIndex.get(state);
-    if (id === undefined) {
-      id = s.palette.length;
-      s.palette.push(state);
-      s.paletteIndex.set(state, id);
-      newStates.push(state);
-    }
-    cells.push(x + sx * (z + sz * y), id);
+    cells.push(x + sx * (z + sz * y), paletteId(w.displayState(i)));
+  }
+  let entities: SimEntity[] | null = null;
+  if (w.falling.length || entitiesShown) {
+    entities = w.falling.map((e) => ({
+      id: e.id,
+      state: paletteId(w.states.info(e.state).state),
+      pos: [e.x, e.y, e.z] as Vec3,
+    }));
+    entitiesShown = entities.length > 0;
   }
   const events = w.events.slice(eventsSent).map((e) => ({
     ...e,
@@ -220,6 +258,7 @@ function frame(): void {
       values: s.circuit.errors.length ? {} : s.circuit.values(),
       events: events as SimEvent[],
       test: test ? { ...test.progress } : null,
+      entities,
     },
     [buf.buffer],
   );
@@ -250,6 +289,7 @@ function advance(): void {
         values: s.circuit.values(),
         events: [],
         test: done.progress,
+        entities: null,
       });
     }
     return;
@@ -323,7 +363,7 @@ ctx.onmessage = (e: MessageEvent<SimIn>) => {
         break;
       case 'use':
         powerOn();
-        s.world.use(s.world.index(...msg.pos));
+        s.world.activate(s.world.index(...msg.pos), msg.hit);
         break;
       case 'set':
         powerOn();
