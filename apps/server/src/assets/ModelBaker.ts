@@ -21,9 +21,15 @@ interface ModelElement {
   faces: Partial<Record<FaceName, ModelFace>>;
 }
 
+/**
+ * A model's texture value: a sprite name or `#reference`, or (in newer client jars, for example the 26.x stained glass panes)
+ * an object `{ sprite, force_translucent? }`.
+ */
+type RawTexture = string | { sprite?: string; force_translucent?: boolean };
+
 interface RawModel {
   parent?: string;
-  textures?: Record<string, string>;
+  textures?: Record<string, RawTexture>;
   elements?: ModelElement[];
   ambientocclusion?: boolean;
 }
@@ -250,6 +256,12 @@ const DYES = [
  * cullfaces, tint indices and weighted random variants. Block-entity blocks the game draws in
  * code (chests, beds, signs, banners, heads) get simple stand-in shapes.
  */
+/** The sprite name of a texture value, whether written as a string or as `{ sprite, … }`. */
+export function textureName(value: RawTexture | undefined): string | undefined {
+  if (typeof value === 'string') return value;
+  return typeof value?.sprite === 'string' ? value.sprite : undefined;
+}
+
 export class ModelBaker {
   private readonly layerOf = new Map<string, number>();
   private readonly resolved = new Map<string, ResolvedModel | null>();
@@ -298,7 +310,10 @@ export class ModelBaker {
       let ao = true;
       for (let i = chain.length - 1; i >= 0; i--) {
         const m = chain[i] as RawModel;
-        Object.assign(textures, m.textures ?? {});
+        for (const [key, value] of Object.entries(m.textures ?? {})) {
+          const sprite = textureName(value);
+          if (sprite !== undefined) textures[key] = sprite;
+        }
         if (m.elements) elements = m.elements;
         if (m.ambientocclusion === false) ao = false;
       }

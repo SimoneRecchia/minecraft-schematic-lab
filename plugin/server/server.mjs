@@ -940,6 +940,10 @@ var DYES = [
   "red",
   "black"
 ];
+function textureName(value) {
+  if (typeof value === "string") return value;
+  return typeof value?.sprite === "string" ? value.sprite : void 0;
+}
 var ModelBaker = class {
   constructor(pack) {
     this.pack = pack;
@@ -982,7 +986,10 @@ var ModelBaker = class {
       let ao = true;
       for (let i = chain.length - 1; i >= 0; i--) {
         const m = chain[i];
-        Object.assign(textures, m.textures ?? {});
+        for (const [key2, value] of Object.entries(m.textures ?? {})) {
+          const sprite = textureName(value);
+          if (sprite !== void 0) textures[key2] = sprite;
+        }
         if (m.elements) elements = m.elements;
         if (m.ambientocclusion === false) ao = false;
       }
